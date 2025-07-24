@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home - BiocBot Instructor</title>
+    <link rel="stylesheet" href="../styles/style.css">
+    <link rel="stylesheet" href="../styles/home.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="logo-container">
+                <h2>BiocBot</h2>
+            </div>
+            <nav class="main-nav">
+                <ul>
+                    <li class="active"><a href="/instructor/home"><span class="icon">🏠</span> Home</a></li>
+                    <li><a href="/instructor"><span class="icon">📄</span> Course Upload</a></li>
+                    <li><a href="/instructor/settings"><span class="icon">⚙️</span> Settings</a></li>
+                    <li><a href="/instructor/onboarding"><span class="icon">🚀</span> Onboarding</a></li>
+                </ul>
+            </nav>
+            <div class="user-info">
+                <div class="user-avatar">I</div>
+                <div class="user-name">Instructor Name</div>
+                <div class="user-role">Instructor</div>
+                <div class="switch-role">
+                    <a href="/">Switch Role</a>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <header class="home-header">
+                <h1>Home</h1>
+            </header>
+
+            <div class="home-container">
+                <!-- Course Summary Section -->
+                <section class="home-section course-summary">
+                    <div class="section-header">
+                        <h2>Course Summary</h2>
+                    </div>
+                    <div class="course-info">
+                        <div class="course-details">
+                            <h3 class="course-name">BIOC 202</h3>
+                            <p class="course-meta">Term: 2025 W1, Course Code: BIOC25T1</p>
+                        </div>
+                        <div class="course-actions">
+                            <button class="action-btn secondary">Upload New Material</button>
+                            <button class="action-btn secondary">Probe Questions</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Daily Digest Section -->
+                <section class="home-section daily-digest">
+                    <div class="section-header">
+                        <h2>Daily Digest</h2>
+                    </div>
+                    <div class="digest-content">
+                        <div class="digest-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">Total Study Minutes today:</span>
+                                <span class="stat-value">55 min</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Covered topics today:</span>
+                                <span class="stat-value">Biology, Heart</span>
+                            </div>
+                        </div>
+                        <div class="digest-flags">
+                            <div class="flags-info">
+                                <span class="flags-count">10 New Flags Today</span>
+                            </div>
+                            <button class="action-btn primary">Investigate</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Recent Activity Section -->
+                <section class="home-section recent-activity">
+                    <div class="section-header">
+                        <h2>Recent Activity</h2>
+                    </div>
+                    <div class="activity-list">
+                        <div class="activity-item success">
+                            <span class="activity-number">1.</span>
+                            <span class="activity-text">Week_1 lecture uploaded</span>
+                        </div>
+                        <div class="activity-item success">
+                            <span class="activity-number">2.</span>
+                            <span class="activity-text">Week_3 lecture uploaded</span>
+                        </div>
+                        <div class="activity-item error">
+                            <span class="activity-number">3.</span>
+                            <span class="activity-text">LO_1 not uploaded properly</span>
+                        </div>
+                        <div class="activity-item error">
+                            <span class="activity-number">4.</span>
+                            <span class="activity-text">LO_2 not parsed properly</span>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+    
+    <script src="../instructor/scripts/home.js"></script>
+</body>
+</html> 

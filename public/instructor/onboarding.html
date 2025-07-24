@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Onboarding - BiocBot Instructor</title>
+    <link rel="stylesheet" href="../styles/style.css">
+    <link rel="stylesheet" href="../styles/onboarding.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="logo-container">
+                <h2>BiocBot</h2>
+            </div>
+            <nav class="main-nav">
+                <ul>
+                    <li><a href="/instructor/home"><span class="icon">🏠</span> Home</a></li>
+                    <li><a href="/instructor"><span class="icon">📄</span> Course Upload</a></li>
+                    <li><a href="/instructor/settings"><span class="icon">⚙️</span> Settings</a></li>
+                    <li class="active"><a href="/instructor/onboarding"><span class="icon">🚀</span> Onboarding</a></li>
+                </ul>
+            </nav>
+            <div class="user-info">
+                <div class="user-avatar">I</div>
+                <div class="user-name">Instructor Name</div>
+                <div class="user-role">Instructor</div>
+                <div class="switch-role">
+                    <a href="/">Switch Role</a>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <header class="onboarding-header">
+                <h1>Welcome to BiocBot</h1>
+                <p>Let's get your course set up for AI-powered learning</p>
+            </header>
+
+            <div class="onboarding-container">
+                <!-- Course Selection Form -->
+                <section class="onboarding-section">
+                    <h2>Select Course</h2>
+                    <form id="course-setup-form" class="onboarding-form">
+                        <div class="form-group">
+                            <label for="course-select">Courses</label>
+                            <select id="course-select" name="course" required>
+                                <option value="">Select a course</option>
+                                <option value="BIOC 202">BIOC 202</option>
+                                <option value="BIOC 303">BIOC 303</option>
+                                <option value="BIOC 301">BIOC 301</option>
+                                <option value="BIOC 302">BIOC 302</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="units-count">How many units?</label>
+                            <select id="units-count" name="units" required>
+                                <option value="">Numerical value</option>
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="7">7</option>
+                                <option value="8">8</option>
+                                <option value="9">9</option>
+                                <option value="10">10</option>
+                                <option value="11">11</option>
+                                <option value="12">12</option>
+                                <option value="13">13</option>
+                                <option value="14">14</option>
+                                <option value="15">15</option>
+                                <option value="16">16</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-actions">
+                            <button type="submit" class="primary-button">Create Course</button>
+                        </div>
+                    </form>
+                </section>
+
+                <!-- Onboarding Steps -->
+                <section class="onboarding-section">
+                    <h2>Next Steps</h2>
+                    <div class="steps-container">
+                        <div class="step-item">
+                            <div class="step-number">1</div>
+                            <div class="step-content">
+                                <h3>Upload Course Materials</h3>
+                                <p>Upload your syllabus, lecture notes, and practice materials</p>
+                            </div>
+                        </div>
+                        <div class="step-item">
+                            <div class="step-number">2</div>
+                            <div class="step-content">
+                                <h3>Organize Content</h3>
+                                <p>Structure your materials into units and topics</p>
+                            </div>
+                        </div>
+                        <div class="step-item">
+                            <div class="step-number">3</div>
+                            <div class="step-content">
+                                <h3>Configure AI Settings</h3>
+                                <p>Set up AI responses and student interaction preferences</p>
+                            </div>
+                        </div>
+                        <div class="step-item">
+                            <div class="step-number">4</div>
+                            <div class="step-content">
+                                <h3>Launch to Students</h3>
+                                <p>Publish your course and let students start learning</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+    
+    <script src="../instructor/scripts/onboarding.js"></script>
+</body>
+</html> 

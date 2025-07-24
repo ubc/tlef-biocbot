@@ -1,0 +1,329 @@
+/* Home Page Styles */
+
+.home-header {
+    padding: 30px 40px 20px;
+    border-bottom: 1px solid var(--border-color);
+    background-color: white;
+}
+
+.home-header h1 {
+    font-size: 2.5rem;
+    color: var(--text-color);
+    margin: 0;
+    font-weight: 600;
+}
+
+.home-container {
+    padding: 40px;
+    max-width: 1200px;
+    margin: 0 auto;
+    display: grid;
+    gap: 30px;
+}
+
+/* Section Styles */
+.home-section {
+    background: white;
+    border-radius: 12px;
+    padding: 30px;
+    box-shadow: 0 2px 8px var(--shadow-color);
+    border: 1px solid var(--border-color);
+}
+
+.section-header {
+    margin-bottom: 25px;
+}
+
+.section-header h2 {
+    font-size: 1.5rem;
+    color: var(--text-color);
+    margin: 0;
+    font-weight: 600;
+}
+
+/* Course Summary Section */
+.course-summary .course-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 30px;
+}
+
+.course-details {
+    flex: 1;
+}
+
+.course-name {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-color);
+    margin: 0 0 10px 0;
+}
+
+.course-meta {
+    font-size: 1rem;
+    color: #666;
+    margin: 0;
+}
+
+.course-actions {
+    display: flex;
+    gap: 15px;
+    flex-shrink: 0;
+}
+
+/* Daily Digest Section */
+.daily-digest .digest-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 30px;
+}
+
+.digest-stats {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.stat-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.stat-label {
+    font-size: 1rem;
+    color: var(--text-color);
+    font-weight: 500;
+}
+
+.stat-value {
+    font-size: 1rem;
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+.digest-flags {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 15px;
+    flex-shrink: 0;
+}
+
+.flags-info {
+    text-align: right;
+}
+
+.flags-count {
+    font-size: 1rem;
+    color: var(--text-color);
+    font-weight: 500;
+}
+
+/* Recent Activity Section */
+.activity-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.activity-item {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 15px;
+    border-radius: 8px;
+    background-color: #f8f9fa;
+    transition: background-color 0.3s ease;
+}
+
+.activity-item:hover {
+    background-color: #e9ecef;
+}
+
+.activity-number {
+    font-weight: 600;
+    color: var(--text-color);
+    min-width: 20px;
+}
+
+.activity-text {
+    font-size: 1rem;
+    color: var(--text-color);
+}
+
+.activity-item.success .activity-text {
+    color: var(--success-color);
+}
+
+.activity-item.error .activity-text {
+    color: var(--danger-color);
+}
+
+/* Button Styles */
+.action-btn {
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: 1px solid var(--border-color);
+    background-color: white;
+    color: var(--text-color);
+}
+
+.action-btn:hover {
+    background-color: var(--border-color);
+}
+
+.action-btn.primary {
+    background-color: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.action-btn.primary:hover {
+    background-color: var(--accent-color);
+    border-color: var(--accent-color);
+}
+
+.action-btn.secondary {
+    background-color: white;
+    color: var(--text-color);
+    border-color: var(--border-color);
+}
+
+.action-btn.secondary:hover {
+    background-color: var(--border-color);
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+    .home-container {
+        padding: 20px;
+    }
+    
+    .course-summary .course-info,
+    .daily-digest .digest-content {
+        flex-direction: column;
+        gap: 20px;
+    }
+    
+    .course-actions {
+        justify-content: flex-start;
+    }
+    
+    .digest-flags {
+        align-items: flex-start;
+    }
+}
+
+@media (max-width: 768px) {
+    .home-header {
+        padding: 20px;
+    }
+    
+    .home-header h1 {
+        font-size: 2rem;
+    }
+    
+    .home-section {
+        padding: 20px;
+    }
+    
+    .course-name {
+        font-size: 1.5rem;
+    }
+    
+    .course-actions {
+        flex-direction: column;
+        width: 100%;
+    }
+    
+    .action-btn {
+        width: 100%;
+        text-align: center;
+    }
+    
+    .digest-stats {
+        gap: 10px;
+    }
+    
+    .stat-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+}
+
+@media (max-width: 480px) {
+    .home-container {
+        padding: 15px;
+        gap: 20px;
+    }
+    
+    .home-section {
+        padding: 15px;
+    }
+    
+    .section-header h2 {
+        font-size: 1.3rem;
+    }
+    
+    .activity-item {
+        padding: 10px;
+        gap: 10px;
+    }
+    
+    .activity-text {
+        font-size: 0.9rem;
+    }
+}
+
+/* Accessibility Enhancements */
+.action-btn:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+.activity-item:focus-within {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+/* Loading States */
+.action-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Animation for new items */
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.activity-item {
+    animation: slideIn 0.3s ease-out;
+}
+
+/* Hover effects for interactive elements */
+.course-actions .action-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px var(--shadow-color);
+}
+
+.digest-flags .action-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px var(--shadow-color);
+} 
