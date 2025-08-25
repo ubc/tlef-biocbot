@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="../styles/style.css">
     <link rel="stylesheet" href="../styles/documents.css">
     <link rel="stylesheet" href="./styles/onboarding.css">
+    
+
 </head>
 <body>
     <div class="app-container">
@@ -268,7 +270,7 @@
                                                 <p>Upload your lecture slides, notes, or readings for Unit 1</p>
                                                 <span class="status-badge" id="lecture-status">Not Uploaded</span>
                                             </div>
-                                            <button class="upload-btn" onclick="openUploadModal('Unit 1', 'lecture-notes')">Upload</button>
+                                            <button class="upload-btn" onclick="openUploadModalFromInstructor('Unit 1', 'lecture-notes')">Upload</button>
                                         </div>
                                         
                                         <div class="material-item required">
@@ -277,7 +279,7 @@
                                                 <p>Upload practice questions, assignments, or tutorial materials</p>
                                                 <span class="status-badge" id="practice-status">Not Uploaded</span>
                                             </div>
-                                            <button class="upload-btn" onclick="openUploadModal('Unit 1', 'practice-quiz')">Upload</button>
+                                            <button class="upload-btn" onclick="openUploadModalFromInstructor('Unit 1', 'practice-quiz')">Upload</button>
                                         </div>
                                         
                                         <div class="material-item optional">
@@ -286,7 +288,7 @@
                                                 <p>Add supplementary readings, videos, or other resources</p>
                                                 <span class="status-badge" id="additional-status">Optional</span>
                                             </div>
-                                            <button class="upload-btn" onclick="openUploadModal('Unit 1', 'additional')">Add</button>
+                                            <button class="upload-btn" onclick="openUploadModalFromInstructor('Unit 1', 'additional')">Add</button>
                                         </div>
                                     </div>
                                 </div>
@@ -328,7 +330,7 @@
                             
                             <!-- Action Buttons -->
                             <div class="assessment-actions">
-                                <button class="add-question-btn" onclick="openQuestionModal('Onboarding')">
+                                <button class="add-question-btn" onclick="openQuestionModalFromInstructor('Unit 1')">
                                     <span class="btn-icon">➕</span>
                                     Add Question
                                 </button>
@@ -349,19 +351,19 @@
         </main>
     </div>
     
-    <!-- Upload Modal -->
+    <!-- Upload Modal (Minimal - reuses instructor.js functionality) -->
     <div id="upload-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="modal-title">Upload Content</h2>
-                <button class="modal-close" onclick="closeUploadModal()">×</button>
+                <button class="modal-close" onclick="closeUploadModalFromInstructor()">×</button>
             </div>
             
             <div class="modal-body">
                 <div class="upload-section">
                     <!-- File Upload Button -->
                     <div class="file-upload-container">
-                        <button class="upload-file-btn" onclick="triggerFileInput()">
+                        <button class="upload-file-btn" onclick="triggerFileInputFromInstructor()">
                             <span class="upload-icon">📁</span>
                             <span>Upload Summarized/Expert notes</span>
                         </button>
@@ -394,19 +396,19 @@
             
             <div class="modal-footer">
                 <div class="modal-actions">
-                    <button class="btn-secondary" onclick="closeUploadModal()">Cancel</button>
-                    <button class="btn-primary" id="upload-btn" onclick="handleUpload()">Upload</button>
+                    <button class="btn-secondary" onclick="closeUploadModalFromInstructor()">Cancel</button>
+                    <button class="btn-primary" id="upload-btn" onclick="handleUploadFromInstructor()">Upload</button>
                 </div>
             </div>
         </div>
     </div>
     
-    <!-- Question Creation Modal -->
+    <!-- Question Creation Modal (Minimal - reuses instructor.js functionality) -->
     <div id="question-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Create Assessment Question</h2>
-                <button class="modal-close" onclick="closeQuestionModal()">×</button>
+                <button class="modal-close" onclick="closeQuestionModalFromInstructor()">×</button>
             </div>
             
             <div class="modal-body">
@@ -414,7 +416,7 @@
                     <!-- Question Type Selection -->
                     <div class="form-section">
                         <label for="question-type">Question Type</label>
-                        <select id="question-type" onchange="updateQuestionForm()">
+                        <select id="question-type" onchange="updateQuestionFormFromInstructor()">
                             <option value="">Select question type...</option>
                             <option value="true-false">True/False</option>
                             <option value="multiple-choice">Multiple Choice</option>
@@ -488,13 +490,15 @@
             
             <div class="modal-footer">
                 <div class="modal-actions">
-                    <button class="btn-secondary" onclick="closeQuestionModal()">Cancel</button>
-                    <button class="btn-primary" onclick="saveQuestion()">Save Question</button>
+                    <button class="btn-secondary" onclick="closeQuestionModalFromInstructor()">Cancel</button>
+                    <button class="btn-primary" onclick="saveQuestionFromInstructor()">Save Question</button>
                 </div>
             </div>
         </div>
     </div>
     
+    <!-- Scripts -->
+    <script src="./scripts/instructor.js"></script>
     <script src="./scripts/onboarding.js"></script>
 </body>
 </html> 

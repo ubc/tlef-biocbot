@@ -48,13 +48,14 @@ class QdrantService {
             const llmConfig = config.getLLMConfig();
             const logger = new ConsoleLogger('biocbot-qdrant');
             
-            // Add embedding-specific configuration
+            // Configure embeddings service using LLM provider with Ollama backend
             const embeddingConfig = {
                 providerType: 'ubc-genai-toolkit-llm',
                 logger: logger,
                 llmConfig: {
-                    ...llmConfig,
-                    embeddingModel: process.env.LLM_EMBEDDING_MODEL || 'nomic-embed-text'
+                    provider: 'ollama',
+                    endpoint: process.env.OLLAMA_ENDPOINT || 'http://127.0.0.1:11434',
+                    defaultModel: process.env.LLM_EMBEDDING_MODEL || 'nomic-embed-text'
                 }
             };
 
@@ -89,6 +90,12 @@ class QdrantService {
             // Set vector size dynamically based on the embedding model
             this.vectorSize = testEmbedding.length;
             console.log(`✅ Successfully initialized embeddings service (vector size: ${this.vectorSize} dimensions)`);
+            
+            // Force the correct vector size for nomic-embed-text model
+            if (process.env.LLM_EMBEDDING_MODEL === 'nomic-embed-text' || !process.env.LLM_EMBEDDING_MODEL) {
+                this.vectorSize = 768; // nomic-embed-text generates 768-dimensional vectors
+                console.log(`🔧 Forcing vector size to 768 for nomic-embed-text model`);
+            }
 
             // Ensure collection exists
             await this.ensureCollectionExists();
@@ -115,7 +122,7 @@ class QdrantService {
             );
 
             if (!collectionExists) {
-                console.log(`Creating collection: ${this.collectionName}`);
+                console.log(`Creating collection: ${this.collectionName} with vector size: ${this.vectorSize}`);
                 
                 await this.client.createCollection(this.collectionName, {
                     vectors: {
@@ -126,7 +133,31 @@ class QdrantService {
 
                 console.log(`✅ Collection ${this.collectionName} created successfully`);
             } else {
-                console.log(`✅ Collection ${this.collectionName} already exists`);
+                // Check if the existing collection has the correct vector size
+                const collectionInfo = await this.client.getCollection(this.collectionName);
+                const existingVectorSize = collectionInfo.config.params.vectors.size;
+                
+                console.log(`🔍 Collection ${this.collectionName} exists with vector size: ${existingVectorSize}, expected: ${this.vectorSize}`);
+                
+                if (existingVectorSize !== this.vectorSize) {
+                    console.log(`⚠️ Vector size mismatch detected. Deleting and recreating collection...`);
+                    
+                    // Delete the existing collection
+                    await this.client.deleteCollection(this.collectionName);
+                    console.log(`🗑️ Deleted collection: ${this.collectionName}`);
+                    
+                    // Create new collection with correct vector size
+                    await this.client.createCollection(this.collectionName, {
+                        vectors: {
+                            size: this.vectorSize,
+                            distance: 'Cosine'
+                        }
+                    });
+                    
+                    console.log(`✅ Recreated collection ${this.collectionName} with correct vector size: ${this.vectorSize}`);
+                } else {
+                    console.log(`✅ Collection ${this.collectionName} already exists with correct vector size`);
+                }
             }
         } catch (error) {
             console.error('❌ Error ensuring collection exists:', error);

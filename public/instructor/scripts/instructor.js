@@ -1,4 +1,12 @@
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    // Check if we're on the onboarding page - if so, don't initialize instructor functionality
+    if (window.location.pathname.includes('/onboarding')) {
+        console.log('🚫 [INSTRUCTOR] On onboarding page, skipping instructor initialization');
+        return;
+    }
+    
+    console.log('🚀 [INSTRUCTOR] Starting instructor page initialization...');
+    
     const uploadDropArea = document.getElementById('upload-drop-area');
     const fileUpload = document.getElementById('file-upload');
     const documentSearch = document.getElementById('document-search');
@@ -61,31 +69,37 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-
-    
     // Check for URL parameters to open modals
     checkUrlParameters();
     
-    // Load the saved publish status from the database
-    loadPublishStatus();
+    // Load course data first (either from onboarding redirect or existing course)
+    await loadCourseData();
     
-    // Load the saved learning objectives from the database
-    loadLearningObjectives();
-    
-    // Load the saved documents from the database
-    loadDocuments();
-    
-    // Load the saved assessment questions from the database
-    loadAssessmentQuestions();
-    
-    // Load the saved pass thresholds from the database
-    loadPassThresholds();
+    // Only load saved data if we have a course loaded
+    const courseId = await getCurrentCourseId();
+    if (courseId) {
+        console.log(`📁 [INSTRUCTOR] Course ${courseId} loaded, loading saved data...`);
+        
+        // Load the saved publish status from the database
+        loadPublishStatus();
+        
+        // Load the saved learning objectives from the database
+        loadLearningObjectives();
+        
+        // Load the saved documents from the database
+        loadDocuments();
+        
+        // Load the saved assessment questions from the database
+        loadAssessmentQuestions();
+        
+        // Load the saved pass thresholds from the database
+        loadPassThresholds();
+    } else {
+        console.log('ℹ️ [INSTRUCTOR] No course loaded, skipping data load operations');
+    }
     
     // Set up threshold input event listeners
     setupThresholdInputListeners();
-    
-    // Load course data if available (either from onboarding or existing course)
-    loadCourseData();
     
     // Add global cleanup button
     addGlobalCleanupButton();
@@ -866,19 +880,28 @@ function getCurrentInstructorId() {
 
 /**
  * Get the current course ID for the instructor
- * @returns {Promise<string>} Course ID
+ * This function checks URL parameters first, then falls back to instructor courses
+ * @returns {Promise<string|null>} The course ID or null if not found
  */
 async function getCurrentCourseId() {
+    // Check if we're on the onboarding page - if so, don't make API calls
+    if (window.location.pathname.includes('/onboarding')) {
+        console.log('🚫 [COURSES] On onboarding page, skipping course ID fetch');
+        return null;
+    }
+    
     // Check if we have a courseId from URL parameters (onboarding redirect)
     const urlParams = new URLSearchParams(window.location.search);
     const courseIdFromUrl = urlParams.get('courseId');
     
     if (courseIdFromUrl) {
+        console.log(`🔍 [COURSES] Found course ID in URL: ${courseIdFromUrl}`);
         return courseIdFromUrl;
     }
     
     // If no course ID in URL, try to get it from the instructor's courses
     try {
+        console.log('🔍 [COURSES] No course ID in URL, checking instructor courses...');
         const instructorId = getCurrentInstructorId();
         const response = await fetch(`/api/onboarding/instructor/${instructorId}`);
         
@@ -887,15 +910,16 @@ async function getCurrentCourseId() {
             if (result.data && result.data.courses && result.data.courses.length > 0) {
                 // Return the first course found
                 const firstCourse = result.data.courses[0];
+                console.log(`🔍 [COURSES] Found course from instructor data: ${firstCourse.courseId}`);
                 return firstCourse.courseId;
             }
         }
     } catch (error) {
-        console.error('Error fetching instructor courses:', error);
+        console.error('❌ [COURSES] Error fetching instructor courses:', error);
     }
     
     // If no course found, show an error and redirect to onboarding
-    console.error('No course ID found. Redirecting to onboarding...');
+    console.error('❌ [COURSES] No course ID found. Redirecting to onboarding...');
     showNotification('No course found. Please complete onboarding first.', 'error');
     setTimeout(() => {
         window.location.href = '/instructor/onboarding';
@@ -911,6 +935,13 @@ async function getCurrentCourseId() {
 async function loadPublishStatus() {
     try {
         const courseId = await getCurrentCourseId();
+        
+        // If we're on onboarding page, don't load publish status
+        if (!courseId) {
+            console.log('🚫 [PUBLISH] No course ID available (likely on onboarding page), skipping publish status load');
+            return;
+        }
+        
         const instructorId = getCurrentInstructorId();
         
         const response = await fetch(`/api/lectures/publish-status?instructorId=${instructorId}&courseId=${courseId}`);
@@ -945,7 +976,7 @@ async function loadPublishStatus() {
         });
         
     } catch (error) {
-        console.error('Error loading publish status:', error);
+        console.error('❌ [PUBLISH] Error loading publish status:', error);
         showNotification('Error loading publish status. Using default values.', 'warning');
     }
 }
@@ -957,6 +988,13 @@ async function loadLearningObjectives() {
     try {
         console.log('📚 [LEARNING_OBJECTIVES] Starting to load learning objectives...');
         const courseId = await getCurrentCourseId();
+        
+        // If we're on onboarding page, don't load learning objectives
+        if (!courseId) {
+            console.log('🚫 [LEARNING_OBJECTIVES] No course ID available (likely on onboarding page), skipping learning objectives load');
+            return;
+        }
+        
         console.log(`📚 [LEARNING_OBJECTIVES] Course ID: ${courseId}`);
         
         // Get all accordion items (units/weeks)
@@ -970,31 +1008,66 @@ async function loadLearningObjectives() {
             const lectureName = folderName.textContent;
             console.log(`📚 [LEARNING_OBJECTIVES] Processing lecture/unit: ${lectureName}`);
             
-            console.log(`📡 [MONGODB] Making API request to /api/learning-objectives?week=${encodeURIComponent(lectureName)}&courseId=${courseId}`);
-            const response = await fetch(`/api/learning-objectives?week=${encodeURIComponent(lectureName)}&courseId=${courseId}`);
-            console.log(`📡 [MONGODB] API response status: ${response.status} ${response.statusText}`);
-            console.log(`📡 [MONGODB] API response headers:`, Object.fromEntries(response.headers.entries()));
+            const instructorId = getCurrentInstructorId();
+            const response = await fetch(`/api/learning-objectives?instructorId=${instructorId}&courseId=${courseId}&lectureName=${encodeURIComponent(lectureName)}`);
             
             if (response.ok) {
                 const result = await response.json();
-                console.log(`📡 [MONGODB] Learning objectives data for ${lectureName}:`, result);
                 const objectives = result.data.objectives;
+                
+                // Debug: Log the actual objectives data structure
+                console.log(`🔍 [LEARNING_OBJECTIVES] Raw API response for ${lectureName}:`, result);
+                console.log(`🔍 [LEARNING_OBJECTIVES] Objectives data for ${lectureName}:`, objectives);
                 
                 if (objectives && objectives.length > 0) {
                     console.log(`📚 [LEARNING_OBJECTIVES] Found ${objectives.length} objectives for ${lectureName}:`, objectives);
-                    // Clear existing objectives
-                    const objectivesList = item.querySelector('.objectives-list');
+                    
+                    // Debug: Log the first objective structure
+                    if (objectives[0]) {
+                        console.log(`🔍 [LEARNING_OBJECTIVES] First objective structure:`, {
+                            objective: objectives[0],
+                            keys: Object.keys(objectives[0]),
+                            hasText: objectives[0].hasOwnProperty('text'),
+                            textValue: objectives[0].text,
+                            type: typeof objectives[0].text
+                        });
+                    }
+                    
+                    // Find the objectives list for this unit
+                    const unitId = lectureName.toLowerCase().replace(/\s+/g, '-');
+                    const objectivesList = document.getElementById(`objectives-list-${unitId}`);
+                    
                     if (objectivesList) {
+                        // Clear existing objectives
                         objectivesList.innerHTML = '';
                         
                         // Add each objective
                         objectives.forEach((objective, index) => {
-                            console.log(`📚 [LEARNING_OBJECTIVES] Adding objective ${index + 1} to UI: ${objective}`);
+                            console.log(`🔍 [LEARNING_OBJECTIVES] Processing objective ${index}:`, objective);
+                            
                             const objectiveItem = document.createElement('div');
-                            objectiveItem.className = 'objective-display-item';
+                            objectiveItem.className = 'objective-item';
+                            
+                            // Try different possible property names for the objective text
+                            let objectiveText = '';
+                            if (objective.text) {
+                                objectiveText = objective.text;
+                            } else if (objective.objective) {
+                                objectiveText = objective.objective;
+                            } else if (objective.content) {
+                                objectiveText = objective.content;
+                            } else if (objective.description) {
+                                objectiveText = objective.description;
+                            } else if (typeof objective === 'string') {
+                                objectiveText = objective;
+                            } else {
+                                objectiveText = 'Unknown objective format';
+                                console.warn(`⚠️ [LEARNING_OBJECTIVES] Unknown objective format for ${lectureName}:`, objective);
+                            }
+                            
                             objectiveItem.innerHTML = `
-                                <span class="objective-text">${objective}</span>
-                                <button class="remove-objective" onclick="removeObjective(this)">×</button>
+                                <span class="objective-text">${objectiveText}</span>
+                                <button class="remove-objective-btn" onclick="removeObjective('${lectureName}', '${objectiveText}')">×</button>
                             `;
                             objectivesList.appendChild(objectiveItem);
                         });
@@ -1020,17 +1093,56 @@ async function loadLearningObjectives() {
 
 /**
  * Load the saved documents for all lectures from the database
+ * Optimized to fetch course data once and reuse for all units
  */
 async function loadDocuments() {
     try {
         console.log('📁 [DOCUMENTS] Starting to load documents...');
         const courseId = await getCurrentCourseId();
+        
+        // If we're on onboarding page, don't load documents
+        if (!courseId) {
+            console.log('🚫 [DOCUMENTS] No course ID available (likely on onboarding page), skipping document load');
+            return;
+        }
+        
         console.log(`📁 [DOCUMENTS] Course ID: ${courseId}`);
         
         // Get all accordion items (units/weeks)
         const accordionItems = document.querySelectorAll('.accordion-item');
         console.log(`📁 [DOCUMENTS] Found ${accordionItems.length} accordion items (units/weeks)`);
         
+        // Fetch course data ONCE instead of for each unit
+        console.log(`📡 [MONGODB] Making single API request to /api/courses/${courseId}?instructorId=${getCurrentInstructorId()}`);
+        const response = await fetch(`/api/courses/${courseId}?instructorId=${getCurrentInstructorId()}`);
+        console.log(`📡 [MONGODB] API response status: ${response.status} ${response.statusText}`);
+        
+        if (!response.ok) {
+            throw new Error(`Failed to load course data: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log(`📡 [MONGODB] Course data loaded successfully:`, result);
+        const course = result.data;
+        
+        // Debug: Log the actual course structure
+        console.log('🔍 [DOCUMENTS] Course data structure:', {
+            hasCourse: !!course,
+            courseType: typeof course,
+            courseKeys: course ? Object.keys(course) : 'N/A',
+            hasLectures: course && !!course.lectures,
+            lecturesType: course && course.lectures ? typeof course.lectures : 'N/A',
+            lecturesLength: course && course.lectures ? course.lectures.length : 'N/A'
+        });
+        
+        if (!course || !course.lectures) {
+            console.warn('⚠️ [DOCUMENTS] No course or lectures data found');
+            console.warn('🔍 [DOCUMENTS] Course:', course);
+            console.warn('🔍 [DOCUMENTS] Course.lectures:', course ? course.lectures : 'N/A');
+            return;
+        }
+        
+        // Process all units using the cached course data
         for (const item of accordionItems) {
             const folderName = item.querySelector('.folder-name');
             if (!folderName) {
@@ -1041,75 +1153,60 @@ async function loadDocuments() {
             const lectureName = folderName.textContent;
             console.log(`📁 [DOCUMENTS] Processing lecture/unit: ${lectureName}`);
             
-            // Load documents from the course structure instead of separate API
-            console.log(`📡 [MONGODB] Making API request to /api/courses/${courseId}?instructorId=${getCurrentInstructorId()}`);
-            const response = await fetch(`/api/courses/${courseId}?instructorId=${getCurrentInstructorId()}`);
-            console.log(`📡 [MONGODB] API response status: ${response.status} ${response.statusText}`);
-            console.log(`📡 [MONGODB] API response headers:`, Object.fromEntries(response.headers.entries()));
+            // Find the unit data from the cached course data
+            const unit = course.lectures.find(l => l.name === lectureName);
+            const documents = unit ? (unit.documents || []) : [];
+            console.log(`📁 [DOCUMENTS] Found ${documents.length} documents for ${lectureName}:`, documents);
             
-            if (response.ok) {
-                const result = await response.json();
-                console.log(`📡 [MONGODB] Course data for ${lectureName}:`, result);
-                const course = result.data;
+            // Find the course materials section
+            const courseMaterialsSection = item.querySelector('.course-materials-section .section-content');
+            if (courseMaterialsSection) {
+                console.log(`📁 [DOCUMENTS] Course materials section found for ${lectureName}`);
                 
-                if (course && course.lectures) {
-                    const unit = course.lectures.find(l => l.name === lectureName);
-                    const documents = unit ? (unit.documents || []) : [];
-                    console.log(`📁 [DOCUMENTS] Found ${documents.length} documents for ${lectureName}:`, documents);
+                // Clear ALL existing document items (both placeholders and actual documents)
+                const existingItems = courseMaterialsSection.querySelectorAll('.file-item');
+                console.log(`📁 [DOCUMENTS] Clearing ${existingItems.length} existing document items for ${lectureName}`);
+                
+                existingItems.forEach(item => {
+                    item.remove();
+                });
+                
+                // ADD ALL DOCUMENTS - BACKEND HANDLES DELETION FROM BOTH DBs
+                if (documents && documents.length > 0) {
+                    console.log(`📁 [DOCUMENTS] Adding ${documents.length} documents to UI for ${lectureName}`);
                     
-                    // Find the course materials section
-                    const courseMaterialsSection = item.querySelector('.course-materials-section .section-content');
-                    if (courseMaterialsSection) {
-                        console.log(`📁 [DOCUMENTS] Course materials section found for ${lectureName}`);
-                        
-                        // Clear ALL existing document items (both placeholders and actual documents)
-                        const existingItems = courseMaterialsSection.querySelectorAll('.file-item');
-                        console.log(`📁 [DOCUMENTS] Clearing ${existingItems.length} existing document items for ${lectureName}`);
-                        
-                        existingItems.forEach(item => {
-                            item.remove();
-                        });
-                        
-                        // ADD ALL DOCUMENTS - BACKEND HANDLES DELETION FROM BOTH DBs
-                        if (documents && documents.length > 0) {
-                            console.log(`📁 [DOCUMENTS] Adding ${documents.length} documents to UI for ${lectureName}`);
-                            
-                            // Add all documents - backend ensures they exist in both databases
-                            documents.forEach((doc, index) => {
-                                console.log(`📁 [DOCUMENTS] Adding document ${index + 1} to UI:`, doc);
-                                const documentItem = createDocumentItem(doc);
-                                courseMaterialsSection.appendChild(documentItem);
-                            });
-                            console.log(`✅ [DOCUMENTS] Successfully added ${documents.length} documents to UI for ${lectureName}`);
-                        } else {
-                            console.log(`📁 [DOCUMENTS] No documents to add for ${lectureName}`);
-                        }
-                        
-                        // Always add the required placeholder items if they don't exist
-                        addRequiredPlaceholders(courseMaterialsSection, lectureName);
-                        
-                        // Add the "Add Additional Material" button and "Confirm Course Materials" button
-                        addActionButtons(courseMaterialsSection, lectureName);
-                        
-                        // Add cleanup button if there are documents
-                        if (documents && documents.length > 0) {
-                            addCleanupButton(courseMaterialsSection, lectureName, courseId);
-                        } else {
-                            addCleanupButton(courseMaterialsSection, lectureName, courseId);
-                        }
-                    } else {
-                        console.error('Course materials section not found for', lectureName);
-                    }
+                    // Add all documents - backend ensures they exist in both databases
+                    documents.forEach((doc, index) => {
+                        console.log(`📁 [DOCUMENTS] Adding document ${index + 1} to UI:`, doc);
+                        const documentItem = createDocumentItem(doc);
+                        courseMaterialsSection.appendChild(documentItem);
+                    });
+                    console.log(`✅ [DOCUMENTS] Successfully added ${documents.length} documents to UI for ${lectureName}`);
                 } else {
-                    // No course or lectures data found
+                    console.log(`📁 [DOCUMENTS] No documents to add for ${lectureName}`);
+                }
+                
+                // Always add the required placeholder items if they don't exist
+                addRequiredPlaceholders(courseMaterialsSection, lectureName);
+                
+                // Add the "Add Additional Material" button and "Confirm Course Materials" button
+                addActionButtons(courseMaterialsSection, lectureName);
+                
+                // Add cleanup button if there are documents
+                if (documents && documents.length > 0) {
+                    addCleanupButton(courseMaterialsSection, lectureName, courseId);
+                } else {
+                    addCleanupButton(courseMaterialsSection, lectureName, courseId);
                 }
             } else {
-                console.error('Failed to load course data:', response.status);
+                console.error('Course materials section not found for', lectureName);
             }
         }
         
+        console.log(`✅ [DOCUMENTS] Successfully processed all ${accordionItems.length} units with single API call`);
+        
     } catch (error) {
-        console.error('Error loading documents:', error);
+        console.error('❌ [DOCUMENTS] Error loading documents:', error);
         showNotification('Error loading documents. Using default values.', 'warning');
     }
 }
@@ -3493,10 +3590,9 @@ function generateUnitsFromOnboarding(onboardingData) {
         loadAssessmentQuestionsFromCourseData(onboardingData);
     }, 100);
     
-    // Load documents from course structure
-    setTimeout(() => {
-        loadDocuments();
-    }, 500); // Increased timeout to ensure DOM is fully ready
+    // Don't load documents when generating units from onboarding data
+    // Documents will be loaded later when the course is properly set up
+    console.log('ℹ️ [ONBOARDING] Skipping document load for onboarding-generated units');
 }
 
 /**
@@ -4138,3 +4234,255 @@ async function clearAllDocuments(unitName, courseId) {
         showNotification(`Error clearing documents: ${error.message}`, 'error');
     }
 }
+
+/**
+ * Wrapper functions to expose upload functionality to other pages (e.g., onboarding.js)
+ * These functions allow other pages to use the upload functionality without duplicating code
+ */
+
+/**
+ * Wrapper for openUploadModal - allows onboarding.js to use this function
+ * @param {string} week - The week identifier
+ * @param {string} contentType - The content type
+ */
+window.openUploadModalFromInstructor = function(week, contentType = '') {
+    openUploadModal(week, contentType);
+};
+
+/**
+ * Wrapper for closeUploadModal - allows onboarding.js to use this function
+ */
+window.closeUploadModalFromInstructor = function() {
+    closeUploadModal();
+};
+
+/**
+ * Wrapper for resetModal - allows onboarding.js to use this function
+ */
+window.resetModalFromInstructor = function() {
+    resetModal();
+};
+
+/**
+ * Wrapper for triggerFileInput - allows onboarding.js to use this function
+ */
+window.triggerFileInputFromInstructor = function() {
+    triggerFileInput();
+};
+
+/**
+ * Wrapper for handleFileUpload - allows onboarding.js to use this function
+ * @param {File} file - The uploaded file
+ */
+window.handleFileUploadFromInstructor = function(file) {
+    handleFileUpload(file);
+};
+
+/**
+ * Wrapper for handleUpload - allows onboarding.js to use this function
+ * This version is adapted for onboarding context
+ */
+window.handleUploadFromInstructor = async function() {
+    const urlInput = document.getElementById('url-input').value.trim();
+    const textInput = document.getElementById('text-input').value.trim();
+    const materialNameInput = document.getElementById('material-name').value.trim();
+    const uploadBtn = document.getElementById('upload-btn');
+    
+    // Check if at least one input method is provided
+    if (!uploadedFile && !urlInput && !textInput) {
+        showNotification('Please provide content via file upload, URL, or direct text input', 'error');
+        return;
+    }
+    
+    // Disable upload button and show loading state
+    uploadBtn.textContent = 'Uploading...';
+    uploadBtn.disabled = true;
+    
+    try {
+        // For onboarding, we need to get the course ID from the onboarding state
+        // This would typically come from a global variable or data attribute
+        let courseId = null;
+        let instructorId = null;
+        
+        // Debug logging for onboarding
+        console.log('🔍 [ONBOARDING] Debugging upload process...');
+        console.log('🔍 [ONBOARDING] window.onboardingState:', window.onboardingState);
+        console.log('🔍 [ONBOARDING] window.currentCourseId:', window.currentCourseId);
+        console.log('🔍 [ONBOARDING] currentWeek:', currentWeek);
+        console.log('🔍 [ONBOARDING] currentContentType:', currentContentType);
+        
+        // Try to get course ID from various sources (prioritize onboarding state)
+        if (window.onboardingState && window.onboardingState.createdCourseId) {
+            courseId = window.onboardingState.createdCourseId;
+            console.log('✅ [ONBOARDING] Found course ID from onboardingState:', courseId);
+        } else if (window.currentCourseId) {
+            courseId = window.currentCourseId;
+            console.log('✅ [ONBOARDING] Found course ID from currentCourseId:', courseId);
+        } else {
+            // Try to get from URL parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            courseId = urlParams.get('courseId');
+            console.log('🔍 [ONBOARDING] URL params courseId:', courseId);
+        }
+        
+        if (!courseId) {
+            console.error('❌ [ONBOARDING] No course ID found from any source');
+            throw new Error('No course ID available. Please complete course setup first.');
+        }
+        
+        // For onboarding, use the instructor ID from onboarding state if available
+        if (window.onboardingState && window.onboardingState.courseData && window.onboardingState.courseData.instructorId) {
+            instructorId = window.onboardingState.courseData.instructorId;
+            console.log('✅ [ONBOARDING] Using instructor ID from onboarding state:', instructorId);
+        } else {
+            instructorId = getCurrentInstructorId();
+            console.log('✅ [ONBOARDING] Using instructor ID from getCurrentInstructorId():', instructorId);
+        }
+        
+        const lectureName = currentWeek || 'Unit 1';
+        
+        let uploadResult;
+        
+        if (uploadedFile) {
+            // Handle file upload
+            console.log('📁 [ONBOARDING] Starting file upload...');
+            console.log('📁 [ONBOARDING] File details:', {
+                name: uploadedFile.name,
+                size: uploadedFile.size,
+                type: uploadedFile.type
+            });
+            console.log('📁 [ONBOARDING] Upload parameters:', {
+                courseId,
+                lectureName,
+                documentType: currentContentType,
+                instructorId
+            });
+            
+            const formData = new FormData();
+            formData.append('file', uploadedFile);
+            formData.append('courseId', courseId);
+            formData.append('lectureName', lectureName);
+            formData.append('documentType', currentContentType);
+            formData.append('instructorId', instructorId);
+            
+            console.log('📁 [ONBOARDING] Sending request to /api/documents/upload...');
+            const response = await fetch('/api/documents/upload', {
+                method: 'POST',
+                body: formData
+            });
+            
+            console.log('📁 [ONBOARDING] Response status:', response.status);
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('❌ [ONBOARDING] Upload failed:', response.status, errorText);
+                throw new Error(`Upload failed: ${response.status} ${errorText}`);
+            }
+            
+            uploadResult = await response.json();
+            console.log('✅ [ONBOARDING] Upload successful:', uploadResult);
+            
+        } else if (textInput) {
+            // Handle text submission
+            console.log('📝 [ONBOARDING] Starting text submission...');
+            const title = materialNameInput || `${currentContentType} - ${lectureName}`;
+            console.log('📝 [ONBOARDING] Text submission parameters:', {
+                courseId,
+                lectureName,
+                documentType: currentContentType,
+                instructorId,
+                contentLength: textInput.length,
+                title
+            });
+            
+            const response = await fetch('/api/documents/text', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    courseId: courseId,
+                    lectureName: lectureName,
+                    documentType: currentContentType,
+                    instructorId: instructorId,
+                    content: textInput,
+                    title: title,
+                    description: urlInput || ''
+                })
+            });
+            
+            console.log('📝 [ONBOARDING] Response status:', response.status);
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('❌ [ONBOARDING] Text submission failed:', response.status, errorText);
+                throw new Error(`Text submission failed: ${response.status} ${errorText}`);
+            }
+            
+            uploadResult = await response.json();
+            console.log('✅ [ONBOARDING] Text submission successful:', uploadResult);
+            
+        } else if (urlInput) {
+            // Handle URL import (treat as text with URL as description)
+            const title = materialNameInput || `Content from URL - ${lectureName}`;
+            
+            const response = await fetch('/api/documents/text', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    courseId: courseId,
+                    lectureName: lectureName,
+                    documentType: currentContentType,
+                    instructorId: instructorId,
+                    content: `Content imported from: ${urlInput}`,
+                    title: title,
+                    description: urlInput
+                })
+            });
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`URL import failed: ${response.status} ${errorText}`);
+            }
+            
+            uploadResult = await response.json();
+        }
+        
+        // Update status badge based on content type (for onboarding)
+        let statusBadge = null;
+        let statusText = 'Uploaded';
+        
+        switch (currentContentType) {
+            case 'lecture-notes':
+                statusBadge = document.getElementById('lecture-status');
+                break;
+            case 'practice-quiz':
+                statusBadge = document.getElementById('practice-status');
+                break;
+            case 'additional':
+                statusBadge = document.getElementById('additional-status');
+                statusText = 'Added';
+                break;
+        }
+        
+        if (statusBadge) {
+            statusBadge.textContent = statusText;
+            statusBadge.style.background = 'rgba(40, 167, 69, 0.1)';
+            statusBadge.style.color = '#28a745';
+        }
+        
+        // Close modal and show success
+        closeUploadModal();
+        showNotification('Content uploaded and processed successfully!', 'success');
+        
+    } catch (error) {
+        console.error('Error uploading content:', error);
+        showNotification(`Error uploading content: ${error.message}. Please try again.`, 'error');
+        
+        // Re-enable upload button
+        uploadBtn.textContent = 'Upload';
+        uploadBtn.disabled = false;
+    }
+};
