@@ -29,13 +29,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Wait for authentication to be ready before loading courses
     await waitForAuth();
     
-    loadAvailableCourses();
-    // Wait for courses to load before loading content
-    setTimeout(() => {
-        initializeFilters();
-        loadFlaggedContent();
-        loadFlagStats();
-    }, 100);
+    // Load content directly
+    initializeFilters();
+    loadFlaggedContent();
+    loadFlagStats();
 });
 
 /**
@@ -75,8 +72,6 @@ function initializeEventListeners() {
     const flagTypeFilter = document.getElementById('flag-type-filter');
     const statusFilter = document.getElementById('status-filter');
     const refreshButton = document.getElementById('refresh-flags');
-    const courseSelect = document.getElementById('course-select');
-    
     if (flagTypeFilter) {
         flagTypeFilter.addEventListener('change', handleFilterChange);
     }
@@ -88,88 +83,8 @@ function initializeEventListeners() {
     if (refreshButton) {
         refreshButton.addEventListener('click', handleRefresh);
     }
-    
-    if (courseSelect) {
-        courseSelect.addEventListener('change', handleCourseChange);
-    }
 }
 
-/**
- * Load available courses for the instructor
- */
-async function loadAvailableCourses() {
-    try {
-        const courseSelect = document.getElementById('course-select');
-        if (!courseSelect) return;
-        
-        // Fetch courses from the API instead of hardcoding
-        const response = await fetch('/api/courses/available/all');
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        
-        if (!result.success) {
-            throw new Error(result.message || 'Failed to fetch courses');
-        }
-        
-        const courses = result.data;
-        
-        console.log('All available courses from API:', courses);
-        
-        // Filter out duplicate courses by courseId
-        const uniqueCourses = courses.filter((course, index, self) => 
-            index === self.findIndex(c => c.courseId === course.courseId)
-        );
-        
-        console.log('Unique courses after deduplication:', uniqueCourses);
-        
-        // Clear loading option
-        courseSelect.innerHTML = '';
-        
-        // Add course options
-        uniqueCourses.forEach(course => {
-            const option = document.createElement('option');
-            option.value = course.courseId;
-            option.textContent = course.courseName;
-            courseSelect.appendChild(option);
-        });
-        
-        // Set default selection to the most recent course (or first if only one)
-        if (uniqueCourses.length > 0) {
-            // Sort by creation date to get the most recent course first
-            const sortedCourses = uniqueCourses.sort((a, b) => {
-                const dateA = new Date(a.createdAt || 0);
-                const dateB = new Date(b.createdAt || 0);
-                return dateB - dateA; // Most recent first
-            });
-            
-            courseSelect.value = sortedCourses[0].courseId;
-            console.log('Default course selected:', sortedCourses[0].courseName, sortedCourses[0].courseId);
-        }
-        
-        console.log('Available courses loaded and deduplicated:', uniqueCourses);
-        
-    } catch (error) {
-        console.error('Error loading available courses:', error);
-        // Fallback to default course if API fails
-        const courseSelect = document.getElementById('course-select');
-        if (courseSelect) {
-            courseSelect.innerHTML = '<option value="default">Loading courses...</option>';
-        }
-    }
-}
-
-/**
- * Handle course selection change
- */
-function handleCourseChange() {
-    console.log('Course selection changed, reloading data...');
-    loadFlaggedContent();
-    loadFlagStats();
-}
 
 /**
  * Handle filter changes and update the displayed content
@@ -209,12 +124,11 @@ async function loadFlaggedContent() {
     try {
         showLoadingState();
         
-        // Get current course ID from selector
-        const courseSelect = document.getElementById('course-select');
-        const courseId = courseSelect ? courseSelect.value : '';
+        // Get current course ID from auth or other source
+        const courseId = getCurrentCourseId();
         
         if (!courseId) {
-            console.log('No course selected, showing empty state');
+            console.log('No course available, showing empty state');
             appState.flags = [];
             applyFilters();
             renderFlaggedContent();
@@ -260,12 +174,11 @@ async function loadFlaggedContent() {
  */
 async function loadFlagStats() {
     try {
-        // Get current course ID from selector
-        const courseSelect = document.getElementById('course-select');
-        const courseId = courseSelect ? courseSelect.value : '';
+        // Get current course ID from auth or other source
+        const courseId = getCurrentCourseId();
         
         if (!courseId) {
-            console.log('No course selected, using default stats');
+            console.log('No course available, using default stats');
             appState.stats = { total: 0, pending: 0, reviewed: 0, resolved: 0, dismissed: 0 };
             updateStatsDisplay();
             return;

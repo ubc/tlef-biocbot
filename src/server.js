@@ -19,12 +19,13 @@ const questionsRoutes = require('./routes/questions');
 const onboardingRoutes = require('./routes/onboarding');
 const qdrantRoutes = require('./routes/qdrant');
 const studentsRoutes = require('./routes/students');
+const userAgreementRoutes = require('./routes/user-agreement');
 const LLMService = require('./services/llm');
 const AuthService = require('./services/authService');
 const createAuthMiddleware = require('./middleware/auth');
 
 const app = express();
-const port = process.env.TLEF_BIOCBOT_PORT || 8080;
+const port = process.env.TLEF_BIOCBOT_PORT || 8085;
 
 // Configure CORS to allow requests from localhost:3002 (browser-sync proxy)
 app.use(cors({
@@ -107,22 +108,9 @@ async function connectToMongoDB() {
         // Make the database available to routes
         app.locals.db = db;
         
-        // Configure session store after MongoDB connection
-        app.use(session({
-            secret: process.env.SESSION_SECRET || 'biocbot-session-secret-change-in-production',
-            resave: false,
-            saveUninitialized: false,
-            store: MongoStore.create({
-                client: client,
-                dbName: process.env.MONGO_DB_NAME || 'biocbot'
-            }),
-            cookie: {
-                secure: process.env.NODE_ENV === 'production',
-                httpOnly: true,
-                sameSite: 'lax',
-                maxAge: 24 * 60 * 60 * 1000 // 24 hours
-            }
-        }));
+        // Enhance session store with MongoDB after connection
+        // Note: This will be used for future session persistence improvements
+        console.log('✅ MongoDB session store available for future use');
         
         // Test the connection by listing collections
         const collections = await db.listCollections().toArray();
@@ -140,7 +128,18 @@ async function connectToMongoDB() {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Session configuration will be set up after MongoDB connection
+// Basic session configuration (will be enhanced after MongoDB connection)
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'biocbot-session-secret-change-in-production',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        sameSite: 'lax',
+        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    }
+}));
 
 // Serve static files from the 'public' directory
 app.use(express.static(path.join(__dirname, '../public')));
@@ -414,6 +413,7 @@ function setupAPIRoutes() {
     app.use('/api/qdrant', authMiddleware.requireAuth, qdrantRoutes);
     app.use('/api/chat', authMiddleware.requireAuth, chatRoutes);
     app.use('/api/students', authMiddleware.requireAuth, studentsRoutes);
+    app.use('/api/user-agreement', authMiddleware.requireAuth, userAgreementRoutes);
 }
 
 // Initialize the application

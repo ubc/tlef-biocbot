@@ -9,6 +9,157 @@ let currentStudents = [];
 let currentStudentSessions = [];
 
 /**
+ * Get the current course ID for the instructor
+ * @returns {Promise<string>} Course ID
+ */
+async function getCurrentCourseId() {
+    // Check if we have a courseId from URL parameters (onboarding redirect)
+    const urlParams = new URLSearchParams(window.location.search);
+    const courseIdFromUrl = urlParams.get('courseId');
+    
+    if (courseIdFromUrl) {
+        return courseIdFromUrl;
+    }
+    
+    // If no course ID in URL, try to get it from the instructor's courses
+    try {
+        console.log('🔍 [GET_COURSE_ID] Getting instructor ID...');
+        const instructorId = getCurrentInstructorId();
+        console.log('🔍 [GET_COURSE_ID] Instructor ID:', instructorId);
+        
+        if (!instructorId) {
+            console.error('No instructor ID available');
+            return null;
+        }
+        
+        console.log(`🔍 [GET_COURSE_ID] Fetching courses for instructor: ${instructorId}`);
+        const response = await fetch(`/api/onboarding/instructor/${instructorId}`, {
+            credentials: 'include'
+        });
+        
+        console.log(`🔍 [GET_COURSE_ID] Response status: ${response.status} ${response.statusText}`);
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log(`🔍 [GET_COURSE_ID] API response:`, result);
+            
+            if (result.data && result.data.courses && result.data.courses.length > 0) {
+                // Return the first course found
+                const firstCourse = result.data.courses[0];
+                console.log(`🔍 [GET_COURSE_ID] Found course:`, firstCourse.courseId);
+                return firstCourse.courseId;
+            } else {
+                console.log(`🔍 [GET_COURSE_ID] No courses found in response`);
+            }
+        } else {
+            const errorText = await response.text();
+            console.error(`🔍 [GET_COURSE_ID] API error: ${response.status} - ${errorText}`);
+        }
+    } catch (error) {
+        console.error('Error fetching instructor courses:', error);
+    }
+    
+    
+    // Additional fallback: Check if we can get course ID from the current user's preferences
+    const currentUser = getCurrentUser();
+    if (currentUser && currentUser.preferences && currentUser.preferences.courseId) {
+        console.log(`🔍 [GET_COURSE_ID] Using course from user preferences: ${currentUser.preferences.courseId}`);
+        return currentUser.preferences.courseId;
+    }
+    
+    // If no course found, show an error and redirect to onboarding
+    console.error('No course ID found. Redirecting to onboarding...');
+    showNotification('No course found. Please complete onboarding first.', 'error');
+    setTimeout(() => {
+        window.location.href = '/instructor/onboarding';
+    }, 2000);
+    
+    // Return a placeholder (this should not be reached due to redirect)
+    return null;
+}
+
+/**
+ * Show notification message
+ * @param {string} message - Message to display
+ * @param {string} type - Type of notification (success, error, info)
+ */
+function showNotification(message, type = 'info') {
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.textContent = message;
+    
+    // Add styles
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 12px 20px;
+        border-radius: 4px;
+        color: white;
+        font-weight: 500;
+        z-index: 1000;
+        max-width: 400px;
+        word-wrap: break-word;
+    `;
+    
+    // Set background color based on type
+    switch (type) {
+        case 'success':
+            notification.style.backgroundColor = '#4CAF50';
+            break;
+        case 'error':
+            notification.style.backgroundColor = '#f44336';
+            break;
+        case 'info':
+        default:
+            notification.style.backgroundColor = '#2196F3';
+            break;
+    }
+    
+    // Add to page
+    document.body.appendChild(notification);
+    
+    // Remove after 5 seconds
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+        }
+    }, 5000);
+}
+
+/**
+ * Wait for authentication to be ready
+ * @returns {Promise<void>}
+ */
+async function waitForAuth() {
+    return new Promise((resolve) => {
+        console.log('🔍 [WAIT_AUTH] Checking if auth is ready...');
+        // Check if auth is already ready
+        const currentUser = getCurrentUser();
+        console.log('🔍 [WAIT_AUTH] Current user:', currentUser);
+        
+        if (currentUser) {
+            console.log('🔍 [WAIT_AUTH] Auth already ready');
+            resolve();
+            return;
+        }
+        
+        // Wait for auth:ready event
+        document.addEventListener('auth:ready', () => {
+            console.log('✅ [AUTH] Authentication ready');
+            resolve();
+        }, { once: true });
+        
+        // Fallback timeout in case auth never loads
+        setTimeout(() => {
+            console.warn('⚠️ [AUTH] Authentication timeout, proceeding anyway');
+            resolve();
+        }, 5000);
+    });
+}
+
+/**
  * Initialize the downloads page
  */
 document.addEventListener('DOMContentLoaded', async () => {
@@ -17,8 +168,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Set up event listeners
     setupEventListeners();
     
-    // Automatically load BIOC202 course
-    await loadBIOC202Course();
+    // Initialize authentication
+    await initAuth();
+    
+    // Wait for authentication to be ready
+    await waitForAuth();
+    
+    // Load the current course (the one the instructor is in)
+    await loadCurrentCourse();
 });
 
 /**
@@ -33,59 +190,56 @@ function setupEventListeners() {
 }
 
 /**
- * Automatically load BIOC202 course
+ * Load the current course that the instructor is in
  */
-async function loadBIOC202Course() {
+async function loadCurrentCourse() {
     try {
-        console.log('Loading BIOC202 course automatically...');
+        console.log('Loading current course...');
         showLoadingState();
         
-        // First, get all courses to find BIOC202
-        const response = await fetch('/api/courses', {
+        // Get the current course ID using the same logic as other instructor pages
+        const courseId = await getCurrentCourseId();
+        
+        if (!courseId) {
+            throw new Error('No course found. Please complete onboarding first.');
+        }
+        
+        console.log('Found current course ID:', courseId);
+        
+        // Get course details
+        const response = await fetch(`/api/courses/${courseId}`, {
             method: 'GET',
             credentials: 'include'
         });
         
         if (!response.ok) {
-            throw new Error(`Failed to load courses: ${response.status}`);
+            throw new Error(`Failed to load course details: ${response.status}`);
         }
         
         const result = await response.json();
         
         if (!result.success) {
-            throw new Error(result.message || 'Failed to load courses');
+            throw new Error(result.message || 'Failed to load course details');
         }
         
-        const courses = result.data || [];
-        console.log(`Loaded ${courses.length} courses`);
-        
-        // Find BIOC202 course
-        const bioc202Course = courses.find(course => 
-            course.name.toLowerCase().includes('bioc202') || 
-            course.id.toLowerCase().includes('bioc202')
-        );
-        
-        if (!bioc202Course) {
-            throw new Error('BIOC202 course not found');
-        }
-        
-        console.log('Found BIOC202 course:', bioc202Course);
+        const course = result.data;
+        console.log('Found course:', course);
         
         // Set the course ID and load student data
-        currentCourseId = bioc202Course.id;
+        currentCourseId = courseId;
         
         // Update course title
         const courseTitle = document.getElementById('course-title');
         if (courseTitle) {
-            courseTitle.textContent = `${bioc202Course.name} - Student Downloads`;
+            courseTitle.textContent = `${course.name} - Student Downloads`;
         }
         
-        // Load student data for BIOC202
+        // Load student data for the current course
         await loadStudentData();
         
     } catch (error) {
-        console.error('Error loading BIOC202 course:', error);
-        showErrorState('Failed to load BIOC202 course. Please try again.');
+        console.error('Error loading current course:', error);
+        showErrorState('Failed to load current course. Please try again.');
     }
 }
 
@@ -190,19 +344,40 @@ function displayStudents(students) {
  * @returns {HTMLElement} Student card element
  */
 function createStudentCard(student) {
+    console.log('🔍 [CREATE_CARD] Student data:', student);
+    console.log('🔍 [CREATE_CARD] studentName type:', typeof student.studentName);
+    console.log('🔍 [CREATE_CARD] studentName value:', student.studentName);
+    
+    // Handle missing or invalid student name
+    let studentName = 'Unknown Student';
+    
+    if (student.studentName) {
+        if (typeof student.studentName === 'string') {
+            studentName = student.studentName;
+        } else if (typeof student.studentName === 'object') {
+            // If it's an object, try to extract the name from common fields
+            studentName = student.studentName.displayName || 
+                         student.studentName.name || 
+                         student.studentName.studentName || 
+                         'Unknown Student';
+        }
+    }
+    
+    const firstLetter = studentName && typeof studentName === 'string' ? studentName.charAt(0).toUpperCase() : '?';
+    
     const card = document.createElement('div');
     card.className = 'student-card';
     card.innerHTML = `
         <div class="student-info">
-            <div class="student-avatar">${student.studentName.charAt(0).toUpperCase()}</div>
+            <div class="student-avatar">${firstLetter}</div>
             <div class="student-details">
-                <h3 class="student-name">${student.studentName}</h3>
+                <h3 class="student-name">${studentName}</h3>
                 <p class="student-id">ID: ${student.studentId}</p>
                 <p class="student-stats">${student.totalSessions} saved chat${student.totalSessions !== 1 ? 's' : ''}</p>
             </div>
         </div>
         <div class="student-actions">
-            <button class="btn-primary" onclick="viewStudentSessions('${student.studentId}', '${student.studentName}')">
+            <button class="btn-primary" onclick="viewStudentSessions('${student.studentId}', '${studentName.replace(/'/g, "\\'")}')">
                 View Sessions
             </button>
         </div>

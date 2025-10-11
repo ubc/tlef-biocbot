@@ -73,7 +73,20 @@ router.get('/:courseId', async (req, res) => {
         chatSessions.forEach(session => {
             
             const studentId = session.studentId;
-            const studentName = session.studentName || 'Unknown Student';
+            let studentName = session.studentName || 'Unknown Student';
+            
+            // If studentName is an object, try to extract the actual name
+            if (typeof studentName === 'object' && studentName !== null) {
+                studentName = studentName.displayName || 
+                             studentName.name || 
+                             studentName.studentName || 
+                             'Unknown Student';
+            }
+            
+            // Ensure studentName is a string
+            if (typeof studentName !== 'string') {
+                studentName = 'Unknown Student';
+            }
             
             if (!studentsMap.has(studentId)) {
                 studentsMap.set(studentId, {

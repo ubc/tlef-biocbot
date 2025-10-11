@@ -6,7 +6,7 @@
   "scripts": {
     "start": "cross-env NODE_ENV=production node src/server.js",
     "dev": "npm-run-all --parallel dev:*",
-    "dev:server": "cross-env NODE_ENV=development nodemon src/server.js",
+    "dev:server": "cross-env NODE_ENV=development TLEF_BIOCBOT_PORT=8085 nodemon src/server.js",
     "dev:client": "browser-sync start --proxy 'http://localhost:8085' --files 'public'",
     "diagnose": "node diagnose.js",
     "test": "echo \"Error: no test specified\" && exit 1"

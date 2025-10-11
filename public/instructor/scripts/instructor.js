@@ -6,6 +6,32 @@ let aiGenerationCount = 0;
 let lastGeneratedContent = null;
 let currentQuestionType = null;
 
+/**
+ * Wait for authentication to be ready
+ * @returns {Promise<void>}
+ */
+async function waitForAuth() {
+    return new Promise((resolve) => {
+        // Check if auth is already ready
+        if (getCurrentUser()) {
+            resolve();
+            return;
+        }
+        
+        // Wait for auth:ready event
+        document.addEventListener('auth:ready', () => {
+            console.log('✅ [AUTH] Authentication ready');
+            resolve();
+        }, { once: true });
+        
+        // Fallback timeout in case auth never loads
+        setTimeout(() => {
+            console.warn('⚠️ [AUTH] Authentication timeout, proceeding anyway');
+            resolve();
+        }, 5000);
+    });
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('🚀 [DOM_LOADED] Instructor page loaded');
     
@@ -40,7 +66,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const fileUpload = document.getElementById('file-upload');
     const documentSearch = document.getElementById('document-search');
     const documentFilter = document.getElementById('document-filter');
-    const courseSelect = document.getElementById('course-select');
     const accordionHeaders = document.querySelectorAll('.accordion-header');
     const sectionHeaders = document.querySelectorAll('.section-header');
     
@@ -121,8 +146,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Set up threshold input event listeners
     setupThresholdInputListeners();
     
-    // Load available courses for the dropdown
-    loadAvailableCourses();
     
     // Load course data if available (either from onboarding or existing course)
     loadCourseData();
@@ -147,17 +170,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     });
     
-    // Handle course selection
-    if (courseSelect) {
-        courseSelect.addEventListener('change', () => {
-            const selectedCourse = courseSelect.value;
-            if (selectedCourse) {
-                // In a real implementation, this would load the course documents
-                console.log(`Loading documents for course: ${selectedCourse}`);
-                showNotification(`Loaded documents for ${courseSelect.options[courseSelect.selectedIndex].text}`, 'info');
-            }
-        });
-    }
     
     // Handle drag and drop functionality
     if (uploadDropArea) {
@@ -205,12 +217,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         function handleFiles(files) {
             // This is just a UI skeleton, so we'll just log the files
             
-            // Check if a course is selected
-            const selectedCourse = courseSelect.value;
-            if (!selectedCourse) {
-                alert('Please select a course before uploading documents.');
-                return;
-            }
             
             // Check if week is selected
             const weekSelect = document.getElementById('week-select');
@@ -484,14 +490,12 @@ function resetModal() {
     // Reset file input and info
     const fileInput = document.getElementById('file-input');
     const fileInfo = document.getElementById('file-info');
-    const urlInput = document.getElementById('url-input');
     const textInput = document.getElementById('text-input');
     const materialName = document.getElementById('material-name');
     const uploadFileBtn = document.querySelector('.upload-file-btn span:last-child');
     
     if (fileInput) fileInput.value = '';
     if (fileInfo) fileInfo.style.display = 'none';
-    if (urlInput) urlInput.value = '';
     if (textInput) textInput.value = '';
     if (materialName) materialName.value = '';
     
@@ -535,14 +539,13 @@ function handleFileUpload(file) {
  * Handle the main upload action
  */
 async function handleUpload() {
-    const urlInput = document.getElementById('url-input').value.trim();
     const textInput = document.getElementById('text-input').value.trim();
     const materialNameInput = document.getElementById('material-name').value.trim();
     const uploadBtn = document.getElementById('upload-btn');
     
     // Check if at least one input method is provided
-    if (!uploadedFile && !urlInput && !textInput) {
-        showNotification('Please provide content via file upload, URL, or direct text input', 'error');
+    if (!uploadedFile && !textInput) {
+        showNotification('Please provide content via file upload or direct text input', 'error');
         return;
     }
     
@@ -594,7 +597,7 @@ async function handleUpload() {
                     instructorId: instructorId,
                     content: textInput,
                     title: title,
-                    description: urlInput || ''
+                    description: ''
                 })
             });
             
@@ -946,18 +949,44 @@ async function getCurrentCourseId() {
     // If no course ID in URL, try to get it from the instructor's courses
     try {
         const instructorId = getCurrentInstructorId();
-        const response = await fetch(`/api/onboarding/instructor/${instructorId}`);
+        if (!instructorId) {
+            console.error('No instructor ID available');
+            return null;
+        }
+        
+        console.log(`🔍 [GET_COURSE_ID] Fetching courses for instructor: ${instructorId}`);
+        const response = await fetch(`/api/onboarding/instructor/${instructorId}`, {
+            credentials: 'include'
+        });
+        
+        console.log(`🔍 [GET_COURSE_ID] Response status: ${response.status} ${response.statusText}`);
         
         if (response.ok) {
             const result = await response.json();
+            console.log(`🔍 [GET_COURSE_ID] API response:`, result);
+            
             if (result.data && result.data.courses && result.data.courses.length > 0) {
                 // Return the first course found
                 const firstCourse = result.data.courses[0];
+                console.log(`🔍 [GET_COURSE_ID] Found course:`, firstCourse.courseId);
                 return firstCourse.courseId;
+            } else {
+                console.log(`🔍 [GET_COURSE_ID] No courses found in response`);
             }
+        } else {
+            const errorText = await response.text();
+            console.error(`🔍 [GET_COURSE_ID] API error: ${response.status} - ${errorText}`);
         }
     } catch (error) {
         console.error('Error fetching instructor courses:', error);
+    }
+    
+    
+    // Additional fallback: Check if we can get course ID from the current user's preferences
+    const currentUser = getCurrentUser();
+    if (currentUser && currentUser.preferences && currentUser.preferences.courseId) {
+        console.log(`🔍 [GET_COURSE_ID] Using course from user preferences: ${currentUser.preferences.courseId}`);
+        return currentUser.preferences.courseId;
     }
     
     // If no course found, show an error and redirect to onboarding
@@ -3295,6 +3324,13 @@ function setupMCQValidation() {
  * Save the created question
  */
 async function saveQuestion() {
+    // Check authentication first
+    const currentUser = getCurrentUser();
+    if (!currentUser) {
+        showNotification('Authentication error. Please refresh the page and try again.', 'error');
+        return;
+    }
+    
     const questionType = document.getElementById('question-type').value;
     const questionText = document.getElementById('question-text').value.trim();
     
@@ -3370,6 +3406,27 @@ async function saveQuestion() {
         const instructorId = getCurrentInstructorId();
         const lectureName = currentWeek;
         
+        // Debug logging
+        console.log('🔍 [SAVE_QUESTION] Debug info:', {
+            courseId,
+            instructorId,
+            lectureName,
+            currentWeek
+        });
+        
+        // Validation
+        if (!courseId) {
+            throw new Error('No course selected. Please select a course first.');
+        }
+        
+        if (!instructorId) {
+            throw new Error('Authentication error. Please refresh the page and try again.');
+        }
+        
+        if (!lectureName) {
+            throw new Error('No lecture selected. Please select a lecture first.');
+        }
+        
         const response = await fetch(`${API_BASE_URL}/api/questions`, {
             method: 'POST',
             headers: {
@@ -3392,6 +3449,17 @@ async function saveQuestion() {
         
         if (!response.ok) {
             const errorText = await response.text();
+            console.error('❌ [SAVE_QUESTION] API Error:', {
+                status: response.status,
+                statusText: response.statusText,
+                errorText: errorText
+            });
+            
+            // Check if it's an authentication error
+            if (response.status === 401) {
+                throw new Error('Authentication expired. Please refresh the page and try again.');
+            }
+            
             throw new Error(`Failed to save question: ${response.status} ${errorText}`);
         }
         
@@ -4040,11 +4108,9 @@ function saveAssessment(week) {
 
 // Initialize assessment system - this will be called from the main DOMContentLoaded listener
 function initializeAssessmentSystem() {
-    // Initialize questions display for all weeks
-    ['Week 1', 'Week 2', 'Week 3'].forEach(week => {
-        updateQuestionsDisplay(week);
-        checkAIGenerationAvailability(week);
-    });
+    // Initialize questions display for all units
+    // Note: This will be updated dynamically based on actual course structure
+    // The updateQuestionsDisplay function will be called for each unit as they are loaded
 }
 
 /**
@@ -5235,6 +5301,9 @@ function renderCourseUnits(units) {
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('📄 [DOCUMENTS] DOM fully loaded and parsed');
     
+    // Wait for authentication to be ready
+    await waitForAuth();
+    
     // Check for onboarding completion first
     const instructorId = getCurrentInstructorId();
     if (!instructorId) {
@@ -5247,18 +5316,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     await initializeAssessmentSystem();
     await loadOnboardingData();
 
-    // Handle course selection
-    const courseSelect = document.getElementById('course-select');
-    if (courseSelect) {
-        courseSelect.addEventListener('change', () => {
-            const selectedCourse = courseSelect.value;
-            if (selectedCourse) {
-                // In a real implementation, this would load the course documents
-                console.log(`Loading documents for course: ${selectedCourse}`);
-                showNotification(`Loaded documents for ${courseSelect.options[courseSelect.selectedIndex].text}`, 'info');
-            }
-        });
-    }
 });
 
 /**
@@ -5483,105 +5540,3 @@ async function waitForAuth() {
     console.warn('⚠️ [AUTH] Authentication not ready after 5 seconds, proceeding anyway');
 }
 
-/**
- * Load available courses for the instructor dropdown
- */
-async function loadAvailableCourses() {
-    try {
-        const courseSelect = document.getElementById('course-select');
-        const courseTitle = document.getElementById('course-title');
-        
-        if (!courseSelect) return;
-        
-        // Fetch courses from the API
-        const response = await fetch('/api/courses/available/all');
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        
-        if (!result.success) {
-            throw new Error(result.message || 'Failed to fetch courses');
-        }
-        
-        const courses = result.data;
-        
-        console.log('All available courses from API:', courses);
-        
-        // Filter out duplicate courses by courseId
-        const uniqueCourses = courses.filter((course, index, self) => 
-            index === self.findIndex(c => c.courseId === course.courseId)
-        );
-        
-        console.log('Unique courses after deduplication:', uniqueCourses);
-        
-        // Clear loading option
-        courseSelect.innerHTML = '';
-        
-        // Add course options
-        uniqueCourses.forEach(course => {
-            const option = document.createElement('option');
-            option.value = course.courseId;
-            option.textContent = course.courseName;
-            courseSelect.appendChild(option);
-        });
-        
-        // Set default selection to the most recent course (or first if only one)
-        if (uniqueCourses.length > 0) {
-            // Sort by creation date to get the most recent course first
-            const sortedCourses = uniqueCourses.sort((a, b) => {
-                const dateA = new Date(a.createdAt || 0);
-                const dateB = new Date(b.createdAt || 0);
-                return dateB - dateA; // Most recent first
-            });
-            
-            const defaultCourse = sortedCourses[0];
-            courseSelect.value = defaultCourse.courseId;
-            
-            // Update the course title to match the selected course
-            if (courseTitle) {
-                courseTitle.textContent = defaultCourse.courseName;
-            }
-            
-            console.log('Default course selected:', defaultCourse.courseName);
-        } else {
-            // No courses available
-            const option = document.createElement('option');
-            option.value = '';
-            option.textContent = 'No courses available';
-            courseSelect.appendChild(option);
-            
-            if (courseTitle) {
-                courseTitle.textContent = 'No Course Available';
-            }
-        }
-        
-        // Add event listener for course selection changes
-        courseSelect.addEventListener('change', function() {
-            const selectedCourseId = this.value;
-            const selectedCourse = uniqueCourses.find(course => course.courseId === selectedCourseId);
-            
-            if (selectedCourse && courseTitle) {
-                courseTitle.textContent = selectedCourse.courseName;
-                console.log('Course changed to:', selectedCourse.courseName);
-            }
-        });
-        
-        console.log('Available courses loaded and deduplicated:', uniqueCourses);
-        
-    } catch (error) {
-        console.error('Error loading available courses:', error);
-        // Fallback to default course if API fails
-        const courseSelect = document.getElementById('course-select');
-        const courseTitle = document.getElementById('course-title');
-        
-        if (courseSelect) {
-            courseSelect.innerHTML = '<option value="default">No courses available</option>';
-        }
-        if (courseTitle) {
-            courseTitle.textContent = 'No Course Available';
-        }
-    }
-}
