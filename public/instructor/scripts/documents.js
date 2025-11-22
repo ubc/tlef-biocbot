@@ -199,18 +199,20 @@ async function loadAvailableCourses() {
             courseSelect.appendChild(option);
         });
         
-        // Check for courseId parameter in URL
+        // Check for courseId parameter in URL or localStorage
         const urlParams = new URLSearchParams(window.location.search);
         const courseIdParam = urlParams.get('courseId');
+        const courseIdFromStorage = localStorage.getItem('selectedCourseId');
+        const selectedCourseId = courseIdParam || courseIdFromStorage;
         
         // Set default selection
         if (uniqueCourses.length > 0) {
             let selectedCourse = null;
             
-            if (courseIdParam) {
-                // Use courseId from URL parameter
-                selectedCourse = uniqueCourses.find(course => course.courseId === courseIdParam);
-                console.log('Course ID from URL parameter:', courseIdParam);
+            if (selectedCourseId) {
+                // Use courseId from URL parameter or localStorage
+                selectedCourse = uniqueCourses.find(course => course.courseId === selectedCourseId);
+                console.log('Course ID from URL/localStorage:', selectedCourseId);
             }
             
             if (!selectedCourse) {
@@ -231,14 +233,35 @@ async function loadAvailableCourses() {
             }
             
             console.log('Course selected:', selectedCourse.courseName, selectedCourse.courseId);
+            
+            // Update URL if course ID is from localStorage
+            if (courseIdFromStorage && !courseIdParam) {
+                urlParams.set('courseId', selectedCourse.courseId);
+                window.history.replaceState({}, '', `${window.location.pathname}?${urlParams.toString()}`);
+            }
         }
         
         // Add event listener for course selection changes
         courseSelect.addEventListener('change', function() {
             const selectedCourse = uniqueCourses.find(course => course.courseId === this.value);
-            if (selectedCourse && courseTitle) {
-                courseTitle.textContent = selectedCourse.courseName;
+            if (selectedCourse) {
+                if (courseTitle) {
+                    courseTitle.textContent = selectedCourse.courseName;
+                }
                 console.log('Course changed to:', selectedCourse.courseName);
+                
+                // Update localStorage and URL
+                localStorage.setItem('selectedCourseId', selectedCourse.courseId);
+                const urlParams = new URLSearchParams(window.location.search);
+                urlParams.set('courseId', selectedCourse.courseId);
+                window.history.replaceState({}, '', `${window.location.pathname}?${urlParams.toString()}`);
+                
+                // Reload course data
+                if (typeof loadSpecificCourse === 'function') {
+                    loadSpecificCourse(selectedCourse.courseId);
+                } else if (typeof loadCourseData === 'function') {
+                    loadCourseData();
+                }
             }
         });
         

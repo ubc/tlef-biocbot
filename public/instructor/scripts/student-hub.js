@@ -14,43 +14,47 @@ document.addEventListener('DOMContentLoaded', async function() {
 });
 
 function initializeStudentHub() {
-    const courseSelect = document.getElementById('student-course-select');
-    if (courseSelect) {
-        courseSelect.addEventListener('change', async (e) => {
-            const courseId = e.target.value;
-            if (courseId) {
-                await loadStudents(courseId);
-            }
-        });
-    }
+    // Course selection is now handled by the home page
+    // No need for dropdown change handler
 }
 
 async function loadInstructorCourses() {
     try {
-        const instructorId = getCurrentInstructorId();
-        if (!instructorId) return;
-
-        const response = await authenticatedFetch(`/api/onboarding/instructor/${instructorId}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        const result = await response.json();
-        instructorCourses = result.data?.courses || [];
-
+        // Get selected course ID from URL or localStorage
+        const urlParams = new URLSearchParams(window.location.search);
+        const courseIdFromUrl = urlParams.get('courseId');
+        const courseIdFromStorage = localStorage.getItem('selectedCourseId');
+        const selectedCourseId = courseIdFromUrl || courseIdFromStorage;
+        
+        // Hide the course selector dropdown
         const courseSelect = document.getElementById('student-course-select');
-        if (courseSelect) {
-            courseSelect.innerHTML = '<option value="">Select a course...</option>';
-            instructorCourses.forEach(course => {
-                const option = document.createElement('option');
-                option.value = course.courseId;
-                option.textContent = course.courseName;
-                courseSelect.appendChild(option);
-            });
+        const controlsRow = courseSelect?.closest('.controls-row');
+        if (controlsRow) {
+            controlsRow.style.display = 'none';
         }
+        
+        if (selectedCourseId) {
+            // Load the selected course
+            await loadStudents(selectedCourseId);
+        } else {
+            // Fallback: try to get first course from instructor's courses
+            const instructorId = getCurrentInstructorId();
+            if (!instructorId) {
+                showNotification('No course selected. Please select a course from the home page.', 'error');
+                return;
+            }
 
-        // Auto-load first course if available
-        if (instructorCourses.length > 0 && courseSelect) {
-            courseSelect.value = instructorCourses[0].courseId;
-            await loadStudents(instructorCourses[0].courseId);
+            const response = await authenticatedFetch(`/api/onboarding/instructor/${instructorId}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const result = await response.json();
+            instructorCourses = result.data?.courses || [];
+
+            if (instructorCourses.length > 0) {
+                await loadStudents(instructorCourses[0].courseId);
+            } else {
+                showNotification('No courses found. Please complete onboarding or select a course from the home page.', 'error');
+            }
         }
     } catch (err) {
         console.error('Error loading instructor courses:', err);

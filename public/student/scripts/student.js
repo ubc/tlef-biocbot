@@ -2214,15 +2214,110 @@ async function loadAvailableCourses() {
         // Check if there's already a selected course in localStorage
         const storedCourseId = localStorage.getItem('selectedCourseId');
         const storedCourseName = localStorage.getItem('selectedCourseName');
+        
         if (storedCourseId) {
-            console.log('Found stored course ID, verifying it exists:', storedCourseId);
+            console.log('Found stored course ID, verifying it exists and belongs to current user:', storedCourseId);
             console.log('Found stored course name:', storedCourseName);
-            // Try to load the stored course, but if it fails, clear localStorage and fetch fresh
+            
+            // Check if this stored courseId has actual chat data (messages) for the current user
+            // If not, it's likely leftover from a previous user session and should be cleared
+            const studentId = getCurrentStudentId();
+            let hasUserChatData = false;
+            
+            if (studentId) {
+                // Check if there's actual chat data with messages for this user with this course
+                const chatDataKey = `biocbot_current_chat_${studentId}`;
+                const chatDataStr = localStorage.getItem(chatDataKey);
+                
+                if (chatDataStr) {
+                    try {
+                        const chatData = JSON.parse(chatDataStr);
+                        // Check if chat data exists, has messages, and matches the stored courseId
+                        if (chatData && 
+                            chatData.metadata && 
+                            chatData.metadata.courseId === storedCourseId &&
+                            chatData.metadata.studentId === studentId &&
+                            chatData.messages && 
+                            chatData.messages.length > 0) {
+                            hasUserChatData = true;
+                            console.log('Found actual chat messages for current user with stored course');
+                        } else {
+                            console.log('Chat data exists but no messages or wrong course - treating as first-time user');
+                        }
+                    } catch (e) {
+                        console.log('Error parsing chat data:', e);
+                    }
+                } else {
+                    console.log('No chat data found for current user - treating as first-time user');
+                }
+            }
+            
+            // First, verify the course exists and the current user has access to it
             try {
-                await loadCourseData(storedCourseId);
-                return;
+                // Check if user has access to this course
+                const enrollmentResponse = await fetch(`/api/courses/${storedCourseId}/student-enrollment`, { 
+                    credentials: 'include' 
+                });
+                
+                if (enrollmentResponse.ok) {
+                    const enrollmentData = await enrollmentResponse.json();
+                    // If user is not enrolled or access is revoked, clear the stored course
+                    if (!enrollmentData.success || !enrollmentData.data || enrollmentData.data.enrolled === false) {
+                        console.log('User does not have access to stored course, clearing localStorage');
+                        localStorage.removeItem('selectedCourseId');
+                        localStorage.removeItem('selectedCourseName');
+                        // Clear any session data for this course
+                        if (studentId) {
+                            Object.keys(localStorage).forEach(key => {
+                                if (key.startsWith(`biocbot_session_${studentId}_${storedCourseId}_`)) {
+                                    localStorage.removeItem(key);
+                                }
+                            });
+                        }
+                        // Continue to fetch fresh courses below
+                    } else if (!hasUserChatData) {
+                        // User has access but no actual chat messages - this is a first-time user
+                        // or the courseId is from a different user's session
+                        console.log('User has access but no chat messages - treating as first-time user, clearing stored course');
+                        localStorage.removeItem('selectedCourseId');
+                        localStorage.removeItem('selectedCourseName');
+                        // Clear any session keys for this course to prevent future false positives
+                        if (studentId) {
+                            Object.keys(localStorage).forEach(key => {
+                                if (key.startsWith(`biocbot_session_${studentId}_${storedCourseId}_`)) {
+                                    localStorage.removeItem(key);
+                                }
+                            });
+                        }
+                        // Continue to fetch fresh courses below
+                    } else {
+                        // User has access and has actual chat messages - verify course still exists
+                        const courseResponse = await fetch(`/api/courses/${storedCourseId}`);
+                        if (courseResponse.ok) {
+                            const courseData = await courseResponse.json();
+                            if (courseData.success && courseData.data) {
+                                // Course exists, user has access, and has chat messages - load it
+                                console.log('Stored course is valid, user has access and chat messages, loading it');
+                                await loadCourseData(storedCourseId);
+                                return;
+                            } else {
+                                console.log('Stored course does not exist, clearing localStorage');
+                                localStorage.removeItem('selectedCourseId');
+                                localStorage.removeItem('selectedCourseName');
+                            }
+                        } else {
+                            console.log('Failed to verify stored course, clearing localStorage');
+                            localStorage.removeItem('selectedCourseId');
+                            localStorage.removeItem('selectedCourseName');
+                        }
+                    }
+                } else {
+                    console.log('Failed to check enrollment, clearing localStorage');
+                    localStorage.removeItem('selectedCourseId');
+                    localStorage.removeItem('selectedCourseName');
+                }
             } catch (error) {
-                console.warn('Stored course ID is invalid, clearing localStorage and fetching fresh courses');
+                console.warn('Error verifying stored course, clearing localStorage:', error);
                 localStorage.removeItem('selectedCourseId');
                 localStorage.removeItem('selectedCourseName');
                 // Continue to fetch fresh courses below
@@ -2250,9 +2345,17 @@ async function loadAvailableCourses() {
             return;
         }
 
-        if (courses.length === 1) {
-            // Only one course available, use it directly
-            console.log('Only one course available, using it directly');
+        // Always show course selection dropdown if no course is stored (first time user)
+        // This ensures users can choose their course even if only one is available
+        const hasStoredCourse = !!localStorage.getItem('selectedCourseId');
+        
+        if (!hasStoredCourse) {
+            // First time user - always show selection dropdown
+            console.log('First time user - showing course selection dropdown');
+            showCourseSelection(courses);
+        } else if (courses.length === 1) {
+            // Returning user with stored course, but only one course available - use it directly
+            console.log('Only one course available and user has stored course, using it directly');
             await loadCourseData(courses[0].courseId);
         } else {
             // Multiple courses available, show selection dropdown
@@ -2308,7 +2411,8 @@ function showCourseSelection(courses) {
             const selectedCourseId = this.value;
             if (selectedCourseId) {
                 console.log('Course selected:', selectedCourseId);
-                await loadCourseData(selectedCourseId);
+                // This is a course change (user selected from dropdown)
+                await loadCourseData(selectedCourseId, true);
 
                 // Hide the course selection after selection
                 const courseSelectionWrapper = document.getElementById('course-selection-wrapper');
@@ -2323,11 +2427,16 @@ function showCourseSelection(courses) {
 /**
  * Load course data and update display
  * @param {string} courseId - Course ID to load
+ * @param {boolean} isCourseChange - Whether this is a course change (vs initial load)
  */
-async function loadCourseData(courseId) {
+async function loadCourseData(courseId, isCourseChange = false) {
     try {
-        console.log('Loading course data for:', courseId);
+        console.log('Loading course data for:', courseId, 'isCourseChange:', isCourseChange);
 
+        // Check if this is actually a course change by comparing with stored courseId
+        const previousCourseId = localStorage.getItem('selectedCourseId');
+        const actualCourseChange = isCourseChange || (previousCourseId && previousCourseId !== courseId);
+        
         // Store the selected course in localStorage
         localStorage.setItem('selectedCourseId', courseId);
 
@@ -2369,6 +2478,98 @@ async function loadCourseData(courseId) {
 
         // Add change course functionality
         addChangeCourseButton();
+
+        // If this is a course change (not initial load), create a new clean session
+        if (actualCourseChange) {
+            console.log('🔄 [COURSE-CHANGE] Creating new session for course change...');
+            
+            // Clear any existing session data for the old course
+            clearCurrentChatData();
+
+            // Clear the selected unit name so the unit dropdown will show up
+            localStorage.removeItem('selectedUnitName');
+            console.log('🔄 [COURSE-CHANGE] Cleared selected unit name to show unit dropdown');
+
+            // Generate a new session ID for the new course
+            const studentId = getCurrentStudentId();
+            const unitName = localStorage.getItem('selectedUnitName') || 'this unit';
+
+            if (studentId && courseId) {
+                const sessionKey = `biocbot_session_${studentId}_${courseId}_${unitName}`;
+                const newSessionId = `autosave_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                localStorage.setItem(sessionKey, newSessionId);
+                console.log('🔄 [COURSE-CHANGE] Generated new session ID:', newSessionId);
+            }
+
+            // Clear the chat interface to start fresh
+            const chatMessages = document.getElementById('chat-messages');
+            if (chatMessages) {
+                chatMessages.innerHTML = `
+                    <div class="message bot-message">
+                        <div class="message-avatar">B</div>
+                        <div class="message-content">
+                            <p>Hello! I'm BiocBot, your AI study assistant for ${courseName}. How can I help you today?</p>
+                            <div class="message-footer">
+                                <div class="message-footer-right">
+                                    <span class="timestamp">Just now</span>
+                                    <div class="message-flag-container">
+                                        <button class="flag-button" onclick="toggleFlagMenu(this)">
+                                            <span class="three-dots">⋯</span>
+                                        </button>
+                                        <div class="flag-menu">
+                                            <button class="flag-option" onclick="flagMessage(this, 'incorrect')">Incorrect</button>
+                                            <button class="flag-option" onclick="flagMessage(this, 'inappropriate')">Inappropriate</button>
+                                            <button class="flag-option" onclick="flagMessage(this, 'unclear')">Unclear</button>
+                                            <button class="flag-option" onclick="flagMessage(this, 'confusing')">Confusing</button>
+                                            <button class="flag-option" onclick="flagMessage(this, 'typo')">Typo/Error</button>
+                                            <button class="flag-option" onclick="flagMessage(this, 'offensive')">Offensive</button>
+                                            <button class="flag-option" onclick="flagMessage(this, 'irrelevant')">Irrelevant</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Reset flags
+            window.autoContinued = false;
+            window.loadingFromHistory = false;
+
+            // Load questions and proper prompts for the new course
+            // Use a small delay to ensure DOM is fully updated
+            setTimeout(() => {
+                console.log('🔄 [COURSE-CHANGE] Loading questions for new course...');
+                checkPublishedUnitsAndLoadQuestions();
+            }, 200);
+        } else {
+            // On initial load, ensure session exists and questions are loaded
+            console.log('🔄 [INITIAL-LOAD] Initial course load - ensuring session exists and questions are loaded');
+            
+            // Ensure session ID exists (but don't create a new one if one already exists)
+            const studentId = getCurrentStudentId();
+            const unitName = localStorage.getItem('selectedUnitName') || 'this unit';
+            if (studentId && courseId) {
+                const sessionKey = `biocbot_session_${studentId}_${courseId}_${unitName}`;
+                let sessionId = localStorage.getItem(sessionKey);
+                if (!sessionId) {
+                    // Only create session if one doesn't exist
+                    sessionId = `autosave_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    localStorage.setItem(sessionKey, sessionId);
+                    console.log('🔄 [INITIAL-LOAD] Created new session ID:', sessionId);
+                } else {
+                    console.log('🔄 [INITIAL-LOAD] Using existing session ID:', sessionId);
+                }
+            }
+
+            // Ensure questions are loaded after a delay to allow DOM to be ready
+            // This handles the case where loadCourseData is called before checkPublishedUnitsAndLoadQuestions
+            setTimeout(() => {
+                console.log('🔄 [INITIAL-LOAD] Ensuring questions are loaded for initial course...');
+                checkPublishedUnitsAndLoadQuestions();
+            }, 300);
+        }
 
     } catch (error) {
         console.error('Error loading course data:', error);
@@ -2612,6 +2813,7 @@ function addChangeCourseButton() {
             changeCourseBtn.remove();
 
             // Reload available courses to show selection
+            // When a course is selected, it will be treated as a course change
             await loadAvailableCourses();
         }
     });
@@ -2812,9 +3014,17 @@ async function checkPublishedUnitsAndLoadQuestions() {
     try {
         console.log('=== CHECKING FOR PUBLISHED UNITS ===');
 
+        // Prevent duplicate calls - if already checking, wait for it to complete
+        if (window.isCheckingPublishedUnits) {
+            console.log('🔄 [UNITS] Already checking published units, skipping duplicate call');
+            return;
+        }
+        window.isCheckingPublishedUnits = true;
+
         // Check if chat was auto-continued
         if (window.autoContinued) {
             console.log('🔄 [AUTO-CONTINUE] Chat was auto-continued, skipping assessment questions');
+            window.isCheckingPublishedUnits = false;
             return;
         }
 
@@ -2822,6 +3032,7 @@ async function checkPublishedUnitsAndLoadQuestions() {
         const courseId = localStorage.getItem('selectedCourseId');
         if (!courseId) {
             console.log('No course selected yet, skipping unit check');
+            window.isCheckingPublishedUnits = false; // Reset flag on early return
             return;
         }
         console.log('Checking course:', courseId);
@@ -2840,10 +3051,12 @@ async function checkPublishedUnitsAndLoadQuestions() {
             if (response.status === 404) {
                 console.log('Course not found, clearing localStorage and loading available courses');
                 localStorage.removeItem('selectedCourseId');
+                window.isCheckingPublishedUnits = false; // Reset flag before returning
                 await loadAvailableCourses();
                 return;
             }
 
+            window.isCheckingPublishedUnits = false; // Reset flag on error
             throw new Error(`Failed to fetch course data: ${response.status} - ${errorText}`);
         }
 
@@ -2863,6 +3076,7 @@ async function checkPublishedUnitsAndLoadQuestions() {
             console.log('No course data or lectures found');
             console.log('Available data keys:', courseData.data ? Object.keys(courseData.data) : 'no data');
             showNoQuestionsMessage();
+            window.isCheckingPublishedUnits = false; // Reset flag on early return
             return;
         }
 
@@ -2877,6 +3091,7 @@ async function checkPublishedUnitsAndLoadQuestions() {
             console.log('No published units found');
             console.log('All units:', courseData.data.lectures.map(u => ({ name: u.name, isPublished: u.isPublished })));
             showNoQuestionsMessage();
+            window.isCheckingPublishedUnits = false; // Reset flag on early return
             return;
         }
 
@@ -2884,11 +3099,16 @@ async function checkPublishedUnitsAndLoadQuestions() {
         console.log('Showing unit selection dropdown for published units...');
         showUnitSelectionDropdown(publishedUnits);
 
+        // Reset the flag after completion
+        window.isCheckingPublishedUnits = false;
+
     } catch (error) {
         console.error('=== ERROR CHECKING PUBLISHED UNITS ===');
         console.error('Error details:', error);
         console.error('Error stack:', error.stack);
         showNoQuestionsMessage();
+        // Reset the flag even on error
+        window.isCheckingPublishedUnits = false;
     }
 }
 

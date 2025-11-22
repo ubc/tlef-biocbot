@@ -54,10 +54,24 @@ async function fetchCourseId() {
     // Check if we have a courseId from URL parameters (onboarding redirect or direct navigation)
     const urlParams = new URLSearchParams(window.location.search);
     const courseIdFromUrl = urlParams.get('courseId');
+    const courseIdFromStorage = localStorage.getItem('selectedCourseId');
     
+    // Priority: URL > localStorage > API fetch
     if (courseIdFromUrl) {
         console.log('🔍 [GET_COURSE_ID] Using courseId from URL parameter:', courseIdFromUrl);
+        // Update localStorage to match URL
+        if (courseIdFromUrl !== courseIdFromStorage) {
+            localStorage.setItem('selectedCourseId', courseIdFromUrl);
+        }
         return courseIdFromUrl;
+    }
+    
+    if (courseIdFromStorage) {
+        console.log('🔍 [GET_COURSE_ID] Using courseId from localStorage:', courseIdFromStorage);
+        // Update URL to match localStorage
+        urlParams.set('courseId', courseIdFromStorage);
+        window.history.replaceState({}, '', `${window.location.pathname}?${urlParams.toString()}`);
+        return courseIdFromStorage;
     }
     
     // If no course ID in URL, try to get it from the user's courses

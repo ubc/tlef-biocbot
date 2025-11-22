@@ -1380,12 +1380,25 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (!toggle) return;
 
         async function initToggleWithCourse() {
-            const courseId = await getCurrentCourseId();
+            // Get course ID from URL or localStorage (same priority as other pages)
+            const urlParams = new URLSearchParams(window.location.search);
+            const courseIdFromUrl = urlParams.get('courseId');
+            const courseIdFromStorage = localStorage.getItem('selectedCourseId');
+            let courseId = courseIdFromUrl || courseIdFromStorage;
+            
+            // Fallback to getCurrentCourseId if not found
+            if (!courseId) {
+                courseId = await getCurrentCourseId();
+            }
+            
             if (!courseId) {
                 // No course context yet; disable toggle gracefully
                 toggle.disabled = true;
+                console.warn('No course ID found for additive retrieval toggle');
                 return;
             }
+            
+            console.log('Initializing additive retrieval toggle for course:', courseId);
 
             // Load current setting
             const res = await fetch(`/api/courses/${courseId}`);
@@ -4757,17 +4770,26 @@ async function loadOnboardingData() {
  */
 async function loadCourseData() {
     try {
-        // First check if we have a courseId from URL parameters (onboarding redirect)
+        // First check if we have a courseId from URL parameters (onboarding redirect or course selection)
         const urlParams = new URLSearchParams(window.location.search);
-        const courseId = urlParams.get('courseId');
+        const courseIdFromUrl = urlParams.get('courseId');
+        const courseIdFromStorage = localStorage.getItem('selectedCourseId');
+        const selectedCourseId = courseIdFromUrl || courseIdFromStorage;
         
-        if (courseId) {
+        if (selectedCourseId) {
             // Load specific course data
-            await loadSpecificCourse(courseId);
+            console.log('Loading course from URL/localStorage:', selectedCourseId);
+            await loadSpecificCourse(selectedCourseId);
+            
+            // Update URL if course ID is from localStorage
+            if (courseIdFromStorage && !courseIdFromUrl) {
+                urlParams.set('courseId', selectedCourseId);
+                window.history.replaceState({}, '', `${window.location.pathname}?${urlParams.toString()}`);
+            }
             return;
         }
         
-        // If no courseId in URL, check if instructor has any existing courses
+        // If no courseId in URL or localStorage, check if instructor has any existing courses
         const instructorId = getCurrentInstructorId();
         if (!instructorId) {
             console.error('No instructor ID found. User not authenticated.');
@@ -4780,6 +4802,7 @@ async function loadCourseData() {
             if (result.data && result.data.courses && result.data.courses.length > 0) {
                 // Load the first available course
                 const firstCourse = result.data.courses[0];
+                console.log('Loading first available course:', firstCourse.courseId);
                 await loadSpecificCourse(firstCourse.courseId);
                 return;
             }

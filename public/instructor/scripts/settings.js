@@ -1,7 +1,10 @@
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     const saveSettingsBtn = document.getElementById('save-settings');
     const resetSettingsBtn = document.getElementById('reset-settings');
     const deleteCollectionBtn = document.getElementById('delete-collection');
+    
+    // Check if user can see the delete all button
+    await checkDeleteAllPermission();
     
     // Default settings - simplified to placeholder
     const defaultSettings = {
@@ -89,6 +92,42 @@ document.addEventListener('DOMContentLoaded', () => {
                 deleteCollectionBtn.textContent = 'Delete All Data';
             }
         });
+    }
+    
+    /**
+     * Check if the current user has permission to see the delete all button
+     * Hides the entire Database Management section if user doesn't have permission
+     */
+    async function checkDeleteAllPermission() {
+        try {
+            const response = await fetch('/api/settings/can-delete-all', {
+                credentials: 'include'
+            });
+            
+            const result = await response.json();
+            
+            // Get the Database Management section by ID
+            const databaseSection = document.getElementById('database-management-section');
+            
+            if (result.success && result.canDeleteAll) {
+                // User has permission, ensure the section is visible (it's visible by default)
+                if (databaseSection) {
+                    databaseSection.style.display = '';
+                }
+            } else {
+                // User doesn't have permission, hide the Database Management section
+                if (databaseSection) {
+                    databaseSection.style.display = 'none';
+                }
+            }
+        } catch (error) {
+            console.error('Error checking delete all permission:', error);
+            // On error, hide the section for security
+            const databaseSection = document.getElementById('database-management-section');
+            if (databaseSection) {
+                databaseSection.style.display = 'none';
+            }
+        }
     }
     
     // Function to show notification

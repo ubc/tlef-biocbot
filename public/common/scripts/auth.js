@@ -165,6 +165,20 @@ function isTA() {
  * @returns {string|null} Current course ID or null
  */
 function getCurrentCourseId() {
+    // First check URL parameters (highest priority)
+    const urlParams = new URLSearchParams(window.location.search);
+    const courseIdFromUrl = urlParams.get('courseId');
+    if (courseIdFromUrl) {
+        return courseIdFromUrl;
+    }
+    
+    // Then check localStorage (for instructor pages)
+    const courseIdFromStorage = localStorage.getItem('selectedCourseId');
+    if (courseIdFromStorage) {
+        return courseIdFromStorage;
+    }
+    
+    // Finally check user preferences
     return currentUser && currentUser.preferences ? currentUser.preferences.courseId : null;
 }
 

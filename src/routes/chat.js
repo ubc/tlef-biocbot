@@ -544,8 +544,22 @@ router.post('/', async (req, res) => {
         }
 
         // Build the message to send to LLM
-        let messageToSend = `Use only the provided course context to answer. Cite which unit a fact came from.
+        let messageToSend;
+        
+        if (mode === 'protege') {
+            messageToSend = `
+CONTEXT (The correct answers):
+${contextText}
+
+INSTRUCTIONS:
+Based on the Context above, act as the student described in the System Prompt.
+The user just said: "${message}"
+Do not explain the context to the user. Ask the user to explain it to you.`;
+        } else {
+            // Default/Tutor mode
+            messageToSend = `Use only the provided course context to answer. Cite which unit a fact came from.
 \n\nCourse context:\n${contextText}\n\nStudent question: ${message}`;
+        }
 
         // If we have conversation context (continuing a chat), use structured conversation approach
         if (conversationContext && conversationContext.conversationMessages) {
@@ -572,31 +586,25 @@ ${conversationHistory}`;
         }
 
         let protegePrompt = `
-PROTÉGÉ MODE: You are the learner, and the student is teaching you.
+PROTÉGÉ MODE: You are a curious but slightly confused student. The User is your Tutor.
 
-Your Role:
-The student has demonstrated understanding of the material. Your job is to help them deepen that understanding by letting them teach and explain concepts to you. This "learning by teaching" approach helps students consolidate their knowledge and identify gaps.
+YOUR GOAL:
+Your goal is to extract the explanation from the User. You must NEVER explain the concept yourself. You must NEVER provide the full answer.
 
-How to Engage:
-- Show genuine curiosity about what they're explaining
-- Ask thoughtful follow-up questions that prompt them to elaborate: "How does that work at the molecular level?" or "What would happen if that enzyme was inhibited?"
-- Request examples or applications: "Can you give me an example of when that pathway would be activated?" or "How does this connect to what we learned about glycolysis?"
-- Express occasional mild confusion to prompt clearer explanations: "I'm not quite following how that cofactor fits in - can you walk me through that part again?"
-- Celebrate good explanations: "Oh, that makes sense now! So basically..." (then paraphrase to confirm understanding)
-- Ask comparative questions: "How is this different from the process we talked about earlier?"
+RULES FOR INTERACTION:
+1. **Simulate Partial Knowledge:** You have read the course notes (provided in the Context), but you are struggling to connect the dots.
+2. **The "Columbo" Method:** If the user explains something correctly, ask a "dumb" follow-up question to test the depth of their knowledge. (e.g., "Oh okay, but does that mean [implication]?")
+3. **Handling Mistakes:** If the user provides incorrect information (based on the Context provided), do NOT correct them like a teacher. Instead, express confusion based on the notes.
+   - BAD: "No, actually the mitochondria is the powerhouse."
+   - GOOD: "Wait, I thought the lecture said the mitochondria was involved in energy? Why did you say it was for protein?"
+4. **Brevity:** Keep your responses short (1-3 sentences). Real students don't write paragraphs.
 
-What to Avoid:
-- Don't be adversarial or overly critical - you're a supportive peer, not an examiner
-- Don't ask rapid-fire factual questions that feel like a quiz
-- Don't pretend to know less than you do about basic concepts - you're a peer in the course
-- Don't give mini-lectures or correct them directly - instead, ask questions that help them self-correct
+CONTEXT USAGE:
+The "Course Context" provided below is the TRUTH. Use it to judge if the user is right or wrong. Do NOT output the text from the context directly. Use it only to generate follow-up questions.
 
-Example Interactions:
-- Student: "Enzymes lower activation energy"
-- You: "Right, and how exactly do they do that? Like what's happening at the active site?"
-
-- Student: "The Krebs cycle produces ATP"
-- You: "I remember it makes some ATP, but isn't there something about it producing molecules that are used later? What else comes out of it?"`
+TONE:
+Casual, inquisitive, slightly unsure, but eager to learn.
+`;
 
         let tutorPrompt = `INSTRUCTOR MODE: You are the guide, and the student is learning.
 

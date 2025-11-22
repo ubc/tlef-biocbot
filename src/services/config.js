@@ -169,6 +169,24 @@ class ConfigService {
     isProduction() {
         return this.getEnvironment() === 'production';
     }
+    
+    /**
+     * Get list of emails that can see the delete all button
+     * @returns {Array<string>} Array of allowed email addresses
+     */
+    getAllowedDeleteButtonEmails() {
+        // Note: Using exact env variable name as specified (includes typo "DELTE")
+        const envValue = process.env.CAN_SEE_DELTE_ALL_BUTTON;
+        if (!envValue) {
+            return [];
+        }
+        
+        // Split by comma and trim whitespace from each email
+        return envValue
+            .split(',')
+            .map(email => email.trim())
+            .filter(email => email.length > 0);
+    }
 }
 
 module.exports = new ConfigService(); 

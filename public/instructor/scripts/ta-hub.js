@@ -138,6 +138,12 @@ async function loadCurrentTAs() {
         console.log('Current user:', currentUser);
         console.log('Role:', currentUser && currentUser.role);
         
+        // Get selected course ID from URL or localStorage
+        const urlParams = new URLSearchParams(window.location.search);
+        const courseIdFromUrl = urlParams.get('courseId');
+        const courseIdFromStorage = localStorage.getItem('selectedCourseId');
+        const selectedCourseId = courseIdFromUrl || courseIdFromStorage;
+        
         // Get TAs assigned to instructor's courses
         const instructorId = getCurrentInstructorId();
         if (!instructorId) {
@@ -152,7 +158,13 @@ async function loadCurrentTAs() {
         }
         
         const coursesResult = await coursesResponse.json();
-        const courses = coursesResult.data?.courses || [];
+        let courses = coursesResult.data?.courses || [];
+        
+        // Filter to only selected course if one is selected
+        if (selectedCourseId) {
+            courses = courses.filter(course => course.courseId === selectedCourseId);
+            console.log('Filtering TAs to selected course:', selectedCourseId);
+        }
         
         if (courses.length === 0) {
             console.log('No courses found for instructor');

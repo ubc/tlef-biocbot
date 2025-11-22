@@ -6,11 +6,109 @@
     background-color: white;
 }
 
+.header-content {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
 .home-header h1 {
     font-size: 2.5rem;
     color: var(--text-color);
     margin: 0;
     font-weight: 600;
+}
+
+/* Course Selection Styles */
+.course-selection-container {
+    padding: 20px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.current-course-display {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.course-label {
+    font-size: 1rem;
+    color: #666;
+    font-weight: 500;
+}
+
+.course-name-display {
+    font-size: 1.1rem;
+    color: var(--primary-color);
+    font-weight: 600;
+    flex: 1;
+}
+
+.course-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.course-selector label {
+    font-size: 1rem;
+    color: var(--text-color);
+    font-weight: 500;
+}
+
+.course-select-dropdown {
+    padding: 10px 15px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    font-size: 1rem;
+    background-color: white;
+    color: var(--text-color);
+    cursor: pointer;
+    transition: border-color 0.3s ease;
+}
+
+.course-select-dropdown:hover {
+    border-color: var(--primary-color);
+}
+
+.course-select-dropdown:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+}
+
+.selected-course-details {
+    padding: 15px;
+    background-color: white;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+.selected-course-details .course-info h4 {
+    font-size: 1.2rem;
+    color: var(--text-color);
+    margin: 0 0 10px 0;
+    font-weight: 600;
+}
+
+.selected-course-details .course-info p {
+    font-size: 0.95rem;
+    color: #666;
+    margin: 5px 0;
+}
+
+.course-selector-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.course-selector-actions .action-btn {
+    flex: 1;
+    min-width: 120px;
 }
 
 .home-container {
