@@ -338,31 +338,56 @@ async function createOrGetSAMLUser(db, samlData) {
     });
     
     if (existingUser) {
-        // User exists - update PUID if it wasn't stored before (migration case)
+        // User exists — update fields that may have changed since last login.
         const updateFields = {
             lastLogin: new Date(),
             updatedAt: new Date()
         };
-        
-        // If PUID is provided but not stored, add it
+
+        // If PUID is provided but not yet stored (migration case), save it now
         if (samlData.puid && !existingUser.puid) {
             updateFields.puid = samlData.puid;
             console.log(`Updating existing user ${existingUser.userId} with PUID: ${samlData.puid}`);
         }
-        
-        // Update last login and PUID if needed
+
+        // Always re-apply the role determined by the Passport strategy on each login.
+        // This corrects any previously mis-assigned roles (e.g. a student+staff dual-role
+        // user who was incorrectly given 'instructor' before this fix was applied).
+        //
+        // IMPORTANT: Do NOT overwrite a manually-granted 'ta' role.
+        // The 'ta' role is assigned by an instructor through the app — it is not
+        // derived from CWL affiliations. A TA's CWL affiliation will still say 'student',
+        // so we must preserve the 'ta' role and never downgrade it via CWL login.
+        const isManuallyGrantedRole = existingUser.role === 'ta';
+
+        if (samlData.role && samlData.role !== existingUser.role && !isManuallyGrantedRole) {
+            console.log(
+                `[USER] Role change for ${existingUser.userId}: ` +
+                `${existingUser.role} → ${samlData.role} (re-evaluated from CWL attributes)`
+            );
+            updateFields.role = samlData.role;
+        } else if (isManuallyGrantedRole) {
+            console.log(
+                `[USER] Preserving manually-granted 'ta' role for ${existingUser.userId} ` +
+                `(CWL says '${samlData.role}', keeping 'ta')`
+            );
+        }
+
         await collection.updateOne(
             { userId: existingUser.userId },
             { $set: updateFields }
         );
-        
+
+        // Use the freshly determined role in the returned object
+        const resolvedRole = updateFields.role || existingUser.role;
+
         return {
             success: true,
             user: {
                 userId: existingUser.userId,
                 username: existingUser.username,
                 email: existingUser.email,
-                role: existingUser.role,
+                role: resolvedRole,
                 displayName: existingUser.displayName,
                 authProvider: existingUser.authProvider,
                 preferences: existingUser.preferences
