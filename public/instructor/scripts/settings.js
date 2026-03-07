@@ -126,10 +126,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Populate toggles
             const quizEnabledToggle = document.getElementById('quiz-enabled-toggle');
             const materialAccessToggle = document.getElementById('quiz-material-access-toggle');
+            const sourceAttributionDownloadToggle = document.getElementById('source-attribution-download-toggle');
 
             if (settingsData.success && settingsData.settings) {
-                if (quizEnabledToggle) quizEnabledToggle.checked = settingsData.settings.enabled !== false;
+                if (quizEnabledToggle) quizEnabledToggle.checked = settingsData.settings.enabled === true;
                 if (materialAccessToggle) materialAccessToggle.checked = settingsData.settings.allowLectureMaterialAccess !== false;
+                if (sourceAttributionDownloadToggle) sourceAttributionDownloadToggle.checked = settingsData.settings.allowSourceAttributionDownloads === true;
             }
 
             // Populate testable units checkboxes
@@ -211,6 +213,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // Save quiz practice settings
                 const quizEnabled = document.getElementById('quiz-enabled-toggle')?.checked;
                 const materialAccess = document.getElementById('quiz-material-access-toggle')?.checked;
+                const sourceAttributionDownloads = document.getElementById('source-attribution-download-toggle')?.checked;
                 const unitCheckboxes = document.querySelectorAll('.testable-unit-checkbox');
                 let testableUnits = 'all';
                 if (unitCheckboxes.length > 0) {
@@ -224,9 +227,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         courseId,
-                        enabled: quizEnabled !== false,
+                        enabled: quizEnabled === true,
                         testableUnits,
-                        allowLectureMaterialAccess: materialAccess !== false
+                        allowLectureMaterialAccess: materialAccess === true,
+                        allowSourceAttributionDownloads: sourceAttributionDownloads === true
                     })
                 });
 
@@ -327,15 +331,23 @@ document.addEventListener('DOMContentLoaded', async () => {
                     // Reset quiz settings to defaults
                     const quizEnabledToggle = document.getElementById('quiz-enabled-toggle');
                     const materialAccessToggle = document.getElementById('quiz-material-access-toggle');
-                    if (quizEnabledToggle) quizEnabledToggle.checked = true;
+                    const sourceAttributionDownloadToggle = document.getElementById('source-attribution-download-toggle');
+                    if (quizEnabledToggle) quizEnabledToggle.checked = false;
                     if (materialAccessToggle) materialAccessToggle.checked = true;
+                    if (sourceAttributionDownloadToggle) sourceAttributionDownloadToggle.checked = false;
                     // Check all unit checkboxes
                     document.querySelectorAll('.testable-unit-checkbox').forEach(cb => { cb.checked = true; });
                     // Save quiz defaults
                     await fetch('/api/settings/quiz', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ courseId, enabled: true, testableUnits: 'all', allowLectureMaterialAccess: true })
+                        body: JSON.stringify({
+                            courseId,
+                            enabled: false,
+                            testableUnits: 'all',
+                            allowLectureMaterialAccess: true,
+                            allowSourceAttributionDownloads: false
+                        })
                     });
 
                     showNotification('Settings reset to defaults', 'success');

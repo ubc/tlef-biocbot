@@ -450,26 +450,46 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function downloadMaterial(documentId, filename) {
         try {
             const res = await fetch(`/api/quiz/materials/${documentId}/download?courseId=${courseId}`);
-            const data = await res.json();
-
-            if (data.success && data.data && data.data.content) {
-                // Create a text blob and download
-                const blob = new Blob([data.data.content], { type: 'text/plain' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename || 'document.txt';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            } else {
+            if (!res.ok) {
                 showToast('Unable to download this document.');
+                return;
             }
+
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const disposition = res.headers.get('Content-Disposition') || '';
+            const nameFromHeader = extractFilenameFromDisposition(disposition);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = nameFromHeader || filename || 'document';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         } catch (e) {
             console.error('Error downloading material:', e);
             showToast('Error downloading material.');
         }
+    }
+
+    function extractFilenameFromDisposition(contentDisposition) {
+        if (!contentDisposition) return null;
+        const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+        if (utf8Match && utf8Match[1]) {
+            try {
+                return decodeURIComponent(utf8Match[1]);
+            } catch (_) {
+                return utf8Match[1];
+            }
+        }
+
+        const asciiMatch = contentDisposition.match(/filename="([^"]+)"/i);
+        if (asciiMatch && asciiMatch[1]) {
+            return asciiMatch[1];
+        }
+
+        return null;
     }
 
     // ==============================

@@ -1587,17 +1587,26 @@ async function getQuizSettings(db, courseId) {
         { projection: { quizSettings: 1 } }
     );
 
+    const defaults = {
+        enabled: false,
+        testableUnits: 'all',
+        allowLectureMaterialAccess: true,
+        allowSourceAttributionDownloads: false
+    };
+
     if (!course) {
-        return { enabled: true, testableUnits: 'all', allowLectureMaterialAccess: true };
+        return defaults;
     }
 
-    const defaults = { enabled: true, testableUnits: 'all', allowLectureMaterialAccess: true };
     const settings = course.quizSettings || {};
 
     return {
         enabled: settings.enabled !== undefined ? settings.enabled : defaults.enabled,
         testableUnits: settings.testableUnits !== undefined ? settings.testableUnits : defaults.testableUnits,
-        allowLectureMaterialAccess: settings.allowLectureMaterialAccess !== undefined ? settings.allowLectureMaterialAccess : defaults.allowLectureMaterialAccess
+        allowLectureMaterialAccess: settings.allowLectureMaterialAccess !== undefined ? settings.allowLectureMaterialAccess : defaults.allowLectureMaterialAccess,
+        allowSourceAttributionDownloads: settings.allowSourceAttributionDownloads !== undefined
+            ? settings.allowSourceAttributionDownloads
+            : defaults.allowSourceAttributionDownloads
     };
 }
 
@@ -1605,7 +1614,7 @@ async function getQuizSettings(db, courseId) {
  * Update quiz practice settings for a course
  * @param {Object} db - MongoDB database instance
  * @param {string} courseId - Course identifier
- * @param {Object} settings - { enabled, testableUnits, allowLectureMaterialAccess }
+ * @param {Object} settings - { enabled, testableUnits, allowLectureMaterialAccess, allowSourceAttributionDownloads }
  * @param {string} instructorId - ID of the instructor making the change
  * @returns {Promise<Object>} Update result
  */
@@ -1614,9 +1623,12 @@ async function updateQuizSettings(db, courseId, settings, instructorId) {
     const now = new Date();
 
     const quizSettings = {
-        enabled: settings.enabled !== undefined ? settings.enabled : true,
+        enabled: settings.enabled !== undefined ? settings.enabled : false,
         testableUnits: settings.testableUnits !== undefined ? settings.testableUnits : 'all',
-        allowLectureMaterialAccess: settings.allowLectureMaterialAccess !== undefined ? settings.allowLectureMaterialAccess : true
+        allowLectureMaterialAccess: settings.allowLectureMaterialAccess !== undefined ? settings.allowLectureMaterialAccess : true,
+        allowSourceAttributionDownloads: settings.allowSourceAttributionDownloads !== undefined
+            ? settings.allowSourceAttributionDownloads
+            : false
     };
 
     const result = await collection.updateOne(

@@ -528,7 +528,13 @@ router.get('/quiz', async (req, res) => {
  */
 router.post('/quiz', async (req, res) => {
     try {
-        const { courseId, enabled, testableUnits, allowLectureMaterialAccess } = req.body;
+        const {
+            courseId,
+            enabled,
+            testableUnits,
+            allowLectureMaterialAccess,
+            allowSourceAttributionDownloads
+        } = req.body;
         if (!courseId) {
             return res.status(400).json({ success: false, message: 'Missing courseId' });
         }
@@ -543,7 +549,8 @@ router.post('/quiz', async (req, res) => {
         const result = await CourseModel.updateQuizSettings(db, courseId, {
             enabled,
             testableUnits,
-            allowLectureMaterialAccess
+            allowLectureMaterialAccess,
+            allowSourceAttributionDownloads
         }, instructorId);
 
         if (result.success) {

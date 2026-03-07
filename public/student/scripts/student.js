@@ -1128,6 +1128,51 @@ async function handleExplainAction(text, topic = null) {
     }
 }
 
+function buildSourceDownloadUrl(documentId, courseId) {
+    const encodedDocId = encodeURIComponent(documentId);
+    const encodedCourseId = encodeURIComponent(courseId);
+    return `/api/chat/source-documents/${encodedDocId}/download?courseId=${encodedCourseId}`;
+}
+
+function renderSourceAttribution(sourceDiv, sourceAttribution) {
+    const fallbackText = sourceAttribution && sourceAttribution.description
+        ? sourceAttribution.description
+        : 'TBD';
+    const hasDownloadableSources = sourceAttribution
+        && sourceAttribution.downloadsEnabled === true
+        && Array.isArray(sourceAttribution.documents)
+        && sourceAttribution.documents.some(doc => doc && doc.documentId);
+
+    if (!hasDownloadableSources) {
+        sourceDiv.textContent = `Source: ${fallbackText}`;
+        return;
+    }
+
+    const courseId = localStorage.getItem('selectedCourseId');
+    if (!courseId) {
+        sourceDiv.textContent = `Source: ${fallbackText}`;
+        return;
+    }
+
+    sourceDiv.textContent = '';
+    sourceDiv.appendChild(document.createTextNode('Source: '));
+
+    const docs = sourceAttribution.documents.filter(doc => doc && doc.documentId);
+    docs.forEach((doc, index) => {
+        if (index > 0) {
+            sourceDiv.appendChild(document.createTextNode(', '));
+        }
+
+        const labelBase = doc.fileName || 'Source Document';
+        const label = doc.lectureName ? `${labelBase} (${doc.lectureName})` : labelBase;
+        const link = document.createElement('a');
+        link.href = buildSourceDownloadUrl(doc.documentId, courseId);
+        link.textContent = label;
+        link.title = 'Download source document';
+        sourceDiv.appendChild(link);
+    });
+}
+
 /**
  * Global function to add a message to the chat
  * @param {string} content - The message content
@@ -1195,12 +1240,7 @@ function addMessage(content, sender, withSource = false, skipAutoSave = false, s
         const sourceDiv = document.createElement('div');
         sourceDiv.classList.add('message-source');
 
-        // Use actual source attribution if available, otherwise show TBD
-        if (sourceAttribution && sourceAttribution.description) {
-            sourceDiv.innerHTML = `Source: ${sourceAttribution.description}`;
-        } else {
-            sourceDiv.innerHTML = 'Source: TBD';
-        }
+        renderSourceAttribution(sourceDiv, sourceAttribution);
 
         footerDiv.appendChild(sourceDiv);
     }
@@ -3250,18 +3290,15 @@ async function getCurrentCourseId() {
             return courses[0].courseId;
         } else if (courses.length > 1) {
             // Multiple courses available - don't auto-select, let user choose
-
-            throw new Error('Multiple courses available - user selection required');
+            return null;
         }
 
-        // Fallback to a default course ID if no courses are available
-
-        return 'default-course-id';
+        // No courses available
+        return null;
 
     } catch (error) {
         console.error('Error fetching course ID:', error);
-        // Fallback to a default course ID if API fails
-        return 'default-course-id';
+        return null;
     }
 }
 

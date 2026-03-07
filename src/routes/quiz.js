@@ -4,6 +4,7 @@
  */
 
 const express = require('express');
+const path = require('path');
 const router = express.Router();
 const CourseModel = require('../models/Course');
 const QuizAttempt = require('../models/QuizAttempt');
@@ -13,6 +14,52 @@ const prompts = require('../services/prompts');
 const profanityCleaner = require('profanity-cleaner');
 
 router.use(express.json());
+
+function inferExtensionFromMimeType(mimeType) {
+    switch ((mimeType || '').toLowerCase()) {
+        case 'application/pdf':
+            return '.pdf';
+        case 'text/markdown':
+            return '.md';
+        case 'application/msword':
+            return '.doc';
+        case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+            return '.docx';
+        case 'application/rtf':
+            return '.rtf';
+        case 'text/plain':
+            return '.txt';
+        default:
+            return '';
+    }
+}
+
+function resolveDownloadFilename(document) {
+    const fallbackName = `quiz-material-${document.documentId || Date.now()}`;
+    const rawOriginal = (document.originalName || '').trim();
+    const rawFile = (document.filename || '').trim();
+    const preferredName = rawOriginal || rawFile || fallbackName;
+    let safeName = path.basename(preferredName).replace(/[\r\n]/g, '');
+
+    if (!path.extname(safeName)) {
+        if (rawFile && path.extname(rawFile)) {
+            safeName = path.basename(rawFile).replace(/[\r\n]/g, '');
+        } else {
+            safeName += inferExtensionFromMimeType(document.mimeType);
+        }
+    }
+
+    return safeName || `${fallbackName}.txt`;
+}
+
+function setAttachmentHeaders(res, filename) {
+    const encodedName = encodeURIComponent(filename);
+    const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+    res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedName}`
+    );
+}
 
 /**
  * GET /api/quiz/status
@@ -315,11 +362,29 @@ router.get('/materials/:documentId/download', async (req, res) => {
         }
 
         const document = await DocumentModel.getDocumentById(db, documentId);
-        if (!document) {
+        if (!document || document.courseId !== courseId) {
             return res.status(404).json({ success: false, message: 'Document not found' });
         }
 
-        res.json({ success: true, data: document });
+        const downloadFilename = resolveDownloadFilename(document);
+        setAttachmentHeaders(res, downloadFilename);
+
+        if (document.contentType === 'file' && document.fileData) {
+            const payload = Buffer.isBuffer(document.fileData)
+                ? document.fileData
+                : (document.fileData.buffer ? Buffer.from(document.fileData.buffer) : null);
+
+            if (!payload) {
+                return res.status(500).json({ success: false, message: 'Stored file data is invalid' });
+            }
+
+            res.setHeader('Content-Type', document.mimeType || 'application/octet-stream');
+            return res.send(payload);
+        }
+
+        const textContent = typeof document.content === 'string' ? document.content : '';
+        res.setHeader('Content-Type', `${document.mimeType || 'text/plain'}; charset=utf-8`);
+        return res.send(textContent);
     } catch (error) {
         console.error('Error downloading quiz material:', error);
         res.status(500).json({ success: false, message: 'Internal server error' });
