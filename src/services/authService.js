@@ -59,33 +59,6 @@ class AuthService {
     }
 
     /**
-     * Authenticate user with username and password
-     * @param {string} username - Username or email
-     * @param {string} password - Plain text password
-     * @returns {Promise<Object>} Authentication result
-     */
-    async loginUser(username, password) {
-        try {
-            if (!username || !password) {
-                return {
-                    success: false,
-                    error: 'Username and password are required'
-                };
-            }
-
-            const result = await User.authenticateUser(this.db, username, password);
-            return result;
-
-        } catch (error) {
-            console.error('Error in loginUser:', error);
-            return {
-                success: false,
-                error: 'Login failed. Please try again.'
-            };
-        }
-    }
-
-    /**
      * Get user by ID
      * @param {string} userId - User identifier
      * @returns {Promise<Object>} User object or null
@@ -126,31 +99,6 @@ class AuthService {
             return {
                 success: false,
                 error: 'Failed to update preferences'
-            };
-        }
-    }
-
-    /**
-     * Create or get user for SAML authentication (future implementation)
-     * @param {Object} samlData - SAML authentication data
-     * @returns {Promise<Object>} User result
-     */
-    async handleSAMLUser(samlData) {
-        try {
-            if (!samlData.samlId || !samlData.email) {
-                return {
-                    success: false,
-                    error: 'SAML data is incomplete'
-                };
-            }
-
-            return await User.createOrGetSAMLUser(this.db, samlData);
-
-        } catch (error) {
-            console.error('Error in handleSAMLUser:', error);
-            return {
-                success: false,
-                error: 'SAML authentication failed'
             };
         }
     }

@@ -1899,28 +1899,6 @@ function getCurrentChatData() {
 }
 
 /**
- * Update the last activity timestamp in the current chat data
- * This tracks when the last message was sent or received
- */
-function updateLastActivityTimestamp() {
-    try {
-        const chatData = getCurrentChatData();
-        if (chatData) {
-            chatData.lastActivityTimestamp = new Date().toISOString();
-
-            // Save the updated data back to localStorage
-            const studentId = getCurrentStudentId();
-            const autoSaveKey = `biocbot_current_chat_${studentId}`;
-            localStorage.setItem(autoSaveKey, JSON.stringify(chatData));
-
-
-        }
-    } catch (error) {
-        console.error('Error updating last activity timestamp:', error);
-    }
-}
-
-/**
  * Load the current session data into the chat interface
  * This is used for auto-continue to restore the session without creating a new one
  */
@@ -3323,16 +3301,6 @@ function generateQuestionId(messageText) {
     const encodedText = encodeURIComponent(messageText.substring(0, 20));
     const hash = encodedText.replace(/[^a-zA-Z0-9]/g, '').substring(0, 10);
     return `bot_response_${timestamp}_${hash}`;
-}
-
-/**
- * Get auth token (placeholder)
- * @returns {string} Auth token
- */
-function getAuthToken() {
-    // This would typically come from localStorage or sessionStorage
-    // For now, return a placeholder
-    return 'placeholder-token';
 }
 
 // Close flag menus when clicking outside
@@ -5729,23 +5697,6 @@ function getChatById(chatId) {
 }
 
 /**
- * Delete a chat from history
- * @param {string} chatId - The chat ID to delete
- * @returns {boolean} True if successful
- */
-function deleteChatFromHistory(chatId) {
-    try {
-        const history = getChatHistory();
-        const filteredHistory = history.filter(chat => chat.id !== chatId);
-        localStorage.setItem('biocbot_chat_history', JSON.stringify(filteredHistory));
-        return true;
-    } catch (error) {
-        console.error('Error deleting chat from history:', error);
-        return false;
-    }
-}
-
-/**
  * Fetch current struggle state from backend
  * @returns {Promise<Object>} The struggle state object
  */
@@ -6068,49 +6019,6 @@ function loadChatData(chatData) {
     }
 }
 
-/**
- * Format date for display in history
- * @param {string} dateString - ISO date string
- * @returns {string} Formatted date
- */
-function formatHistoryDate(dateString) {
-    try {
-        const date = new Date(dateString);
-        const now = new Date();
-        const diffMs = now - date;
-        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-        if (diffDays === 0) {
-            return 'Today, ' + date.toLocaleTimeString('en-US', {
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: true
-            });
-        } else if (diffDays === 1) {
-            return 'Yesterday, ' + date.toLocaleTimeString('en-US', {
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: true
-            });
-        } else if (diffDays < 7) {
-            return date.toLocaleDateString('en-US', {
-                weekday: 'short',
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: true
-            });
-        } else {
-            return date.toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric'
-            });
-        }
-    } catch (error) {
-        console.error('Error formatting date:', error);
-        return 'Unknown date';
-    }
-}
 
 /**
  * Check for chat data to load from history
@@ -6150,93 +6058,6 @@ async function checkForChatDataToLoad() {
     } catch (error) {
         console.error('Error checking for chat data to load:', error);
     }
-}
-
-/**
- * Test function to add sample chat data to history
- * This can be called from the browser console for testing
- */
-function addSampleChatData() {
-    const sampleChatData = {
-        metadata: {
-            exportDate: new Date().toISOString(),
-            courseId: 'BIOC202-test',
-            courseName: 'BIOC 202',
-            studentId: 'test-student-123',
-            studentName: 'Test Student',
-            unitName: 'Unit 1',
-            currentMode: 'tutor',
-            totalMessages: 4,
-            version: '1.0'
-        },
-        messages: [
-            {
-                index: 0,
-                type: 'bot',
-                timestamp: new Date(Date.now() - 3600000).toISOString(),
-                displayTimestamp: '1 hour ago',
-                content: 'Hello! I\'m BiocBot, your AI study assistant for BIOC 202. How can I help you today?',
-                messageType: 'regular-chat',
-                isCalibrationQuestion: false,
-                isModeResult: false,
-                isAssessmentStart: false,
-                hasFlagButton: true
-            },
-            {
-                index: 1,
-                type: 'user',
-                timestamp: new Date(Date.now() - 3500000).toISOString(),
-                displayTimestamp: '1 hour ago',
-                content: 'Can you explain protein folding and what determines the final 3D structure?',
-                messageType: 'regular-chat',
-                isCalibrationQuestion: false,
-                isModeResult: false,
-                isAssessmentStart: false
-            },
-            {
-                index: 2,
-                type: 'bot',
-                timestamp: new Date(Date.now() - 3400000).toISOString(),
-                displayTimestamp: '1 hour ago',
-                content: 'Protein folding is determined by several factors:\n\n1. **Primary structure:** The sequence of amino acids forms the backbone.\n2. **Hydrogen bonding:** Creates secondary structures like alpha helices and beta sheets.\n3. **Hydrophobic interactions:** Non-polar amino acids cluster in the center, away from water.\n4. **Ionic interactions:** Charged amino acids form salt bridges.\n5. **Disulfide bridges:** Covalent bonds between cysteine residues stabilize the structure.\n\nThe final 3D structure represents the most energetically favorable conformation.',
-                messageType: 'regular-chat',
-                isCalibrationQuestion: false,
-                isModeResult: false,
-                isAssessmentStart: false,
-                hasFlagButton: true
-            },
-            {
-                index: 3,
-                type: 'user',
-                timestamp: new Date(Date.now() - 3300000).toISOString(),
-                displayTimestamp: '1 hour ago',
-                content: 'What happens if there\'s a mutation in the amino acid sequence?',
-                messageType: 'regular-chat',
-                isCalibrationQuestion: false,
-                isModeResult: false,
-                isAssessmentStart: false
-            }
-        ],
-        practiceTests: {
-            questions: [],
-            totalQuestions: 0,
-            passThreshold: 2,
-            currentQuestionIndex: 0
-        },
-        studentAnswers: {
-            answers: [],
-            totalAnswers: 0,
-            answersProvided: 0
-        },
-        sessionInfo: {
-            startTime: new Date(Date.now() - 3600000).toISOString(),
-            endTime: new Date().toISOString(),
-            duration: '1h 0m 0s'
-        }
-    };
-
-    saveChatToHistory(sampleChatData);
-
 }
 
 /**

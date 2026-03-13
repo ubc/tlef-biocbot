@@ -55,31 +55,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         });
     }
-    
-    // Test if AI button exists
-    const aiButton = document.getElementById('ai-generate-btn');
-    console.log(`🔍 [DOM_LOADED] AI button found: ${!!aiButton}`);
-    if (aiButton) {
-        console.log(`🔍 [DOM_LOADED] AI button properties:`, {
-            display: aiButton.style.display,
-            disabled: aiButton.disabled,
-            className: aiButton.className,
-            textContent: aiButton.textContent
-        });
-        
-        // Test if button is clickable
-        aiButton.addEventListener('click', function() {
-            console.log('🔍 [TEST] AI button clicked successfully!');
-        });
-        
-        // Test button visibility
-        console.log(`🔍 [TEST] AI button computed styles:`, {
-            display: window.getComputedStyle(aiButton).display,
-            visibility: window.getComputedStyle(aiButton).visibility,
-            opacity: window.getComputedStyle(aiButton).opacity
-        });
-    }
-    
     const uploadDropArea = document.getElementById('upload-drop-area');
     const fileUpload = document.getElementById('file-upload');
     const documentSearch = document.getElementById('document-search');
@@ -2117,16 +2092,6 @@ function startPublishStatusPolling() {
     console.log('📊 [POLLING] Started publish status polling (every 10 seconds)');
 }
 
-/**
- * Stop polling for publish status changes
- */
-function stopPublishStatusPolling() {
-    if (publishStatusPollingInterval) {
-        clearInterval(publishStatusPollingInterval);
-        publishStatusPollingInterval = null;
-        console.log('📊 [POLLING] Stopped publish status polling');
-    }
-}
 
 /**
  * Load the saved learning objectives for all lectures from the database
@@ -3545,29 +3510,6 @@ async function confirmCourseMaterials(week) {
             showNotification(`Error confirming course materials: ${error.message}`, 'error');
         }
     }
-}
-
-
-
-
-
-/**
- * Helper function to find elements containing specific text
- * @param {string} selector - CSS selector for elements to search within
- * @param {string} text - Text to search for
- * @param {boolean} caseSensitive - Whether the search should be case sensitive
- * @returns {Array} - Array of matching elements
- */
-function findElementsContainingText(selector, text, caseSensitive = false) {
-    const elements = Array.from(document.querySelectorAll(selector));
-    return elements.filter(element => {
-        const elementText = element.textContent;
-        if (caseSensitive) {
-            return elementText.includes(text);
-        } else {
-            return elementText.toUpperCase().includes(text.toUpperCase());
-        }
-    });
 }
 
 // Initialize sections when DOM is loaded
@@ -5134,45 +5076,6 @@ function initializeUnitEventListeners() {
 }
 
 /**
- * Update file status display for uploaded files
- */
-function updateFileStatus(contentType, unitName, status, fileName) {
-    // Find the file item for this content type and unit
-    const fileItems = document.querySelectorAll('.file-item');
-    
-    fileItems.forEach(item => {
-        const itemTitle = item.querySelector('h3');
-        if (itemTitle) {
-            const isLectureNotes = contentType === 'lecture-notes' && itemTitle.textContent.includes('Lecture Notes');
-            const isPracticeQuestions = contentType === 'practice-questions' && itemTitle.textContent.includes('Practice Questions');
-            
-            // Check if this item belongs to the specified unit
-            const isCorrectUnit = itemTitle.textContent.includes(unitName);
-            
-            if ((isLectureNotes || isPracticeQuestions) && isCorrectUnit) {
-                const statusText = item.querySelector('.status-text');
-                if (statusText) {
-                    statusText.textContent = status === 'uploaded' ? 'Uploaded' : 'Not Uploaded';
-                    statusText.className = status === 'uploaded' ? 'status-text uploaded' : 'status-text';
-                }
-                
-                // Update the file info
-                const fileInfo = item.querySelector('.file-info p');
-                if (fileInfo && status === 'uploaded') {
-                    fileInfo.textContent = `File: ${fileName}`;
-                    fileInfo.className = 'file-info uploaded';
-                }
-            }
-        }
-    });
-}
-
-/**
- * Add additional material to the display
- */
- 
-
-/**
  * Show document content in a modal
  * @param {Object} documentData - Document object with content and metadata
  */
@@ -5544,41 +5447,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
 });
-
-/**
- * Show a notification to the user
- * @param {string} message - The message to display
- */
-function showNotification(message, type = 'info') {
-    // Check if notification container exists, if not create it
-    let notificationContainer = document.querySelector('.notification-container');
-    if (!notificationContainer) {
-        notificationContainer = document.createElement('div');
-        notificationContainer.classList.add('notification-container');
-        document.body.appendChild(notificationContainer);
-    }
-    
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.classList.add('notification', type);
-    notification.textContent = message;
-    
-    // Add close button
-    const closeBtn = document.createElement('button');
-    closeBtn.classList.add('notification-close');
-    closeBtn.innerHTML = '&times;';
-    closeBtn.addEventListener('click', () => {
-        notification.remove();
-    });
-    
-    notification.appendChild(closeBtn);
-    notificationContainer.appendChild(notification);
-    
-    // Auto remove after 5 seconds
-    setTimeout(() => {
-        notification.remove();
-    }, 5000);
-}
 /**
  * Open the regenerate modal with current question content
  */
