@@ -564,4 +564,54 @@ router.post('/quiz', async (req, res) => {
     }
 });
 
+/**
+ * GET /api/settings/anonymize-students
+ * Get the anonymize students setting for the current instructor and course
+ */
+router.get('/anonymize-students', async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ success: false, error: 'Not authenticated' });
+        }
+        const courseId = req.query.courseId;
+        if (!courseId) {
+            return res.status(400).json({ success: false, error: 'courseId is required' });
+        }
+        const db = req.app.locals.db;
+        const CourseModel = require('../models/Course');
+        const result = await CourseModel.getAnonymizeStudents(db, courseId, req.user.userId);
+        res.json({ success: true, enabled: result.enabled || false });
+    } catch (error) {
+        console.error('Error fetching anonymize students setting:', error);
+        res.status(500).json({ success: false, error: 'Failed to fetch setting' });
+    }
+});
+
+/**
+ * POST /api/settings/anonymize-students
+ * Update the anonymize students setting for the current instructor and course
+ */
+router.post('/anonymize-students', async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ success: false, error: 'Not authenticated' });
+        }
+        const { courseId, enabled } = req.body;
+        if (!courseId) {
+            return res.status(400).json({ success: false, error: 'courseId is required' });
+        }
+        const db = req.app.locals.db;
+        const CourseModel = require('../models/Course');
+        const result = await CourseModel.updateAnonymizeStudents(db, courseId, req.user.userId, !!enabled);
+        if (result.success) {
+            res.json({ success: true, message: 'Anonymize students setting saved' });
+        } else {
+            res.status(400).json({ success: false, message: result.error || 'Failed to save setting' });
+        }
+    } catch (error) {
+        console.error('Error saving anonymize students setting:', error);
+        res.status(500).json({ success: false, error: 'Failed to save setting' });
+    }
+});
+
 module.exports = router;

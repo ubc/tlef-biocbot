@@ -18,6 +18,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Load quiz practice settings
             await loadQuizSettings();
 
+            // Load privacy settings (anonymize students)
+            await loadAnonymizeStudentsSetting();
+
             // If user has permission, load global settings (login restriction)
             // and question generation prompts
             if (canManageDB) {
@@ -174,6 +177,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    async function loadAnonymizeStudentsSetting() {
+        try {
+            const courseId = await getCurrentCourseId();
+            if (!courseId) return;
+            const response = await fetch(`/api/settings/anonymize-students?courseId=${courseId}`);
+            const result = await response.json();
+            if (result.success) {
+                const toggle = document.getElementById('anonymize-students-toggle');
+                if (toggle) toggle.checked = !!result.enabled;
+            }
+        } catch (error) {
+            console.error('Error loading anonymize students setting:', error);
+        }
+    }
+
     // Handle save button click
     if (saveSettingsBtn) {
         saveSettingsBtn.addEventListener('click', async () => {
@@ -232,6 +250,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                         allowLectureMaterialAccess: materialAccess === true,
                         allowSourceAttributionDownloads: sourceAttributionDownloads === true
                     })
+                });
+
+                // Save anonymize students setting
+                const anonymizeStudents = document.getElementById('anonymize-students-toggle')?.checked;
+                await fetch('/api/settings/anonymize-students', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ courseId, enabled: anonymizeStudents === true })
                 });
 
                 // Save question generation prompts if section is visible (privileged users only)

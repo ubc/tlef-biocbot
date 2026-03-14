@@ -3,6 +3,8 @@
  * Handles instructor dashboard functionality and interactions
  */
 
+let anonymizeStudentsEnabled = false;
+
 document.addEventListener('DOMContentLoaded', function() {
     // Wait for auth to be ready before initializing
     // This ensures getCurrentInstructorId() is available
@@ -342,7 +344,8 @@ function renderStruggleTopics(topicMap) {
             // But to be safe, we can use a local helper or rely on the one in scope. 
             // Since this function is at the bottom, escapeHTML (defined above or below) should be visible if it's a function declaration.
             // In the previous view, escapeHTML was a function declaration.
-            return `<span title="${title}" style="display: inline-block; margin-right: 8px; white-space: nowrap;">${indicator} ${escapeHtml(s.name)}</span>`;
+            const displayName = anonymizeStudentsEnabled ? 'Student' : escapeHtml(s.name);
+            return `<span title="${title}" style="display: inline-block; margin-right: 8px; white-space: nowrap;">${indicator} ${displayName}</span>`;
         }).join('');
         
         const moreText = remaining > 0 ? `<span style="color: #666; font-size: 0.9em;">+ ${remaining} more</span>` : '';
@@ -884,35 +887,41 @@ function renderLiveStruggleTable() {
         dataToDisplay = struggleActivityData.filter(item => item.state === 'Active');
     }
     
+    // Hide/show Name column header based on anonymize setting
+    const nameHeader = document.getElementById('struggle-name-th');
+    if (nameHeader) nameHeader.style.display = anonymizeStudentsEnabled ? 'none' : '';
+
+    const colSpan = anonymizeStudentsEnabled ? 3 : 4;
+
     if (dataToDisplay.length === 0) {
         tbody.innerHTML = `
             <tr class="no-data-row">
-                <td colspan="4" style="text-align: center; color: #666; padding: 20px;">
+                <td colspan="${colSpan}" style="text-align: center; color: #666; padding: 20px;">
                     ${filterActive ? 'No active struggle activity.' : 'No struggle activity yet. Activity will appear here as students interact with topics.'}
                 </td>
             </tr>
         `;
         return;
     }
-    
+
     // Build table rows
     let html = '';
     dataToDisplay.forEach(item => {
         const timestamp = formatTimestampPST(item.timestamp);
-        const stateBadge = item.state === 'Active' 
+        const stateBadge = item.state === 'Active'
             ? '<span class="state-badge active">Active</span>'
             : '<span class="state-badge inactive">Inactive</span>';
-        
+
         html += `
             <tr>
                 <td>${timestamp}</td>
-                <td>${escapeHtml(item.studentName)}</td>
+                ${anonymizeStudentsEnabled ? '' : `<td>${escapeHtml(item.studentName)}</td>`}
                 <td>${escapeHtml(capitalizeFirst(item.topic))}</td>
                 <td>${stateBadge}</td>
             </tr>
         `;
     });
-    
+
     tbody.innerHTML = html;
 }
 
@@ -967,15 +976,21 @@ function downloadStruggleActivityCSV() {
     }
     
     // Build CSV
-    let csv = 'Time (PST),Name,Topic,Status\n';
-    
+    let csv = anonymizeStudentsEnabled
+        ? 'Time (PST),Topic,Status\n'
+        : 'Time (PST),Name,Topic,Status\n';
+
     dataToExport.forEach(item => {
         const timestamp = formatTimestampPST(item.timestamp);
-        const name = item.studentName.replace(/"/g, '""'); // Escape quotes
         const topic = capitalizeFirst(item.topic).replace(/"/g, '""');
         const status = item.state;
-        
-        csv += `"${timestamp}","${name}","${topic}","${status}"\n`;
+
+        if (anonymizeStudentsEnabled) {
+            csv += `"${timestamp}","${topic}","${status}"\n`;
+        } else {
+            const name = item.studentName.replace(/"/g, '""');
+            csv += `"${timestamp}","${name}","${topic}","${status}"\n`;
+        }
     });
     
     // Create download link
@@ -1485,6 +1500,15 @@ async function setSelectedCourse(courseId, courseName) {
         courseIdCache = null;
     }
     
+    // Fetch anonymize students setting for this course
+    try {
+        const anonRes = await fetch(`/api/settings/anonymize-students?courseId=${courseId}`);
+        const anonData = await anonRes.json();
+        anonymizeStudentsEnabled = anonData.success && anonData.enabled;
+    } catch (e) {
+        anonymizeStudentsEnabled = false;
+    }
+
     // Reload page data with new course
     await loadStatistics();
     await loadFlaggedContent();

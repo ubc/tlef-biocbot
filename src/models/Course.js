@@ -1459,6 +1459,55 @@ async function updateQuizSettings(db, courseId, settings, instructorId) {
     };
 }
 
+/**
+ * Get anonymize students setting for a specific instructor and course
+ * @param {Object} db - MongoDB database instance
+ * @param {string} courseId - Course identifier
+ * @param {string} instructorId - Instructor user identifier
+ * @returns {Promise<Object>} { success: true, enabled: Boolean }
+ */
+async function getAnonymizeStudents(db, courseId, instructorId) {
+    const collection = getCoursesCollection(db);
+    const course = await collection.findOne({ courseId });
+    if (!course) {
+        return { success: false, error: 'Course not found' };
+    }
+    const enabled = course.anonymizeStudents && course.anonymizeStudents[instructorId]
+        ? course.anonymizeStudents[instructorId].enabled === true
+        : false;
+    return { success: true, enabled };
+}
+
+/**
+ * Update anonymize students setting for a specific instructor and course
+ * @param {Object} db - MongoDB database instance
+ * @param {string} courseId - Course identifier
+ * @param {string} instructorId - Instructor user identifier
+ * @param {boolean} enabled - Whether to anonymize students
+ * @returns {Promise<Object>} Result of the update
+ */
+async function updateAnonymizeStudents(db, courseId, instructorId, enabled) {
+    const collection = getCoursesCollection(db);
+    const now = new Date();
+
+    const result = await collection.updateOne(
+        { courseId },
+        {
+            $set: {
+                [`anonymizeStudents.${instructorId}.enabled`]: !!enabled,
+                [`anonymizeStudents.${instructorId}.updatedAt`]: now,
+                updatedAt: now
+            }
+        }
+    );
+
+    if (result.matchedCount > 0) {
+        return { success: true };
+    } else {
+        return { success: false, error: 'Course not found' };
+    }
+}
+
 module.exports = {
     getCoursesCollection,
     ensureCourseCodes,
@@ -1494,5 +1543,7 @@ module.exports = {
     setApprovedStruggleTopics,
     normalizeTopicList,
     getQuizSettings,
-    updateQuizSettings
+    updateQuizSettings,
+    getAnonymizeStudents,
+    updateAnonymizeStudents
 };

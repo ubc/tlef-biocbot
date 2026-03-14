@@ -44,7 +44,7 @@ function adjustNavigationForRole() {
         if (!currentUser) return;
         // Hide Student Hub link from TAs
         if (currentUser.role === 'ta') {
-            const studentHubNav = document.getElementById('instructor-student-hub-nav');
+            const studentHubNav = document.getElementById('nav-student-hub-li');
             if (studentHubNav && studentHubNav.style) {
                 studentHubNav.style.display = 'none';
             }
@@ -52,6 +52,10 @@ function adjustNavigationForRole() {
         // Check quiz visibility for students
         if (currentUser.role === 'student') {
             checkQuizNavVisibility();
+        }
+        // Check anonymize students setting for instructors
+        if (currentUser.role === 'instructor') {
+            checkAnonymizeStudentsNav();
         }
     } catch (e) {
         console.warn('adjustNavigationForRole failed:', e);
@@ -84,6 +88,28 @@ async function checkQuizNavVisibility() {
     } catch (e) {
         // On error, hide quiz nav
         quizNavItem.style.display = 'none';
+    }
+}
+
+/**
+ * Check if anonymize students is enabled and hide Student Hub nav if so
+ */
+async function checkAnonymizeStudentsNav() {
+    const navItem = document.getElementById('nav-student-hub-li');
+    if (!navItem) return;
+    try {
+        let courseId = getCurrentCourseId();
+        if (courseId && typeof courseId.then === 'function') {
+            courseId = await courseId;
+        }
+        if (!courseId) return;
+        const response = await fetch(`/api/settings/anonymize-students?courseId=${courseId}`);
+        const data = await response.json();
+        if (data.success && data.enabled) {
+            navItem.style.display = 'none';
+        }
+    } catch (e) {
+        // On error, leave nav visible (safe default)
     }
 }
 

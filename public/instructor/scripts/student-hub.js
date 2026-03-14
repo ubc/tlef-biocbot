@@ -10,6 +10,22 @@ const dirtyEnrollment = new Map(); // studentId -> boolean (enrolled)
 
 document.addEventListener('DOMContentLoaded', async function() {
     await waitForAuth();
+
+    // Check if anonymize students is enabled - redirect away if so
+    try {
+        const courseId = getCurrentCourseId();
+        if (courseId) {
+            const anonRes = await fetch(`/api/settings/anonymize-students?courseId=${courseId}`);
+            const anonData = await anonRes.json();
+            if (anonData.success && anonData.enabled) {
+                window.location.href = '/instructor/home';
+                return;
+            }
+        }
+    } catch (e) {
+        // On error, continue loading normally
+    }
+
     initializeStudentHub();
     await loadInstructorCourses();
 });
