@@ -467,35 +467,6 @@ async function getUsersByRole(db, role) {
     return users;
 }
 
-/**
- * Deactivate user account
- * @param {Object} db - MongoDB database instance
- * @param {string} userId - User identifier
- * @returns {Promise<Object>} Deactivation result
- */
-async function deactivateUser(db, userId) {
-    const collection = getUsersCollection(db);
-    
-    const now = new Date();
-    
-    const result = await collection.updateOne(
-        { userId },
-        {
-            $set: {
-                isActive: false,
-                updatedAt: now
-            }
-        }
-    );
-    
-    if (result.modifiedCount > 0) {
-        console.log(`User deactivated: ${userId}`);
-        return { success: true, modifiedCount: result.modifiedCount };
-    } else {
-        return { success: false, error: 'User not found' };
-    }
-}
-
 module.exports = {
     getUsersCollection,
     createUser,
@@ -505,7 +476,6 @@ module.exports = {
     updateUserPreferences,
     createOrGetSAMLUser,
     getUsersByRole,
-    deactivateUser,
     updateUserStruggleState,
     resetUserStruggleState
 };

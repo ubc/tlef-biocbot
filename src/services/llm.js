@@ -118,69 +118,6 @@ class LLMService {
     }
 
     /**
-     * Create a conversation for multi-turn chat
-     * @returns {Object} Conversation object
-     */
-    async createConversation() {
-        try {
-            // Initialize LLM service on first use
-            if (!this.isInitialized) {
-                console.log(`🔄 Initializing LLM service for first use...`);
-                await this._performInitialization();
-            }
-
-            const conversation = this.llm.createConversation();
-
-            // Set initial system prompt for BiocBot
-            conversation.addMessage('system', this.getSystemPrompt());
-
-            console.log('💬 Conversation created successfully');
-            return conversation;
-
-        } catch (error) {
-            console.error('❌ Error creating conversation:', error.message);
-            throw error;
-        }
-    }
-
-    /**
-     * Send a message in conversation context
-     * @param {Object} conversation - The conversation object
-     * @param {string} message - The user message
-     * @param {Object} options - Additional options
-     * @returns {Promise<Object>} LLM response
-     */
-    async sendConversationMessage(conversation, message, options = {}) {
-        try {
-            // Initialize LLM service on first use
-            if (!this.isInitialized) {
-                console.log(`🔄 Initializing LLM service for first use...`);
-                await this._performInitialization();
-            }
-
-            // Add user message to conversation
-            conversation.addMessage('user', message);
-
-            // Set default options for BiocBot - provider-aware
-            const defaultOptions = {
-                temperature: 0.1,
-                ...this._getProviderSpecificOptions(),
-                ...options
-            };
-
-            // Send message and get response
-            const response = await conversation.send(defaultOptions);
-
-            console.log(`💬 Conversation response received (${response.content.length} characters)`);
-            return response;
-
-        } catch (error) {
-            console.error('❌ Error in conversation:', error.message);
-            throw error;
-        }
-    }
-
-    /**
      * Get available models from the current provider
      * @returns {Promise<Array>} List of available models
      */

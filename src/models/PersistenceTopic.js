@@ -53,38 +53,6 @@ async function incrementStudentCount(db, courseId, topic, userId) {
             includeResultMetadata: true 
         }
     );
-
-    // Calculate count from array length
-    // We need to update the studentCount field based on the array size
-    // MongoDB doesn't support updating a field based on array size in the same operation easily without aggregation pipeline updates (avail in 4.2+)
-    // But since we want to be safe, let's do a second update or use pipeline if version allows.
-    // Simpler approach: 
-    // Just Use $addToSet. 
-    
-    // Actually, to keep 'studentCount' in sync, we can use an aggregation pipeline in the update (MongoDB 4.2+)
-    // [
-    //   { $set: { studentIds: { $setUnion: ["$studentIds", [userId]] } } },
-    //   { $set: { studentCount: { $size: "$studentIds" }, lastUpdated: now } }
-    // ]
-    // However, native `update` with pipeline might be complex for 'upsert'.
-    
-    // Alternative:
-    // 1. $addToSet userId
-    // 2. Then $set studentCount = studentIds.length (requires fetching)
-    // OR
-    // Just store studentIds and calculate count on read?
-    // If studentIds array gets HUGE, this is bad. But for a class of <1000, it's fine.
-    // Let's store `studentCount` for easier sorting/querying without unwinding.
-    
-    // Let's stick to the atomic operation.
-    // If we just use $addToSet, we don't know if we modified it to increment a counter.
-    // We can just inspect the result. If `updatedExisting` is true and `modifiedCount` > 0 (wait, findOneAndUpdate returns different structure).
-    
-    // Let's keep it simple:
-    // We won't maintain a separate `studentCount` field on write if it's tricky. 
-    // We can just rely on `studentIds` size. 
-    // BUT, for the dashboard, we want to sort by count. 
-    // Let's update the count after the upsert.
     
     if (result.value) {
         const doc = result.value;

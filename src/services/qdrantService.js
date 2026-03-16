@@ -784,23 +784,6 @@ class QdrantService {
         };
     }
 
-    /**
-     * Test the LLM service connection through the embeddings
-     * @returns {Promise<boolean>} True if connection is working
-     */
-    async testLLMConnection() {
-        try {
-            if (!this.embeddings) {
-                await this.initialize();
-            }
-            
-            const testEmbedding = await this.embeddings.embed('connection test');
-            return Array.isArray(testEmbedding) && testEmbedding.length > 0;
-        } catch (error) {
-            console.error('❌ LLM connection test failed:', error.message);
-            return false;
-        }
-    }
 }
 
 module.exports = QdrantService;
