@@ -1947,10 +1947,13 @@ async function handleStruggleResetQuestion(topic) {
 function renderStruggleResetQuestion(questionData, topic) {
     const { practiceId, questionType, question, options } = questionData;
 
+    const displayTopic = topic.charAt(0).toUpperCase() + topic.slice(1);
+
+    // Add a conversational lead-in as a regular bot message first
+    addMessage(`Awesome! Before we move on, let's test your understanding of ${displayTopic}:`, 'bot', false, false, null);
+
     let html = `<div class="practice-question-container struggle-gate-question" data-practice-id="${practiceId}" data-question-type="${questionType}" data-struggle-topic="${topic}">`;
-    html += `<div class="practice-question-header" style="color:#dc3545;">Directive Mode Challenge</div>`;
-    html += `<div class="practice-question-text" style="margin-bottom:6px;">${question}</div>`;
-    html += `<div style="font-size:12px;color:#666;margin-bottom:14px;">Answer correctly to turn off Directive Mode for <strong>${topic.charAt(0).toUpperCase() + topic.slice(1)}</strong>.</div>`;
+    html += `<div class="practice-question-text">${question}</div>`;
 
     if (questionType === 'multiple-choice' && options) {
         html += `<div class="practice-options">`;
@@ -2049,7 +2052,6 @@ async function submitStruggleResetAnswer(practiceId) {
         // Build static completed HTML
         const questionText = container.querySelector('.practice-question-text').textContent;
         let completedHtml = `<div class="practice-question-container practice-completed struggle-gate-question">`;
-        completedHtml += `<div class="practice-question-header" style="color:#dc3545;">Directive Mode Challenge</div>`;
         completedHtml += `<div class="practice-question-text">${questionText}</div>`;
 
         if (questionType === 'multiple-choice' || questionType === 'true-false') {
@@ -2081,9 +2083,11 @@ async function submitStruggleResetAnswer(practiceId) {
             </div>`;
         }
 
+        const displayTopic = topic.charAt(0).toUpperCase() + topic.slice(1);
+
         if (correct) {
             // Correct! Reset the struggle state
-            completedHtml += `<div class="practice-feedback practice-feedback-correct" style="display:block;">${feedback}<br><strong>Directive Mode has been turned off for ${topic.charAt(0).toUpperCase() + topic.slice(1)}.</strong></div>`;
+            completedHtml += `<div class="practice-feedback practice-feedback-correct" style="display:block;">${feedback}<br><strong>Great job! Looks like you've got a solid understanding of ${displayTopic}. Let's keep going!</strong></div>`;
             completedHtml += `</div>`;
             container.outerHTML = completedHtml;
 
@@ -2091,7 +2095,7 @@ async function submitStruggleResetAnswer(practiceId) {
             await performStruggleReset(topic, courseId);
         } else {
             // Incorrect — keep in directive mode, encourage them
-            completedHtml += `<div class="practice-feedback practice-feedback-incorrect" style="display:block;">${feedback}<br>Directive Mode remains active. Keep studying and try again when you're ready!</div>`;
+            completedHtml += `<div class="practice-feedback practice-feedback-incorrect" style="display:block;">${feedback}<br>No worries! Let's keep working on ${displayTopic} together. Click "I understand ${displayTopic} now" when you're ready to try again.</div>`;
             completedHtml += `</div>`;
             container.outerHTML = completedHtml;
         }
