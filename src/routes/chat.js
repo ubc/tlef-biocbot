@@ -114,7 +114,7 @@ async function determineSourceAttribution(searchResults, unitName, sourceDownloa
             const fileName = (typeof chunk.fileName === 'string' && chunk.fileName.trim())
                 ? chunk.fileName.trim()
                 : readableType;
-            const dedupeKey = documentId || `${fileName}::${sourceUnit}`;
+            const dedupeKey = `${fileName}::${sourceUnit}`;
             const existing = sourceDocuments.get(dedupeKey);
 
             if (!existing) {
@@ -124,8 +124,16 @@ async function determineSourceAttribution(searchResults, unitName, sourceDownloa
                     lectureName: sourceUnit || unitName || null,
                     maxScore: score
                 });
-            } else if (score > existing.maxScore) {
-                existing.maxScore = score;
+            } else {
+                if (score > existing.maxScore) {
+                    existing.maxScore = score;
+                    // Prefer documentId from highest-scoring chunk (most likely the newest valid upload)
+                    if (documentId) {
+                        existing.documentId = documentId;
+                    }
+                } else if (!existing.documentId && documentId) {
+                    existing.documentId = documentId;
+                }
             }
         });
 
