@@ -876,9 +876,12 @@ ${conversationHistory}`;
             const fr = (extractFinishReason(resp) + '').toLowerCase();
             if (fr.includes('length') || fr.includes('token')) return true;
             if (!content) return false;
-            const tail = content.slice(-60);
-            const endsClean = /([\.\!\?]|\(Unit\s+[^)]+\))\s*$/i.test(tail);
-            return !endsClean && content.length > 300;
+            const tail = content.trim().slice(-60);
+            // Check for clean sentence endings: punctuation, parenthetical unit refs, or emoji
+            const endsClean = /([\.\!\?\)\u2026]|\(Unit\s+[^)]+\))\s*$/i.test(tail);
+            // Only consider truncated if very long AND no clean ending AND finish reason wasn't 'stop'
+            if (fr === 'stop' || fr === 'end_turn') return false;
+            return !endsClean && content.length > 800;
         }
 
         const MAX_CONTINUATIONS = 2;
@@ -1167,6 +1170,164 @@ router.post('/save', async (req, res) => {
             success: false,
             message: 'Internal server error while saving chat session'
         });
+    }
+});
+
+// ─── Practice Question: generate a new question from unit assessment questions ───
+// In-memory store for generated practice questions (keyed by a temp ID)
+// so we never send the correct answer to the client
+const practiceQuestionStore = new Map();
+
+router.post('/practice-question', async (req, res) => {
+    try {
+        const { courseId, unitName, topic } = req.body;
+
+        if (!courseId || !unitName) {
+            return res.status(400).json({ success: false, message: 'courseId and unitName are required.' });
+        }
+
+        const db = req.app.locals.db;
+
+        // Pull assessment questions for this unit
+        const allQuestions = await CourseModel.getAssessmentQuestions(db, courseId, unitName);
+
+        if (!allQuestions || allQuestions.length === 0) {
+            return res.json({
+                success: true,
+                noQuestions: true,
+                message: 'There are no questions to practice right now.'
+            });
+        }
+
+        // Pick up to 6 random questions as seed material
+        const shuffled = [...allQuestions].sort(() => 0.5 - Math.random());
+        const seedQuestions = shuffled.slice(0, 6);
+
+        // Build a prompt for the LLM to generate a NEW question
+        const seedText = seedQuestions.map((q, i) => {
+            let entry = `${i + 1}. [${q.questionType}] ${q.question}`;
+            if (q.options && typeof q.options === 'object') {
+                entry += '\n   Options: ' + Object.entries(q.options).map(([k, v]) => `${k}. ${v}`).join(' | ');
+            }
+            entry += `\n   Answer: ${q.correctAnswer}`;
+            if (q.explanation) entry += `\n   Explanation: ${q.explanation}`;
+            return entry;
+        }).join('\n\n');
+
+        const generationPrompt = prompts.buildPracticeQuestionPrompt(seedText, topic);
+
+        const llmService = req.app.locals.llm;
+
+        const llmResponse = await llmService.sendMessage(generationPrompt, {
+            temperature: 0.7,
+            response_format: { type: "json_object" }
+        });
+
+        // Parse the generated question
+        let generated;
+        try {
+            const jsonStart = llmResponse.content.indexOf('{');
+            const jsonEnd = llmResponse.content.lastIndexOf('}') + 1;
+            if (jsonStart !== -1 && jsonEnd !== 0) {
+                generated = JSON.parse(llmResponse.content.substring(jsonStart, jsonEnd));
+            } else {
+                throw new Error('No JSON found in LLM response');
+            }
+        } catch (parseErr) {
+            console.error('❌ Failed to parse practice question JSON:', parseErr);
+            return res.status(500).json({ success: false, message: 'Failed to generate a practice question. Please try again.' });
+        }
+
+        // Validate required fields
+        if (!generated.questionType || !generated.question || !generated.correctAnswer) {
+            return res.status(500).json({ success: false, message: 'Generated question was incomplete. Please try again.' });
+        }
+
+        // Store correct answer server-side, keyed by a temp ID
+        const practiceId = `pq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        practiceQuestionStore.set(practiceId, {
+            correctAnswer: generated.correctAnswer,
+            explanation: generated.explanation || '',
+            question: generated.question,
+            questionType: generated.questionType,
+            createdAt: Date.now()
+        });
+
+        // Send to client WITHOUT correctAnswer
+        const clientQuestion = {
+            practiceId,
+            questionType: generated.questionType,
+            question: generated.question
+        };
+        if (generated.questionType === 'multiple-choice' && generated.options) {
+            clientQuestion.options = generated.options;
+        }
+
+        res.json({ success: true, data: clientQuestion });
+
+    } catch (error) {
+        console.error('❌ Error generating practice question:', error);
+        res.status(500).json({ success: false, message: 'Failed to generate practice question.' });
+    }
+});
+
+// ─── Check Practice Answer ───
+router.post('/check-practice-answer', async (req, res) => {
+    try {
+        const { practiceId, studentAnswer, studentName } = req.body;
+
+        if (!practiceId || !studentAnswer) {
+            return res.status(400).json({ success: false, message: 'practiceId and studentAnswer are required.' });
+        }
+
+        const stored = practiceQuestionStore.get(practiceId);
+        if (!stored) {
+            return res.status(404).json({ success: false, message: 'Practice question not found or expired. Please generate a new one.' });
+        }
+
+        const { correctAnswer, explanation, question, questionType } = stored;
+
+        if (questionType === 'short-answer') {
+            // Use LLM evaluation for short-answer
+            const llmService = req.app.locals.llm;
+
+            const result = await llmService.evaluateStudentAnswer(
+                question,
+                studentAnswer,
+                correctAnswer,
+                questionType,
+                studentName || 'Student'
+            );
+
+            return res.json({
+                success: true,
+                data: {
+                    correct: result.correct,
+                    feedback: result.feedback,
+                    correctAnswer: correctAnswer,
+                    explanation: explanation
+                }
+            });
+        } else {
+            // MCQ or TF — simple string comparison
+            const correct = studentAnswer.trim().toLowerCase() === correctAnswer.trim().toLowerCase();
+            const feedback = correct
+                ? 'Correct! Well done.'
+                : `Incorrect. The correct answer is ${correctAnswer}.`;
+
+            return res.json({
+                success: true,
+                data: {
+                    correct,
+                    feedback: feedback + (explanation ? ` ${explanation}` : ''),
+                    correctAnswer: correctAnswer
+                }
+            });
+        }
+
+    } catch (error) {
+        console.error('❌ Error checking practice answer:', error);
+        res.status(500).json({ success: false, message: 'Failed to check answer.' });
     }
 });
 

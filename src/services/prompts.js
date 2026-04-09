@@ -544,6 +544,71 @@ ${text}
 `;
 }
 
+/**
+ * Build the prompt for generating a practice question from seed assessment questions.
+ * The question type is randomly selected to ensure variety.
+ * @param {string} seedText - Formatted seed questions with answers
+ * @param {string|null} topic - The detected topic the student is studying
+ * @returns {string} The formatted generation prompt
+ */
+function buildPracticeQuestionPrompt(seedText, topic = null) {
+    const topicHint = topic
+        ? `The student is currently studying the topic: "${topic}". Try to generate a question related to this topic if the seed questions cover it.\n\n`
+        : '';
+
+    // Randomly pick the question type to ensure variety
+    const questionTypes = ['multiple-choice', 'true-false', 'short-answer'];
+    const selectedType = questionTypes[Math.floor(Math.random() * questionTypes.length)];
+
+    let typeSpecificRules = '';
+    let typeSpecificJson = '';
+
+    if (selectedType === 'multiple-choice') {
+        typeSpecificRules = `- Provide exactly 4 options (A, B, C, D) with one correct answer.
+- The "correctAnswer" must be the letter of the correct option (e.g. "C").`;
+        typeSpecificJson = `{
+    "questionType": "multiple-choice",
+    "question": "The question text",
+    "options": { "A": "...", "B": "...", "C": "...", "D": "..." },
+    "correctAnswer": "C",
+    "explanation": "Brief explanation of the correct answer"
+}`;
+    } else if (selectedType === 'true-false') {
+        typeSpecificRules = `- The "correctAnswer" must be exactly "True" or "False".
+- Do NOT include an "options" field.`;
+        typeSpecificJson = `{
+    "questionType": "true-false",
+    "question": "A clear statement that is either true or false",
+    "correctAnswer": "True",
+    "explanation": "Brief explanation of why the statement is true or false"
+}`;
+    } else {
+        typeSpecificRules = `- The "correctAnswer" should be a concise expected answer (1-3 sentences).
+- Do NOT include an "options" field.`;
+        typeSpecificJson = `{
+    "questionType": "short-answer",
+    "question": "The question text",
+    "correctAnswer": "The expected answer text",
+    "explanation": "Brief explanation of what constitutes a correct answer"
+}`;
+    }
+
+    return `You are a biology course question generator. Based on the following sample assessment questions from a unit, generate ONE new **${selectedType}** practice question for the student.
+
+${topicHint}RULES:
+- You MUST generate a **${selectedType}** question. Do not use a different question type.
+${typeSpecificRules}
+- You MAY reuse a question from the samples but with changed numbers, values, or slight rewording.
+- The question should be at a similar difficulty level to the samples.
+- Return ONLY a JSON object, no other text.
+
+JSON format:
+${typeSpecificJson}
+
+SAMPLE QUESTIONS FROM THIS UNIT:
+${seedText}`;
+}
+
 module.exports = {
     BASE_SYSTEM_PROMPT,
     EXPLAIN_SYSTEM_PROMPT,
@@ -555,5 +620,6 @@ module.exports = {
     DEFAULT_PROMPTS,
     DEFAULT_QUESTION_PROMPTS,
     QUESTION_EXTRACTION_SYSTEM_PROMPT,
-    buildQuestionExtractionPrompt
+    buildQuestionExtractionPrompt,
+    buildPracticeQuestionPrompt
 };

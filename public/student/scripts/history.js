@@ -867,10 +867,20 @@ function createPreviewMessage(messageData) {
     const contentDiv = document.createElement('div');
     contentDiv.classList.add('message-content');
     
-    const paragraph = document.createElement('p');
-    // Use innerHTML if content is HTML, otherwise textContent
+    // Use a <div> for HTML content (block elements can't nest inside <p>), otherwise <p>
+    const paragraph = document.createElement(messageData.isHtml ? 'div' : 'p');
     if (messageData.isHtml) {
         paragraph.innerHTML = messageData.content;
+
+        // Sanitize any un-answered practice questions — make them static in history view
+        paragraph.querySelectorAll('.practice-question-container:not(.practice-completed)').forEach(container => {
+            const questionText = container.querySelector('.practice-question-text')?.textContent || '';
+            container.outerHTML = `<div class="practice-question-container practice-completed">
+                <div class="practice-question-header">Practice Question</div>
+                <div class="practice-question-text">${questionText}</div>
+                <div class="practice-feedback practice-feedback-error" style="display:block;">This practice question was not answered during the session.</div>
+            </div>`;
+        });
     } else {
         paragraph.textContent = messageData.content;
     }
