@@ -111,16 +111,14 @@ async function determineSourceAttribution(searchResults, unitName, sourceDownloa
 
             const rawDocumentId = typeof chunk.documentId === 'string' ? chunk.documentId.trim() : '';
             const documentId = rawDocumentId || null;
-            const fileName = (typeof chunk.fileName === 'string' && chunk.fileName.trim())
-                ? chunk.fileName.trim()
-                : readableType;
-            const dedupeKey = `${fileName}::${sourceUnit}`;
+            // Deduplicate by type + unit (not fileName, which is inconsistent across chunks)
+            const dedupeKey = `${readableType}::${sourceUnit}`;
             const existing = sourceDocuments.get(dedupeKey);
 
             if (!existing) {
                 sourceDocuments.set(dedupeKey, {
                     documentId,
-                    fileName,
+                    fileName: readableType,
                     lectureName: sourceUnit || unitName || null,
                     maxScore: score
                 });
