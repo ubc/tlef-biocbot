@@ -1263,9 +1263,6 @@ router.post('/generate-ai', async (req, res) => {
             if (normalizedLearningObjectives.length > 0) {
                 if (regenerate) {
                     formattedLearningObjectives = normalizedLearningObjectives.map((obj, i) => `${i + 1}. ${obj}`).join('\n');
-                    selectedLearningObjective = normalizeLearningObjective(
-                        previousQuestion?.selectedLearningObjective || previousQuestion?.learningObjective
-                    );
                 } else {
                     const randomIndex = Math.floor(Math.random() * normalizedLearningObjectives.length);
                     const selectedObjective = normalizedLearningObjectives[randomIndex];
@@ -1312,6 +1309,30 @@ router.post('/generate-ai', async (req, res) => {
                 
                 console.log(`🤖 AI question generated successfully for ${lectureName}: ${questionType}`);
             }
+
+            if (regenerate && normalizedLearningObjectives.length > 0) {
+                try {
+                    const [relinkedQuestion] = await linkQuestionsToLearningObjectives(
+                        llmService,
+                        normalizedLearningObjectives,
+                        [{
+                            ref: 'regenerated-question',
+                            questionType,
+                            question: generatedQuestion.question,
+                            options: generatedQuestion.options || {},
+                            correctAnswer: generatedQuestion.answer || '',
+                            learningObjective: ''
+                        }],
+                        false
+                    );
+
+                    selectedLearningObjective = normalizeLearningObjective(relinkedQuestion?.learningObjective);
+                    console.log(`🔗 [REGENERATE] Re-linked regenerated question to learning objective: "${selectedLearningObjective || 'unassigned'}"`);
+                } catch (linkError) {
+                    console.error('Error re-linking regenerated question to learning objective:', linkError);
+                    selectedLearningObjective = '';
+                }
+            }
             
             res.json({
                 success: true,
@@ -1324,6 +1345,7 @@ router.post('/generate-ai', async (req, res) => {
                     unitName: lectureName,
                     courseId: courseId,
                     selectedLearningObjective,
+                    wasRegenerated: Boolean(regenerate),
                     aiGenerated: true,
                     timestamp: new Date().toISOString()
                 }

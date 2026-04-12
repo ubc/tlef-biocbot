@@ -4791,12 +4791,22 @@ function populateFormWithAIContent(aiContent) {
         document.getElementById('sa-answer').value = expectedAnswer;
     }
 
-    const selectedLearningObjective = (aiContent.selectedLearningObjective || '').trim();
-    if (selectedLearningObjective) {
+    if (Object.prototype.hasOwnProperty.call(aiContent, 'selectedLearningObjective')) {
+        const selectedLearningObjective = (aiContent.selectedLearningObjective || '').trim();
+        let learningObjectiveNote = '';
+
+        if (aiContent.wasRegenerated) {
+            learningObjectiveNote = selectedLearningObjective
+                ? 'The regenerated question was re-linked to this learning objective. Review it before saving if you want a different one.'
+                : 'No clear learning objective match was found for the regenerated question. It is currently unassigned until you choose one.';
+        } else if (selectedLearningObjective) {
+            learningObjectiveNote = 'AI selected this learning objective for the generated question. Saving will keep this link unless you change it.';
+        }
+
         populateQuestionLearningObjectiveDropdown(
             currentWeek,
             selectedLearningObjective,
-            'AI selected this learning objective for the generated question. Saving will keep this link unless you change it.'
+            learningObjectiveNote
         );
     }
 }
