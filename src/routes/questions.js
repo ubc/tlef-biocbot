@@ -929,9 +929,21 @@ router.post('/generate-ai', async (req, res) => {
         
         try {
             // Format learning objectives for the prompt
-            const formattedLearningObjectives = learningObjectives && learningObjectives.length > 0 
-                ? learningObjectives.map((obj, i) => `${i + 1}. ${obj}`).join('\n')
-                : '';
+            // For normal generation: randomly select ONE objective to ensure question variety.
+            // Sending all objectives every time causes the LLM to gravitate toward the same one,
+            // producing near-identical questions on repeat clicks.
+            // For regeneration: pass all objectives so feedback-based improvements have full context.
+            let formattedLearningObjectives = '';
+            if (learningObjectives && learningObjectives.length > 0) {
+                if (regenerate) {
+                    formattedLearningObjectives = learningObjectives.map((obj, i) => `${i + 1}. ${obj}`).join('\n');
+                } else {
+                    const randomIndex = Math.floor(Math.random() * learningObjectives.length);
+                    const selectedObjective = learningObjectives[randomIndex];
+                    formattedLearningObjectives = `Focus on this learning objective:\n1. ${selectedObjective}`;
+                    console.log(`[GENERATE] Randomly selected objective ${randomIndex + 1}/${learningObjectives.length}: "${selectedObjective}"`);
+                }
+            }
 
             console.log('🎯 [GENERATE] Learning objectives available:', formattedLearningObjectives ? 'Yes' : 'No');
             
