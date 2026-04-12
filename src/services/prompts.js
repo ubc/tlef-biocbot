@@ -609,6 +609,59 @@ SAMPLE QUESTIONS FROM THIS UNIT:
 ${seedText}`;
 }
 
+/**
+ * Build the prompt for linking assessment questions to the most relevant learning objective.
+ * Each question can link to exactly one learning objective or remain blank if there is no clear fit.
+ * @param {Array<string>} learningObjectives - Unit learning objectives
+ * @param {Array<Object>} questions - Questions to classify
+ * @returns {string} Prompt text
+ */
+function buildQuestionObjectiveLinkingPrompt(learningObjectives = [], questions = []) {
+    const formattedObjectives = learningObjectives
+        .map((objective, index) => `${index + 1}. ${objective}`)
+        .join('\n');
+
+    const formattedQuestions = questions.map((question, index) => {
+        const ref = question.ref || question.questionId || `q${index + 1}`;
+        const type = question.questionType || question.type || 'unknown';
+        let entry = `${index + 1}. ref="${ref}" [${type}] ${question.question || ''}`;
+
+        if (question.options && typeof question.options === 'object' && Object.keys(question.options).length > 0) {
+            entry += `\n   Options: ${Object.entries(question.options).map(([key, value]) => `${key}. ${value}`).join(' | ')}`;
+        }
+
+        if (question.correctAnswer) {
+            entry += `\n   Correct answer: ${question.correctAnswer}`;
+        }
+
+        return entry;
+    }).join('\n\n');
+
+    return `You are assigning assessment questions to learning objectives for a university course.
+
+You must decide which SINGLE learning objective best matches each question.
+If no learning objective is a clear match, return an empty string for that question.
+
+RULES:
+- Use only the exact learning objective text provided below.
+- Each question must map to exactly one learning objective or "".
+- Prefer "" over a weak or forced match.
+- Return strict JSON only.
+
+Return this JSON shape:
+{
+  "matches": [
+    { "ref": "q1", "learningObjective": "Exact objective text or empty string" }
+  ]
+}
+
+LEARNING OBJECTIVES:
+${formattedObjectives || '(none provided)'}
+
+QUESTIONS:
+${formattedQuestions || '(none provided)'}`;
+}
+
 module.exports = {
     BASE_SYSTEM_PROMPT,
     EXPLAIN_SYSTEM_PROMPT,
@@ -621,5 +674,6 @@ module.exports = {
     DEFAULT_QUESTION_PROMPTS,
     QUESTION_EXTRACTION_SYSTEM_PROMPT,
     buildQuestionExtractionPrompt,
-    buildPracticeQuestionPrompt
+    buildPracticeQuestionPrompt,
+    buildQuestionObjectiveLinkingPrompt
 };

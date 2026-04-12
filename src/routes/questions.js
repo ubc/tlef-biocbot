@@ -3,9 +3,153 @@ const router = express.Router();
 
 // Import the Course model instead of Question model
 const CourseModel = require('../models/Course');
+const prompts = require('../services/prompts');
 
 // Middleware for JSON parsing
 router.use(express.json());
+
+const QUESTION_UPDATE_FIELDS = [
+    'questionType',
+    'question',
+    'options',
+    'correctAnswer',
+    'explanation',
+    'difficulty',
+    'tags',
+    'points',
+    'metadata',
+    'learningObjective'
+];
+
+function normalizeLearningObjective(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+
+    return value.trim();
+}
+
+function sanitizeQuestionPayload(input = {}) {
+    const payload = {};
+
+    QUESTION_UPDATE_FIELDS.forEach(field => {
+        if (Object.prototype.hasOwnProperty.call(input, field)) {
+            payload[field] = field === 'learningObjective'
+                ? normalizeLearningObjective(input[field])
+                : input[field];
+        }
+    });
+
+    return payload;
+}
+
+function extractFirstJSONObject(str) {
+    try {
+        return JSON.parse(str);
+    } catch {
+        const match = str.match(/\{[\s\S]*\}/);
+        if (!match) {
+            return null;
+        }
+
+        try {
+            return JSON.parse(match[0]);
+        } catch {
+            return null;
+        }
+    }
+}
+
+function resolveMatchedObjective(candidate, learningObjectives) {
+    const normalizedCandidate = normalizeLearningObjective(candidate);
+    if (!normalizedCandidate) {
+        return '';
+    }
+
+    const matchedObjective = learningObjectives.find(objective =>
+        objective.toLowerCase() === normalizedCandidate.toLowerCase()
+    );
+
+    return matchedObjective || '';
+}
+
+function summarizeAutoLinkResults(matchedQuestions = []) {
+    const linkedCount = matchedQuestions.filter(question =>
+        normalizeLearningObjective(question.learningObjective)
+    ).length;
+    const unassignedCount = matchedQuestions.length - linkedCount;
+    const message = unassignedCount > 0
+        ? `Auto-link complete: ${linkedCount} question${linkedCount === 1 ? '' : 's'} linked, ${unassignedCount} left unassigned.`
+        : `Auto-link complete: ${linkedCount} question${linkedCount === 1 ? '' : 's'} linked.`;
+
+    return {
+        linkedCount,
+        unassignedCount,
+        totalQuestions: matchedQuestions.length,
+        message
+    };
+}
+
+async function linkQuestionsToLearningObjectives(llmService, learningObjectives = [], questions = [], preserveExisting = true) {
+    const normalizedObjectives = (learningObjectives || [])
+        .map(objective => normalizeLearningObjective(objective))
+        .filter(Boolean);
+
+    const normalizedQuestions = (questions || []).map((question, index) => ({
+        ...question,
+        ref: question.ref || question.questionId || `question-${index + 1}`,
+        learningObjective: normalizeLearningObjective(question.learningObjective)
+    }));
+
+    if (normalizedQuestions.length === 0 || normalizedObjectives.length === 0) {
+        return normalizedQuestions.map(question => {
+            const { ref, ...rest } = question;
+            return rest;
+        });
+    }
+
+    const questionsToMatch = normalizedQuestions.filter(question =>
+        !(preserveExisting && question.learningObjective)
+    );
+
+    if (questionsToMatch.length === 0) {
+        return normalizedQuestions.map(question => {
+            const { ref, ...rest } = question;
+            return rest;
+        });
+    }
+
+    const prompt = prompts.buildQuestionObjectiveLinkingPrompt(normalizedObjectives, questionsToMatch);
+    const response = await llmService.sendMessage(prompt, {
+        temperature: 0.1,
+        maxTokens: 2048,
+        response_format: { type: 'json_object' }
+    });
+
+    const parsed = extractFirstJSONObject(response?.content || '');
+    const rawMatches = Array.isArray(parsed?.matches) ? parsed.matches : [];
+    const matches = new Map();
+
+    rawMatches.forEach(match => {
+        if (!match?.ref) {
+            return;
+        }
+
+        matches.set(String(match.ref), resolveMatchedObjective(match.learningObjective, normalizedObjectives));
+    });
+
+    return normalizedQuestions.map(question => {
+        const assignedObjective = preserveExisting && question.learningObjective
+            ? question.learningObjective
+            : (matches.get(question.ref) || '');
+
+        const { ref, ...rest } = question;
+        return {
+            ...rest,
+            learningObjective: assignedObjective
+        };
+    });
+}
 
 /**
  * POST /api/questions
@@ -24,6 +168,7 @@ router.post('/', async (req, res) => {
             explanation,
             difficulty,
             tags,
+            learningObjective,
             points,
             metadata
         } = req.body;
@@ -54,6 +199,7 @@ router.post('/', async (req, res) => {
             explanation: explanation || '',
             difficulty: difficulty || 'medium',
             tags: tags || [],
+            learningObjective: normalizeLearningObjective(learningObjective),
             points: points || 1,
             metadata: {
                 source: 'manual',
@@ -88,6 +234,7 @@ router.post('/', async (req, res) => {
                 questionId: result.questionId,
                 question: questionData.question,
                 questionType: questionData.questionType,
+                learningObjective: questionData.learningObjective,
                 createdAt: new Date().toISOString(),
                 created: result.created
             }
@@ -145,6 +292,154 @@ router.get('/lecture', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Internal server error while fetching questions'
+        });
+    }
+});
+
+/**
+ * POST /api/questions/auto-link-learning-objectives
+ * Match assessment questions to the most relevant learning objective
+ */
+router.post('/auto-link-learning-objectives', async (req, res) => {
+    try {
+        const {
+            courseId,
+            lectureName,
+            instructorId,
+            learningObjectives,
+            questions
+        } = req.body;
+
+        if (!courseId || !lectureName) {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required fields: courseId, lectureName'
+            });
+        }
+
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({
+                success: false,
+                message: 'Database connection not available'
+            });
+        }
+
+        const llmService = req.app.locals.llm;
+        if (!llmService) {
+            return res.status(503).json({
+                success: false,
+                message: 'LLM service not available'
+            });
+        }
+
+        const normalizedObjectives = Array.isArray(learningObjectives)
+            ? learningObjectives.map(objective => normalizeLearningObjective(objective)).filter(Boolean)
+            : await CourseModel.getLearningObjectives(db, courseId, lectureName);
+
+        if (normalizedObjectives.length === 0) {
+            return res.json({
+                success: true,
+                message: 'No learning objectives available to link.',
+                data: {
+                    updatedCount: 0,
+                    linkedCount: 0,
+                    matchedQuestions: Array.isArray(questions)
+                        ? questions.map(question => ({
+                            ...question,
+                            learningObjective: normalizeLearningObjective(question.learningObjective)
+                        }))
+                        : []
+                }
+            });
+        }
+
+        const sourceQuestions = Array.isArray(questions)
+            ? questions
+            : await CourseModel.getAssessmentQuestions(db, courseId, lectureName);
+
+        if (!sourceQuestions || sourceQuestions.length === 0) {
+            return res.json({
+                success: true,
+                message: 'No assessment questions found to link.',
+                data: {
+                    updatedCount: 0,
+                    linkedCount: 0,
+                    matchedQuestions: []
+                }
+            });
+        }
+
+        const matchedQuestions = await linkQuestionsToLearningObjectives(
+            llmService,
+            normalizedObjectives,
+            sourceQuestions,
+            true
+        );
+
+        if (Array.isArray(questions)) {
+            const summary = summarizeAutoLinkResults(matchedQuestions);
+            return res.json({
+                success: true,
+                message: summary.message,
+                data: {
+                    updatedCount: 0,
+                    linkedCount: summary.linkedCount,
+                    unassignedCount: summary.unassignedCount,
+                    totalQuestions: summary.totalQuestions,
+                    matchedQuestions
+                }
+            });
+        }
+
+        let updatedCount = 0;
+        const originalById = new Map(sourceQuestions.map(question => [question.questionId, question]));
+
+        for (const matchedQuestion of matchedQuestions) {
+            const originalQuestion = originalById.get(matchedQuestion.questionId);
+            const originalObjective = normalizeLearningObjective(originalQuestion?.learningObjective);
+            const matchedObjective = normalizeLearningObjective(matchedQuestion.learningObjective);
+
+            if (!matchedQuestion.questionId || originalObjective || !matchedObjective) {
+                continue;
+            }
+
+            const result = await CourseModel.updateAssessmentQuestions(
+                db,
+                courseId,
+                lectureName,
+                {
+                    questionId: matchedQuestion.questionId,
+                    learningObjective: matchedObjective
+                },
+                instructorId || req.user?.userId || 'system'
+            );
+
+            if (result.success) {
+                updatedCount++;
+            }
+        }
+
+        const summary = summarizeAutoLinkResults(matchedQuestions);
+
+        return res.json({
+            success: true,
+            message: summary.message,
+            data: {
+                updatedCount,
+                linkedCount: summary.linkedCount,
+                unassignedCount: summary.unassignedCount,
+                totalQuestions: summary.totalQuestions,
+                matchedQuestions
+            }
+        });
+
+    } catch (error) {
+        console.error('Error auto-linking questions to learning objectives:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while auto-linking questions',
+            error: error.message
         });
     }
 });
@@ -223,8 +518,7 @@ router.get('/:questionId', async (req, res) => {
 router.put('/:questionId', async (req, res) => {
     try {
         const { questionId } = req.params;
-        const updateData = req.body;
-        const { courseId, lectureName, instructorId } = req.body;
+        const { courseId, lectureName, instructorId, ...rawUpdateData } = req.body;
         
         if (!questionId || !courseId || !lectureName || !instructorId) {
             return res.status(400).json({
@@ -243,10 +537,8 @@ router.put('/:questionId', async (req, res) => {
         }
         
         // Prepare the updated question data
-        const questionData = {
-            ...updateData,
-            questionId: questionId
-        };
+        const questionData = sanitizeQuestionPayload(rawUpdateData);
+        questionData.questionId = questionId;
         
         // Update question in the course structure using Course model
         const result = await CourseModel.updateAssessmentQuestions(
@@ -436,7 +728,7 @@ router.get('/stats', async (req, res) => {
 
 /**
  * POST /api/questions/bulk
- * Bulk create questions (for AI-generated questions)
+ * Bulk create questions (for AI-generated or extracted questions)
  */
 router.post('/bulk', async (req, res) => {
     try {
@@ -459,12 +751,40 @@ router.post('/bulk', async (req, res) => {
         }
         
         let insertedCount = 0;
+        let autoLinkedCount = 0;
         const insertedIds = [];
+
+        let questionsToSave = questions.map(question => ({
+            ...question,
+            learningObjective: normalizeLearningObjective(question.learningObjective)
+        }));
+
+        const unitLearningObjectives = await CourseModel.getLearningObjectives(db, courseId, lectureName);
+        const needsAutoLinking = unitLearningObjectives.length > 0 && questionsToSave.some(question => !question.learningObjective);
+
+        if (needsAutoLinking) {
+            const llmService = req.app.locals.llm;
+
+            if (llmService) {
+                try {
+                    questionsToSave = await linkQuestionsToLearningObjectives(
+                        llmService,
+                        unitLearningObjectives,
+                        questionsToSave,
+                        true
+                    );
+                    autoLinkedCount = questionsToSave.filter(question => question.learningObjective).length;
+                } catch (linkError) {
+                    console.error('Error auto-linking bulk questions to learning objectives:', linkError);
+                }
+            }
+        }
         
         // Create each question individually using the Course model
-        for (const question of questions) {
+        for (const question of questionsToSave) {
             const questionData = {
                 ...question,
+                learningObjective: normalizeLearningObjective(question.learningObjective),
                 metadata: {
                     source: 'ai-generated',
                     aiGenerated: true,
@@ -496,7 +816,8 @@ router.post('/bulk', async (req, res) => {
                 courseId,
                 lectureName,
                 insertedCount,
-                insertedIds
+                insertedIds,
+                autoLinkedCount
             }
         });
         
@@ -928,20 +1249,29 @@ router.post('/generate-ai', async (req, res) => {
         }
         
         try {
+            const normalizedLearningObjectives = Array.isArray(learningObjectives)
+                ? learningObjectives.map(objective => normalizeLearningObjective(objective)).filter(Boolean)
+                : [];
+
             // Format learning objectives for the prompt
             // For normal generation: randomly select ONE objective to ensure question variety.
             // Sending all objectives every time causes the LLM to gravitate toward the same one,
             // producing near-identical questions on repeat clicks.
             // For regeneration: pass all objectives so feedback-based improvements have full context.
             let formattedLearningObjectives = '';
-            if (learningObjectives && learningObjectives.length > 0) {
+            let selectedLearningObjective = '';
+            if (normalizedLearningObjectives.length > 0) {
                 if (regenerate) {
-                    formattedLearningObjectives = learningObjectives.map((obj, i) => `${i + 1}. ${obj}`).join('\n');
+                    formattedLearningObjectives = normalizedLearningObjectives.map((obj, i) => `${i + 1}. ${obj}`).join('\n');
+                    selectedLearningObjective = normalizeLearningObjective(
+                        previousQuestion?.selectedLearningObjective || previousQuestion?.learningObjective
+                    );
                 } else {
-                    const randomIndex = Math.floor(Math.random() * learningObjectives.length);
-                    const selectedObjective = learningObjectives[randomIndex];
+                    const randomIndex = Math.floor(Math.random() * normalizedLearningObjectives.length);
+                    const selectedObjective = normalizedLearningObjectives[randomIndex];
+                    selectedLearningObjective = normalizeLearningObjective(selectedObjective);
                     formattedLearningObjectives = `Focus on this learning objective:\n1. ${selectedObjective}`;
-                    console.log(`[GENERATE] Randomly selected objective ${randomIndex + 1}/${learningObjectives.length}: "${selectedObjective}"`);
+                    console.log(`[GENERATE] Randomly selected objective ${randomIndex + 1}/${normalizedLearningObjectives.length}: "${selectedObjective}"`);
                 }
             }
 
@@ -993,6 +1323,7 @@ router.post('/generate-ai', async (req, res) => {
                     questionType: questionType,
                     unitName: lectureName,
                     courseId: courseId,
+                    selectedLearningObjective,
                     aiGenerated: true,
                     timestamp: new Date().toISOString()
                 }
@@ -1035,75 +1366,6 @@ router.post('/generate-ai', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Internal server error while generating AI question',
-            error: error.message
-        });
-    }
-});
-
-/**
- * POST /api/questions/bulk
- * Save multiple assessment questions at once (from LLM extraction)
- */
-router.post('/bulk', async (req, res) => {
-    try {
-        const { courseId, lectureName, instructorId, questions } = req.body;
-
-        if (!courseId || !lectureName || !instructorId || !Array.isArray(questions) || questions.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Missing required fields: courseId, lectureName, instructorId, questions (array)'
-            });
-        }
-
-        const db = req.app.locals.db;
-        if (!db) {
-            return res.status(503).json({ success: false, message: 'Database connection not available' });
-        }
-
-        const results = [];
-        let successCount = 0;
-
-        for (const q of questions) {
-            if (!q.question || !q.questionType || !q.correctAnswer) continue;
-
-            const questionData = {
-                questionType: q.questionType,
-                question: q.question,
-                options: q.options || {},
-                correctAnswer: q.correctAnswer,
-                explanation: q.explanation || '',
-                difficulty: q.difficulty || 'medium',
-                tags: q.tags || [],
-                points: q.points || 1,
-                metadata: {
-                    source: 'ai-extracted',
-                    aiGenerated: true,
-                    reviewStatus: 'approved',
-                    extractedFrom: q.extractedFrom || null
-                }
-            };
-
-            const result = await CourseModel.updateAssessmentQuestions(
-                db, courseId, lectureName, questionData, instructorId
-            );
-
-            if (result.success) {
-                successCount++;
-                results.push({ questionId: result.questionId, question: q.question });
-            }
-        }
-
-        res.json({
-            success: true,
-            message: `${successCount} question${successCount === 1 ? '' : 's'} added to assessments`,
-            data: { addedCount: successCount, questions: results }
-        });
-
-    } catch (error) {
-        console.error('Error bulk saving questions:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Internal server error while saving questions',
             error: error.message
         });
     }

@@ -101,6 +101,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const calibrationModal = document.getElementById('calibration-modal');
         const viewModal = document.getElementById('view-modal');
         const questionModal = document.getElementById('question-modal');
+        const questionLearningObjectiveModal = document.getElementById('question-learning-objective-modal');
         
         // Close upload modal if clicking outside
         if (uploadModal && uploadModal.classList.contains('show') && e.target === uploadModal) {
@@ -112,6 +113,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Close question modal if clicking outside
         if (questionModal && questionModal.classList.contains('show') && e.target === questionModal) {
             closeQuestionModal();
+        }
+
+        if (questionLearningObjectiveModal && questionLearningObjectiveModal.classList.contains('show') && e.target === questionLearningObjectiveModal) {
+            closeQuestionLearningObjectiveModal();
         }
     });
     
@@ -2869,7 +2874,8 @@ function loadAssessmentQuestionsFromCourseData(courseData) {
                     type: dbQuestion.questionType,
                     question: dbQuestion.question,
                     answer: dbQuestion.correctAnswer,
-                    options: dbQuestion.options || {}
+                    options: dbQuestion.options || {},
+                    learningObjective: dbQuestion.learningObjective || ''
                 };
                 
                 assessmentQuestions[unit.name].push(localQuestion);
@@ -2938,7 +2944,8 @@ async function loadAssessmentQuestions() {
                             type: dbQuestion.questionType,
                             question: dbQuestion.question,
                             answer: dbQuestion.correctAnswer,
-                            options: dbQuestion.options || {}
+                            options: dbQuestion.options || {},
+                            learningObjective: dbQuestion.learningObjective || ''
                         };
                         console.log(`❓ [ASSESSMENT_QUESTIONS] Converted question ${index + 1}:`, localQuestion);
                         assessmentQuestions[lectureName].push(localQuestion);
@@ -3627,6 +3634,113 @@ let assessmentQuestions = {
     'Week 2': [],
     'Week 3': []
 };
+let editingQuestionObjectiveContext = null;
+
+function getObjectivesForUnit(unitName) {
+    const accordionItem = document.querySelector(`.accordion-item[data-unit-name="${unitName}"]`);
+    if (!accordionItem) {
+        return [];
+    }
+
+    const objectives = [];
+    accordionItem.querySelectorAll('.objectives-list .objective-text').forEach(item => {
+        const text = item.textContent.trim();
+        if (text) {
+            objectives.push(text);
+        }
+    });
+
+    return objectives;
+}
+
+function populateLearningObjectiveOptions(selectElement, objectives = [], selectedObjective = '') {
+    if (!selectElement) {
+        return;
+    }
+
+    const normalizedSelected = (selectedObjective || '').trim();
+    const uniqueObjectives = [...new Set(objectives.map(objective => objective.trim()).filter(Boolean))];
+
+    selectElement.innerHTML = '<option value="">Leave unassigned</option>';
+
+    uniqueObjectives.forEach(objective => {
+        const option = document.createElement('option');
+        option.value = objective;
+        option.textContent = objective;
+        selectElement.appendChild(option);
+    });
+
+    if (normalizedSelected && !uniqueObjectives.includes(normalizedSelected)) {
+        const savedOption = document.createElement('option');
+        savedOption.value = normalizedSelected;
+        savedOption.textContent = `${normalizedSelected} (saved)`;
+        selectElement.appendChild(savedOption);
+    }
+
+    selectElement.value = normalizedSelected;
+}
+
+function setLearningObjectiveNote(message = '') {
+    const note = document.getElementById('learning-objective-note');
+    if (!note) {
+        return;
+    }
+
+    if (message) {
+        note.textContent = message;
+        note.style.display = 'block';
+        return;
+    }
+
+    note.textContent = '';
+    note.style.display = 'none';
+}
+
+function populateQuestionLearningObjectiveDropdown(unitName, selectedObjective = '', noteMessage = '') {
+    const select = document.getElementById('learning-objective-select');
+    populateLearningObjectiveOptions(select, getObjectivesForUnit(unitName), selectedObjective);
+    setLearningObjectiveNote(noteMessage);
+}
+
+function getStoredQuestion(week, questionId) {
+    return (assessmentQuestions[week] || []).find(question => (question.questionId || question.id) === questionId) || null;
+}
+
+function renderLearningObjectiveDisplay(learningObjective) {
+    const value = (learningObjective || '').trim();
+    const className = value
+        ? 'question-learning-objective-value'
+        : 'question-learning-objective-value unassigned';
+    const label = value || 'Unassigned';
+
+    return `
+        <div class="question-learning-objective">
+            <span class="question-learning-objective-label">Learning Objective</span>
+            <span class="${className}">${label}</span>
+        </div>
+    `;
+}
+
+function setAutoLinkButtonLoading(button, isLoading) {
+    if (!button) {
+        return;
+    }
+
+    if (isLoading) {
+        button.dataset.originalHtml = button.innerHTML;
+        button.disabled = true;
+        button.classList.add('is-loading');
+        button.innerHTML = '<span class="btn-icon">⏳</span> Auto-linking...';
+        return;
+    }
+
+    button.disabled = false;
+    button.classList.remove('is-loading');
+    if (button.dataset.originalHtml) {
+        button.innerHTML = button.dataset.originalHtml;
+        delete button.dataset.originalHtml;
+    }
+}
 
 /**
  * Open the question creation modal
@@ -3639,6 +3753,7 @@ function openQuestionModal(week) {
         modal.classList.add('show');
         // Reset form
         resetQuestionForm();
+        populateQuestionLearningObjectiveDropdown(week);
     }
 }
 
@@ -3659,6 +3774,12 @@ function closeQuestionModal() {
 function resetQuestionForm() {
     document.getElementById('question-type').value = '';
     document.getElementById('question-text').value = '';
+    const learningObjectiveSelect = document.getElementById('learning-objective-select');
+    if (learningObjectiveSelect) {
+        learningObjectiveSelect.innerHTML = '<option value="">Leave unassigned</option>';
+        learningObjectiveSelect.value = '';
+    }
+    setLearningObjectiveNote('');
     
     // Hide all answer sections
     document.getElementById('tf-answer-section').style.display = 'none';
@@ -3815,6 +3936,7 @@ async function saveQuestion() {
     
     const questionType = document.getElementById('question-type').value;
     const questionText = document.getElementById('question-text').value.trim();
+    const learningObjective = document.getElementById('learning-objective-select')?.value?.trim() || '';
     
     // Validation
     if (!questionType) {
@@ -3829,7 +3951,8 @@ async function saveQuestion() {
     
     let question = {
         questionType: questionType,
-        question: questionText
+        question: questionText,
+        learningObjective
     };
     
     // Get answer based on type
@@ -3925,6 +4048,7 @@ async function saveQuestion() {
                 explanation: '',
                 difficulty: 'medium',
                 tags: [],
+                learningObjective: question.learningObjective,
                 points: 1
             })
         });
@@ -3958,7 +4082,8 @@ async function saveQuestion() {
             type: question.questionType,
             question: question.question,
             answer: question.correctAnswer,
-            options: question.options || {}
+            options: question.options || {},
+            learningObjective: question.learningObjective || ''
         };
         
         assessmentQuestions[currentWeek].push(savedQuestion);
@@ -3972,7 +4097,10 @@ async function saveQuestion() {
         // Check if we should enable AI generation
         checkAIGenerationAvailability(currentWeek);
         
-        showNotification('Question saved successfully!', 'success');
+        const learningObjectiveMessage = question.learningObjective
+            ? ` Linked to "${question.learningObjective}".`
+            : '';
+        showNotification(`Question saved successfully!${learningObjectiveMessage}`, 'success');
         
     } catch (error) {
         console.error('Error saving question:', error);
@@ -4010,7 +4138,8 @@ async function reloadQuestionsForUnit(unitName) {
                     type: dbQuestion.questionType,
                     question: dbQuestion.question,
                     answer: dbQuestion.correctAnswer,
-                    options: dbQuestion.options || {}
+                    options: dbQuestion.options || {},
+                    learningObjective: dbQuestion.learningObjective || ''
                 };
                 
                 assessmentQuestions[unitName].push(localQuestion);
@@ -4055,9 +4184,13 @@ function updateQuestionsDisplay(week) {
                 <div class="question-header">
                     <span class="question-type-badge ${question.type}">${getQuestionTypeLabel(question.type)}</span>
                     <span class="question-number">Question ${index + 1}</span>
-                    <button class="delete-question-btn" onclick="deleteQuestion('${week}', '${question.questionId || question.id}')">×</button>
+                    <div class="question-action-buttons">
+                        <button class="edit-question-btn" onclick="openQuestionLearningObjectiveModal('${week}', '${question.questionId || question.id}')" title="Edit learning objective">✎</button>
+                        <button class="delete-question-btn" onclick="deleteQuestion('${week}', '${question.questionId || question.id}')" title="Delete question">×</button>
+                    </div>
                 </div>
                 <div class="question-content">
+                    ${renderLearningObjectiveDisplay(question.learningObjective)}
                     <p class="question-text">${question.question}</p>
                     ${getQuestionAnswerDisplay(question)}
                 </div>
@@ -4140,6 +4273,135 @@ function getQuestionAnswerDisplay(question) {
         return `<p class="answer-preview"><strong>Expected:</strong> ${question.answer}</p>`;
     }
     return '';
+}
+
+function openQuestionLearningObjectiveModal(week, questionId) {
+    const question = getStoredQuestion(week, questionId);
+    const modal = document.getElementById('question-learning-objective-modal');
+    const questionText = document.getElementById('edit-learning-objective-question-text');
+    const select = document.getElementById('edit-learning-objective-select');
+
+    if (!question || !modal || !questionText || !select) {
+        showNotification('Could not open the learning objective editor.', 'error');
+        return;
+    }
+
+    editingQuestionObjectiveContext = { week, questionId };
+    questionText.textContent = question.question || '';
+    populateLearningObjectiveOptions(select, getObjectivesForUnit(week), question.learningObjective || '');
+    modal.classList.add('show');
+}
+
+function closeQuestionLearningObjectiveModal() {
+    const modal = document.getElementById('question-learning-objective-modal');
+    const questionText = document.getElementById('edit-learning-objective-question-text');
+    const select = document.getElementById('edit-learning-objective-select');
+
+    editingQuestionObjectiveContext = null;
+
+    if (questionText) {
+        questionText.textContent = '';
+    }
+
+    if (select) {
+        select.innerHTML = '<option value="">Leave unassigned</option>';
+        select.value = '';
+    }
+
+    if (modal) {
+        modal.classList.remove('show');
+    }
+}
+
+async function saveQuestionLearningObjective() {
+    if (!editingQuestionObjectiveContext) {
+        showNotification('No question selected for editing.', 'error');
+        return;
+    }
+
+    try {
+        const { week, questionId } = editingQuestionObjectiveContext;
+        const courseId = await getCurrentCourseId();
+        const instructorId = getCurrentInstructorId();
+        const learningObjective = document.getElementById('edit-learning-objective-select')?.value?.trim() || '';
+
+        const response = await fetch(`${API_BASE_URL}/api/questions/${questionId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                courseId,
+                lectureName: week,
+                instructorId,
+                learningObjective
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Update failed: ${response.status} ${errorText}`);
+        }
+
+        await reloadQuestionsForUnit(week);
+        updateQuestionsDisplay(week);
+        closeQuestionLearningObjectiveModal();
+        showNotification('Learning objective updated successfully.', 'success');
+    } catch (error) {
+        console.error('Error updating question learning objective:', error);
+        showNotification(`Error updating learning objective: ${error.message}`, 'error');
+    }
+}
+
+async function autoLinkQuestionsToLearningObjectives(week, buttonElement = null) {
+    const questions = assessmentQuestions[week] || [];
+    if (questions.length === 0) {
+        showNotification('There are no questions to auto-link yet.', 'warning');
+        return;
+    }
+
+    const objectives = getObjectivesForUnit(week);
+    if (objectives.length === 0) {
+        showNotification('Add learning objectives for this unit before auto-linking questions.', 'warning');
+        return;
+    }
+
+    try {
+        setAutoLinkButtonLoading(buttonElement, true);
+        showNotification('Auto-linking questions to learning objectives...', 'info');
+
+        const courseId = await getCurrentCourseId();
+        const instructorId = getCurrentInstructorId();
+
+        const response = await fetch(`${API_BASE_URL}/api/questions/auto-link-learning-objectives`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                courseId,
+                lectureName: week,
+                instructorId
+            })
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to auto-link questions');
+        }
+
+        await reloadQuestionsForUnit(week);
+        updateQuestionsDisplay(week);
+        const fallbackMessage = result.data?.unassignedCount > 0
+            ? `Auto-link complete: ${result.data.linkedCount || 0} linked, ${result.data.unassignedCount} left unassigned.`
+            : (result.message || 'Questions auto-linked successfully.');
+        showNotification(result.message || fallbackMessage, 'success');
+    } catch (error) {
+        console.error('Error auto-linking questions:', error);
+        showNotification(`Error auto-linking questions: ${error.message}`, 'error');
+    } finally {
+        setAutoLinkButtonLoading(buttonElement, false);
+    }
 }
 
 /**
@@ -4528,7 +4790,15 @@ function populateFormWithAIContent(aiContent) {
         // Set short answer
         document.getElementById('sa-answer').value = expectedAnswer;
     }
-    
+
+    const selectedLearningObjective = (aiContent.selectedLearningObjective || '').trim();
+    if (selectedLearningObjective) {
+        populateQuestionLearningObjectiveDropdown(
+            currentWeek,
+            selectedLearningObjective,
+            'AI selected this learning objective for the generated question. Saving will keep this link unless you change it.'
+        );
+    }
 }
 
 /**
@@ -4981,6 +5251,10 @@ function createUnitElement(unitName, unitData, isExpanded = false) {
                             <span class="btn-icon">➕</span>
                             Add Question
                         </button>
+                        <button class="auto-link-btn" onclick="autoLinkQuestionsToLearningObjectives('${unitName}', this)">
+                            <span class="btn-icon">🪄</span>
+                            Auto-link Questions
+                        </button>
                     </div>
                     
                     <div class="save-assessment">
@@ -5049,7 +5323,8 @@ function loadExistingUnitData(onboardingData) {
                     type: dbQuestion.questionType,
                     question: dbQuestion.question,
                     answer: dbQuestion.correctAnswer,
-                    options: dbQuestion.options || {}
+                    options: dbQuestion.options || {},
+                    learningObjective: dbQuestion.learningObjective || ''
                 };
                 
                 assessmentQuestions[unit.name].push(localQuestion);
@@ -5689,7 +5964,14 @@ async function saveSelectedQuestions(lectureName, courseId) {
                 courseId,
                 lectureName,
                 instructorId,
-                questions: selectedQuestions
+                questions: selectedQuestions.map(question => ({
+                    ...question,
+                    metadata: {
+                        source: 'ai-extracted',
+                        aiGenerated: true,
+                        reviewStatus: 'approved'
+                    }
+                }))
             })
         });
 
@@ -5703,7 +5985,11 @@ async function saveSelectedQuestions(lectureName, courseId) {
         closeQuestionReviewModal();
         closeDocumentModal();
 
-        showNotification(`${result.data.addedCount} question${result.data.addedCount === 1 ? '' : 's'} added to the assessments of ${lectureName}.`, 'success');
+        const autoLinkedCount = result.data.autoLinkedCount || 0;
+        const autoLinkedMessage = autoLinkedCount > 0
+            ? ` ${autoLinkedCount} question${autoLinkedCount === 1 ? ' was' : 's were'} auto-linked to learning objectives.`
+            : '';
+        showNotification(`${result.data.addedCount} question${result.data.addedCount === 1 ? '' : 's'} added to the assessments of ${lectureName}.${autoLinkedMessage}`, 'success');
 
         // Refresh the page content to show updated assessment questions
         if (typeof loadCourseData === 'function') {

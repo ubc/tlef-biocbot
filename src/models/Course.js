@@ -352,16 +352,27 @@ async function updateAssessmentQuestions(db, courseId, lectureName, questionData
             existingLecture.assessmentQuestions.findIndex(q => q.questionId === questionData.questionId) : -1;
         
         if (existingQuestionIndex >= 0) {
+            const existingQuestion = existingLecture.assessmentQuestions[existingQuestionIndex] || {};
+            const updatedQuestion = {
+                ...existingQuestion,
+                ...questionData,
+                questionId: existingQuestion.questionId || questionData.questionId,
+                createdAt: existingQuestion.createdAt || questionData.createdAt || now,
+                updatedAt: now
+            };
+
+            const updatedQuestions = [...(existingLecture.assessmentQuestions || [])];
+            updatedQuestions[existingQuestionIndex] = updatedQuestion;
+
             // Update existing question
             const result = await collection.updateOne(
                 { 
                     courseId,
-                    'lectures.name': lectureName,
-                    'lectures.assessmentQuestions.questionId': questionData.questionId
+                    'lectures.name': lectureName
                 },
                 {
                     $set: {
-                        'lectures.$.assessmentQuestions.$': questionData,
+                        'lectures.$.assessmentQuestions': updatedQuestions,
                         'lectures.$.updatedAt': now,
                         updatedAt: now,
                         lastUpdatedById: instructorId

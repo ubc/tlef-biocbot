@@ -703,10 +703,20 @@ function initializeGuidedSubsteps() {
     // Add click outside modal to close functionality
     document.addEventListener('click', (e) => {
         const uploadModal = document.getElementById('upload-modal');
+        const questionModal = document.getElementById('question-modal');
+        const questionLearningObjectiveModal = document.getElementById('question-learning-objective-modal');
         
         // Close upload modal if clicking outside
         if (uploadModal && uploadModal.classList.contains('show') && e.target === uploadModal) {
             closeUploadModal();
+        }
+
+        if (questionModal && questionModal.classList.contains('show') && e.target === questionModal) {
+            closeQuestionModal();
+        }
+
+        if (questionLearningObjectiveModal && questionLearningObjectiveModal.classList.contains('show') && e.target === questionLearningObjectiveModal) {
+            closeQuestionLearningObjectiveModal();
         }
     });
 }
@@ -1665,6 +1675,108 @@ async function removeQuestion(button) {
 let assessmentQuestions = {
     'Onboarding': []
 };
+let editingQuestionObjectiveContext = null;
+
+function getOnboardingLearningObjectives() {
+    const objectives = [];
+    document.querySelectorAll('#objectives-list .objective-text').forEach(item => {
+        const text = item.textContent.trim();
+        if (text) {
+            objectives.push(text);
+        }
+    });
+
+    return objectives;
+}
+
+function populateLearningObjectiveOptions(selectElement, objectives = [], selectedObjective = '') {
+    if (!selectElement) {
+        return;
+    }
+
+    const normalizedSelected = (selectedObjective || '').trim();
+    const uniqueObjectives = [...new Set(objectives.map(objective => objective.trim()).filter(Boolean))];
+
+    selectElement.innerHTML = '<option value="">Leave unassigned</option>';
+
+    uniqueObjectives.forEach(objective => {
+        const option = document.createElement('option');
+        option.value = objective;
+        option.textContent = objective;
+        selectElement.appendChild(option);
+    });
+
+    if (normalizedSelected && !uniqueObjectives.includes(normalizedSelected)) {
+        const savedOption = document.createElement('option');
+        savedOption.value = normalizedSelected;
+        savedOption.textContent = `${normalizedSelected} (saved)`;
+        selectElement.appendChild(savedOption);
+    }
+
+    selectElement.value = normalizedSelected;
+}
+
+function setLearningObjectiveNote(message = '') {
+    const note = document.getElementById('learning-objective-note');
+    if (!note) {
+        return;
+    }
+
+    if (message) {
+        note.textContent = message;
+        note.style.display = 'block';
+        return;
+    }
+
+    note.textContent = '';
+    note.style.display = 'none';
+}
+
+function populateQuestionLearningObjectiveDropdown(selectedObjective = '', noteMessage = '') {
+    const select = document.getElementById('learning-objective-select');
+    populateLearningObjectiveOptions(select, getOnboardingLearningObjectives(), selectedObjective);
+    setLearningObjectiveNote(noteMessage);
+}
+
+function getStoredQuestion(week, questionId) {
+    return (assessmentQuestions[week] || []).find(question => String(question.id) === String(questionId)) || null;
+}
+
+function renderLearningObjectiveDisplay(learningObjective) {
+    const value = (learningObjective || '').trim();
+    const className = value
+        ? 'question-learning-objective-value'
+        : 'question-learning-objective-value unassigned';
+    const label = value || 'Unassigned';
+
+    return `
+        <div class="question-learning-objective">
+            <span class="question-learning-objective-label">Learning Objective</span>
+            <span class="${className}">${label}</span>
+        </div>
+    `;
+}
+
+function setAutoLinkButtonLoading(button, isLoading) {
+    if (!button) {
+        return;
+    }
+
+    if (isLoading) {
+        button.dataset.originalHtml = button.innerHTML;
+        button.disabled = true;
+        button.classList.add('is-loading');
+        button.innerHTML = '<span class="btn-icon">⏳</span> Auto-linking...';
+        return;
+    }
+
+    button.disabled = false;
+    button.classList.remove('is-loading');
+    if (button.dataset.originalHtml) {
+        button.innerHTML = button.dataset.originalHtml;
+        delete button.dataset.originalHtml;
+    }
+}
 
 /**
  * Open question modal for adding assessment questions
@@ -1676,6 +1788,7 @@ function openQuestionModal(week) {
         modal.classList.add('show');
         // Reset form
         resetQuestionForm();
+        populateQuestionLearningObjectiveDropdown();
         
         // Check if AI generation should be enabled
         checkAIGenerationInModal();
@@ -1699,6 +1812,12 @@ function closeQuestionModal() {
 function resetQuestionForm() {
     document.getElementById('question-type').value = '';
     document.getElementById('question-text').value = '';
+    const learningObjectiveSelect = document.getElementById('learning-objective-select');
+    if (learningObjectiveSelect) {
+        learningObjectiveSelect.innerHTML = '<option value="">Leave unassigned</option>';
+        learningObjectiveSelect.value = '';
+    }
+    setLearningObjectiveNote('');
     
     // Hide all answer sections
     document.getElementById('tf-answer-section').style.display = 'none';
@@ -1778,6 +1897,7 @@ function setupMCQValidation() {
 function saveQuestion() {
     const questionType = document.getElementById('question-type').value;
     const questionText = document.getElementById('question-text').value.trim();
+    const learningObjective = document.getElementById('learning-objective-select')?.value?.trim() || '';
     
     if (!questionType) {
         showNotification('Please select a question type.', 'error');
@@ -1792,7 +1912,8 @@ function saveQuestion() {
     let question = {
         id: Date.now(),
         type: questionType,
-        question: questionText
+        question: questionText,
+        learningObjective
     };
     
     // Get answer based on question type
@@ -1859,7 +1980,10 @@ function saveQuestion() {
     
     // Close modal and show success
     closeQuestionModal();
-    showNotification('Question added successfully!', 'success');
+    const learningObjectiveMessage = question.learningObjective
+        ? ` Linked to "${question.learningObjective}".`
+        : '';
+    showNotification(`Question added successfully!${learningObjectiveMessage}`, 'success');
 }
 
 
@@ -1932,15 +2056,155 @@ function createQuestionElement(question, questionNumber, week) {
         <div class="question-header">
             <span class="question-type-badge ${typeBadgeClass}">${question.type.replace('-', ' ')}</span>
             <span class="question-number">Question ${questionNumber}</span>
-            <button class="delete-question-btn" onclick="deleteAssessmentQuestion('${week}', ${question.id})">×</button>
+            <div class="question-action-buttons">
+                <button class="edit-question-btn" onclick="openQuestionLearningObjectiveModal('${week}', ${question.id})" title="Edit learning objective">✎</button>
+                <button class="delete-question-btn" onclick="deleteAssessmentQuestion('${week}', ${question.id})" title="Delete question">×</button>
+            </div>
         </div>
         <div class="question-content">
+            ${renderLearningObjectiveDisplay(question.learningObjective)}
             <div class="question-text">${question.question}</div>
             ${answerPreview}
         </div>
     `;
     
     return questionDiv;
+}
+
+function openQuestionLearningObjectiveModal(week, questionId) {
+    const question = getStoredQuestion(week || 'Onboarding', questionId);
+    const modal = document.getElementById('question-learning-objective-modal');
+    const questionText = document.getElementById('edit-learning-objective-question-text');
+    const select = document.getElementById('edit-learning-objective-select');
+
+    if (!question || !modal || !questionText || !select) {
+        showNotification('Could not open the learning objective editor.', 'error');
+        return;
+    }
+
+    editingQuestionObjectiveContext = { week: week || 'Onboarding', questionId: String(questionId) };
+    questionText.textContent = question.question || '';
+    populateLearningObjectiveOptions(select, getOnboardingLearningObjectives(), question.learningObjective || '');
+    modal.classList.add('show');
+}
+
+function closeQuestionLearningObjectiveModal() {
+    const modal = document.getElementById('question-learning-objective-modal');
+    const questionText = document.getElementById('edit-learning-objective-question-text');
+    const select = document.getElementById('edit-learning-objective-select');
+
+    editingQuestionObjectiveContext = null;
+
+    if (questionText) {
+        questionText.textContent = '';
+    }
+
+    if (select) {
+        select.innerHTML = '<option value="">Leave unassigned</option>';
+        select.value = '';
+    }
+
+    if (modal) {
+        modal.classList.remove('show');
+    }
+}
+
+function saveQuestionLearningObjective() {
+    if (!editingQuestionObjectiveContext) {
+        showNotification('No question selected for editing.', 'error');
+        return;
+    }
+
+    const { week, questionId } = editingQuestionObjectiveContext;
+    const question = getStoredQuestion(week, questionId);
+    if (!question) {
+        showNotification('Could not find the selected question.', 'error');
+        return;
+    }
+
+    question.learningObjective = document.getElementById('edit-learning-objective-select')?.value?.trim() || '';
+    displayAssessmentQuestions(week);
+    closeQuestionLearningObjectiveModal();
+    showNotification('Learning objective updated successfully.', 'success');
+}
+
+async function autoLinkQuestionsToLearningObjectives(week, buttonElement = null) {
+    const weekKey = week || 'Onboarding';
+    const questions = assessmentQuestions[weekKey] || [];
+    if (questions.length === 0) {
+        showNotification('There are no questions to auto-link yet.', 'warning');
+        return;
+    }
+
+    const learningObjectives = getOnboardingLearningObjectives();
+    if (learningObjectives.length === 0) {
+        showNotification('Add learning objectives before auto-linking questions.', 'warning');
+        return;
+    }
+
+    try {
+        setAutoLinkButtonLoading(buttonElement, true);
+        showNotification('Auto-linking questions to learning objectives...', 'info');
+
+        const courseId = onboardingState.createdCourseId || onboardingState.existingCourseId;
+        const instructorId = getCurrentInstructorId();
+
+        if (!courseId) {
+            throw new Error('Course ID not found. Please complete course setup first.');
+        }
+
+        const response = await authenticatedFetch(`${API_BASE_URL}/api/questions/auto-link-learning-objectives`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                courseId,
+                lectureName: 'Unit 1',
+                instructorId,
+                learningObjectives,
+                questions: questions.map(question => ({
+                    questionId: question.questionId || String(question.id),
+                    questionType: question.type,
+                    question: question.question,
+                    options: Array.isArray(question.options)
+                        ? question.options.reduce((acc, optionText, index) => {
+                            acc[String.fromCharCode(65 + index)] = optionText;
+                            return acc;
+                        }, {})
+                        : (question.options || {}),
+                    correctAnswer: question.correctAnswer,
+                    learningObjective: question.learningObjective || ''
+                }))
+            })
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to auto-link questions');
+        }
+
+        const matchesById = new Map((result.data.matchedQuestions || []).map(question => [
+            String(question.questionId || question.id),
+            question.learningObjective || ''
+        ]));
+
+        assessmentQuestions[weekKey] = questions.map(question => ({
+            ...question,
+            learningObjective: matchesById.get(String(question.questionId || question.id)) || question.learningObjective || ''
+        }));
+
+        displayAssessmentQuestions(weekKey);
+        const fallbackMessage = result.data?.unassignedCount > 0
+            ? `Auto-link complete: ${result.data.linkedCount || 0} linked, ${result.data.unassignedCount} left unassigned.`
+            : (result.message || 'Questions auto-linked successfully.');
+        showNotification(result.message || fallbackMessage, 'success');
+    } catch (error) {
+        console.error('Error auto-linking onboarding questions:', error);
+        showNotification(`Error auto-linking questions: ${error.message}`, 'error');
+    } finally {
+        setAutoLinkButtonLoading(buttonElement, false);
+    }
 }
 
 /**
@@ -3156,6 +3420,7 @@ async function saveUnit1AssessmentQuestion(courseId, lectureName, questionObjOrT
             explanation: questionObj.explanation || '',
             difficulty: questionObj.difficulty || 'medium',
             tags: questionObj.tags || [],
+            learningObjective: questionObj.learningObjective || '',
             points: questionObj.points || 1
         };
         
@@ -3726,6 +3991,14 @@ function populateFormWithAIContent(aiContent) {
     } else if (questionType === 'short-answer') {
         const expectedAnswer = aiContent.EXPECTED_ANSWER || aiContent.answer || '';
         document.getElementById('sa-answer').value = expectedAnswer;
+    }
+
+    const selectedLearningObjective = (aiContent.selectedLearningObjective || '').trim();
+    if (selectedLearningObjective) {
+        populateQuestionLearningObjectiveDropdown(
+            selectedLearningObjective,
+            'AI selected this learning objective for the generated question. Saving will keep this link unless you change it.'
+        );
     }
 }
 
