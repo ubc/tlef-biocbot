@@ -121,6 +121,14 @@
                         <label for="question-text">Question</label>
                         <textarea id="question-text" rows="3" placeholder="Enter your question..."></textarea>
                     </div>
+
+                    <div class="form-section">
+                        <label for="learning-objective-select">Learning Objective (Optional)</label>
+                        <select id="learning-objective-select">
+                            <option value="">Leave unassigned</option>
+                        </select>
+                        <p id="learning-objective-note" class="learning-objective-note" style="display: none;"></p>
+                    </div>
                     
                     <!-- True/False Answer -->
                     <div class="form-section" id="tf-answer-section" style="display: none;">
@@ -190,6 +198,65 @@
                         Generate with AI
                     </button>
                     <button class="btn-primary" onclick="saveQuestion()">Save Question</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="question-learning-objective-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit Learning Objective</h2>
+                <button class="modal-close" onclick="closeQuestionLearningObjectiveModal()">×</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="question-form">
+                    <div class="form-section">
+                        <label>Question</label>
+                        <p id="edit-learning-objective-question-text" class="edit-learning-objective-question-text"></p>
+                    </div>
+
+                    <div class="form-section">
+                        <label for="edit-learning-objective-select">Learning Objective (Optional)</label>
+                        <select id="edit-learning-objective-select">
+                            <option value="">Leave unassigned</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <div class="modal-actions">
+                    <button class="btn-secondary" onclick="closeQuestionLearningObjectiveModal()">Cancel</button>
+                    <button class="btn-primary" onclick="saveQuestionLearningObjective()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="auto-link-confirmation-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Auto-link Questions?</h2>
+                <button class="modal-close" onclick="closeAutoLinkConfirmationModal()">×</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="auto-link-confirmation-copy">
+                    <p>BiocBot will review the unassigned assessment questions for <strong id="auto-link-confirmation-unit-label">this unit</strong> and try to match each one to the most relevant learning objective.</p>
+                    <ul class="auto-link-confirmation-list">
+                        <li>Questions that already have a learning objective will stay as they are.</li>
+                        <li>Questions without a clear match will remain unassigned for you to review.</li>
+                    </ul>
+                    <p class="auto-link-confirmation-note">You can still edit any question's learning objective afterward.</p>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <div class="modal-actions">
+                    <button class="btn-secondary" onclick="closeAutoLinkConfirmationModal()">No</button>
+                    <button class="btn-primary" onclick="confirmAutoLinkQuestions()">Yes</button>
                 </div>
             </div>
         </div>
