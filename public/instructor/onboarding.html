@@ -331,7 +331,7 @@
                                     <span class="btn-icon">➕</span>
                                     Add Question
                                 </button>
-                                <button class="auto-link-btn" onclick="autoLinkQuestionsToLearningObjectives('Onboarding', this)">
+                                <button class="auto-link-btn" onclick="openAutoLinkConfirmationModal('Onboarding', this)">
                                     <span class="btn-icon">🪄</span>
                                     Auto-link Questions
                                 </button>
@@ -552,6 +552,33 @@
                 <div class="modal-actions">
                     <button class="btn-secondary" onclick="closeQuestionLearningObjectiveModal()">Cancel</button>
                     <button class="btn-primary" onclick="saveQuestionLearningObjective()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="auto-link-confirmation-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Auto-link Questions?</h2>
+                <button class="modal-close" onclick="closeAutoLinkConfirmationModal()">×</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="auto-link-confirmation-copy">
+                    <p>BiocBot will review the unassigned assessment questions for <strong id="auto-link-confirmation-unit-label">Unit 1</strong> and try to match each one to the most relevant learning objective.</p>
+                    <ul class="auto-link-confirmation-list">
+                        <li>Questions that already have a learning objective will stay as they are.</li>
+                        <li>Questions without a clear match will remain unassigned for you to review.</li>
+                    </ul>
+                    <p class="auto-link-confirmation-note">You can still edit any question's learning objective afterward.</p>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <div class="modal-actions">
+                    <button class="btn-secondary" onclick="closeAutoLinkConfirmationModal()">No</button>
+                    <button class="btn-primary" onclick="confirmAutoLinkQuestions()">Yes</button>
                 </div>
             </div>
         </div>

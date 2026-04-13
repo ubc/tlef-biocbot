@@ -833,6 +833,27 @@
     gap: 12px;
 }
 
+.auto-link-confirmation-copy p {
+    margin: 0;
+    line-height: 1.6;
+}
+
+.auto-link-confirmation-list {
+    margin: 1rem 0;
+    padding-left: 1.25rem;
+    color: var(--text-color);
+    line-height: 1.6;
+}
+
+.auto-link-confirmation-list li + li {
+    margin-top: 0.5rem;
+}
+
+.auto-link-confirmation-note {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
 /* File Upload */
 .file-upload-area {
     margin: 20px 0;

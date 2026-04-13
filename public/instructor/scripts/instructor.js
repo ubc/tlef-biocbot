@@ -102,6 +102,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const viewModal = document.getElementById('view-modal');
         const questionModal = document.getElementById('question-modal');
         const questionLearningObjectiveModal = document.getElementById('question-learning-objective-modal');
+        const autoLinkConfirmationModal = document.getElementById('auto-link-confirmation-modal');
         
         // Close upload modal if clicking outside
         if (uploadModal && uploadModal.classList.contains('show') && e.target === uploadModal) {
@@ -117,6 +118,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (questionLearningObjectiveModal && questionLearningObjectiveModal.classList.contains('show') && e.target === questionLearningObjectiveModal) {
             closeQuestionLearningObjectiveModal();
+        }
+
+        if (autoLinkConfirmationModal && autoLinkConfirmationModal.classList.contains('show') && e.target === autoLinkConfirmationModal) {
+            closeAutoLinkConfirmationModal();
         }
     });
     
@@ -3635,6 +3640,7 @@ let assessmentQuestions = {
     'Week 3': []
 };
 let editingQuestionObjectiveContext = null;
+let autoLinkConfirmationContext = null;
 
 function getObjectivesForUnit(unitName) {
     const accordionItem = document.querySelector(`.accordion-item[data-unit-name="${unitName}"]`);
@@ -3740,6 +3746,52 @@ function setAutoLinkButtonLoading(button, isLoading) {
         button.innerHTML = button.dataset.originalHtml;
         delete button.dataset.originalHtml;
     }
+}
+
+function openAutoLinkConfirmationModal(week, buttonElement = null) {
+    const questions = assessmentQuestions[week] || [];
+    if (questions.length === 0) {
+        showNotification('There are no questions to auto-link yet.', 'warning');
+        return;
+    }
+
+    const objectives = getObjectivesForUnit(week);
+    if (objectives.length === 0) {
+        showNotification('Add learning objectives for this unit before auto-linking questions.', 'warning');
+        return;
+    }
+
+    const modal = document.getElementById('auto-link-confirmation-modal');
+    const unitLabel = document.getElementById('auto-link-confirmation-unit-label');
+    if (!modal) {
+        autoLinkQuestionsToLearningObjectives(week, buttonElement);
+        return;
+    }
+
+    autoLinkConfirmationContext = { week, buttonElement };
+    if (unitLabel) {
+        unitLabel.textContent = week || 'this unit';
+    }
+    modal.classList.add('show');
+}
+
+function closeAutoLinkConfirmationModal() {
+    autoLinkConfirmationContext = null;
+    const modal = document.getElementById('auto-link-confirmation-modal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+}
+
+function confirmAutoLinkQuestions() {
+    if (!autoLinkConfirmationContext) {
+        closeAutoLinkConfirmationModal();
+        return;
+    }
+
+    const { week, buttonElement } = autoLinkConfirmationContext;
+    closeAutoLinkConfirmationModal();
+    autoLinkQuestionsToLearningObjectives(week, buttonElement);
 }
 
 /**
@@ -5261,7 +5313,7 @@ function createUnitElement(unitName, unitData, isExpanded = false) {
                             <span class="btn-icon">➕</span>
                             Add Question
                         </button>
-                        <button class="auto-link-btn" onclick="autoLinkQuestionsToLearningObjectives('${unitName}', this)">
+                        <button class="auto-link-btn" onclick="openAutoLinkConfirmationModal('${unitName}', this)">
                             <span class="btn-icon">🪄</span>
                             Auto-link Questions
                         </button>

@@ -705,6 +705,7 @@ function initializeGuidedSubsteps() {
         const uploadModal = document.getElementById('upload-modal');
         const questionModal = document.getElementById('question-modal');
         const questionLearningObjectiveModal = document.getElementById('question-learning-objective-modal');
+        const autoLinkConfirmationModal = document.getElementById('auto-link-confirmation-modal');
         
         // Close upload modal if clicking outside
         if (uploadModal && uploadModal.classList.contains('show') && e.target === uploadModal) {
@@ -717,6 +718,10 @@ function initializeGuidedSubsteps() {
 
         if (questionLearningObjectiveModal && questionLearningObjectiveModal.classList.contains('show') && e.target === questionLearningObjectiveModal) {
             closeQuestionLearningObjectiveModal();
+        }
+
+        if (autoLinkConfirmationModal && autoLinkConfirmationModal.classList.contains('show') && e.target === autoLinkConfirmationModal) {
+            closeAutoLinkConfirmationModal();
         }
     });
 }
@@ -1676,6 +1681,7 @@ let assessmentQuestions = {
     'Onboarding': []
 };
 let editingQuestionObjectiveContext = null;
+let autoLinkConfirmationContext = null;
 
 function getOnboardingLearningObjectives() {
     const objectives = [];
@@ -1776,6 +1782,53 @@ function setAutoLinkButtonLoading(button, isLoading) {
         button.innerHTML = button.dataset.originalHtml;
         delete button.dataset.originalHtml;
     }
+}
+
+function openAutoLinkConfirmationModal(week, buttonElement = null) {
+    const weekKey = week || 'Onboarding';
+    const questions = assessmentQuestions[weekKey] || [];
+    if (questions.length === 0) {
+        showNotification('There are no questions to auto-link yet.', 'warning');
+        return;
+    }
+
+    const learningObjectives = getOnboardingLearningObjectives();
+    if (learningObjectives.length === 0) {
+        showNotification('Add learning objectives before auto-linking questions.', 'warning');
+        return;
+    }
+
+    const modal = document.getElementById('auto-link-confirmation-modal');
+    const unitLabel = document.getElementById('auto-link-confirmation-unit-label');
+    if (!modal) {
+        autoLinkQuestionsToLearningObjectives(weekKey, buttonElement);
+        return;
+    }
+
+    autoLinkConfirmationContext = { week: weekKey, buttonElement };
+    if (unitLabel) {
+        unitLabel.textContent = weekKey === 'Onboarding' ? 'Unit 1' : weekKey;
+    }
+    modal.classList.add('show');
+}
+
+function closeAutoLinkConfirmationModal() {
+    autoLinkConfirmationContext = null;
+    const modal = document.getElementById('auto-link-confirmation-modal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+}
+
+function confirmAutoLinkQuestions() {
+    if (!autoLinkConfirmationContext) {
+        closeAutoLinkConfirmationModal();
+        return;
+    }
+
+    const { week, buttonElement } = autoLinkConfirmationContext;
+    closeAutoLinkConfirmationModal();
+    autoLinkQuestionsToLearningObjectives(week, buttonElement);
 }
 
 /**
