@@ -342,6 +342,94 @@
                     </div>
                 </section>
 
+                <!-- Course Lifecycle -->
+                <section class="settings-section" id="course-lifecycle-section">
+                    <h2>Course Lifecycle</h2>
+                    <div class="settings-content">
+                        <div class="setting-item vertical">
+                            <div class="setting-info">
+                                <h3>Deactivate Course</h3>
+                                <p id="course-status-description">When a course is deactivated, students and TAs are blocked from using it. Instructors can still open the course here and reactivate it later.</p>
+                            </div>
+                            <div class="setting-controls full-width-control">
+                                <div class="course-status-panel">
+                                    <div class="course-status-header">
+                                        <span class="course-state-badge active" id="course-status-badge">Active</span>
+                                        <span class="course-state-note" id="course-status-note">Students and TAs can currently use this course.</span>
+                                    </div>
+                                    <button id="toggle-course-active-btn" class="danger-button">Deactivate Course</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="setting-item vertical">
+                            <div class="setting-info">
+                                <h3>Transfer Course</h3>
+                                <p>Create a brand-new course copy from the current course. Materials are recopied and re-parsed, TAs keep their permissions if selected, and no students, chats, or historical activity are carried over.</p>
+                            </div>
+                            <div class="setting-controls full-width-control">
+                                <div class="transfer-course-builder">
+                                    <div class="transfer-field-group">
+                                        <label for="transfer-course-name">New course name</label>
+                                        <input
+                                            type="text"
+                                            id="transfer-course-name"
+                                            class="number-input transfer-course-name-input"
+                                            placeholder="e.g. CPSC 430 Winter 2027"
+                                        >
+                                    </div>
+
+                                    <div class="transfer-global-options">
+                                        <label class="transfer-option">
+                                            <input type="checkbox" id="transfer-settings-toggle" checked>
+                                            <span>Transfer course settings</span>
+                                        </label>
+                                        <label class="transfer-option">
+                                            <input type="checkbox" id="transfer-tas-toggle" checked>
+                                            <span>Transfer TAs and permissions</span>
+                                        </label>
+                                        <label class="transfer-option">
+                                            <input type="checkbox" id="deactivate-source-after-transfer-toggle">
+                                            <span>Deactivate source course after transfer</span>
+                                        </label>
+                                    </div>
+
+                                    <div class="transfer-unit-section">
+                                        <div class="transfer-unit-header">
+                                            <div>
+                                                <h4>Per-Unit Transfer</h4>
+                                                <p>Learning objectives and assessment questions start on by default. Documents also bring their parsed topics along to the new course.</p>
+                                            </div>
+                                            <div class="transfer-unit-masters">
+                                                <label class="transfer-master-option">
+                                                    <input type="checkbox" id="transfer-all-docs" checked>
+                                                    <span>All docs</span>
+                                                </label>
+                                                <label class="transfer-master-option">
+                                                    <input type="checkbox" id="transfer-all-objectives" checked>
+                                                    <span>All learning objectives</span>
+                                                </label>
+                                                <label class="transfer-master-option">
+                                                    <input type="checkbox" id="transfer-all-questions" checked>
+                                                    <span>All questions</span>
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        <div class="transfer-unit-grid" id="transfer-unit-grid">
+                                            <div class="transfer-unit-grid-empty">Loading units...</div>
+                                        </div>
+                                    </div>
+
+                                    <div class="transfer-actions">
+                                        <button id="transfer-course-btn" class="primary-button">Create Course Copy</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Save Button -->
                 <div class="settings-actions">
                     <button id="save-settings" class="primary-button">Save Settings</button>
@@ -350,6 +438,38 @@
             </div>
         </main>
     </div>
+
+    <div id="transfer-course-modal" class="transfer-modal-overlay" aria-hidden="true">
+        <div class="transfer-modal" role="dialog" aria-modal="true" aria-labelledby="transfer-modal-title">
+            <div class="transfer-modal-header">
+                <h2 id="transfer-modal-title">Review Course Copy</h2>
+            </div>
+            <div class="transfer-modal-body">
+                <div id="transfer-modal-confirmation">
+                    <p id="transfer-modal-description">
+                        This will create a new course copy and may take a few minutes while materials are re-parsed and re-indexed.
+                    </p>
+                    <ul id="transfer-modal-summary" class="transfer-modal-summary"></ul>
+                    <div class="transfer-modal-note">
+                        Keep this tab open while the transfer runs. The new course will appear once the copy finishes.
+                    </div>
+                </div>
+
+                <div id="transfer-modal-loading" class="transfer-modal-loading" hidden>
+                    <div class="transfer-modal-spinner" aria-hidden="true"></div>
+                    <h3>Creating course copy...</h3>
+                    <p id="transfer-modal-loading-text">
+                        We’re copying materials, re-parsing files, and rebuilding topics and vectors for the new course.
+                    </p>
+                </div>
+            </div>
+            <div class="transfer-modal-footer">
+                <button id="transfer-modal-cancel" class="secondary-button" type="button">Cancel</button>
+                <button id="transfer-modal-confirm" class="primary-button" type="button">Start Course Copy</button>
+            </div>
+        </div>
+    </div>
+
     <script src="../common/scripts/auth.js"></script>
     <script src="./scripts/instructor.js"></script>
     <script src="./scripts/settings.js"></script>

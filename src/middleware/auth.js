@@ -423,9 +423,12 @@ function createAuthMiddleware(db) {
             }
 
             if (result.enrolled === false) {
+                const isCourseInactive = result.reason === 'course_inactive';
                 return res.status(403).json({
                     success: false,
-                    message: 'Your access to this course is disabled by the instructor.'
+                    message: isCourseInactive
+                        ? 'This course is currently deactivated by the instructor.'
+                        : 'Your access to this course is disabled by the instructor.'
                 });
             }
 
@@ -435,6 +438,51 @@ function createAuthMiddleware(db) {
             return res.status(500).json({
                 success: false,
                 message: 'Enrollment check failed'
+            });
+        }
+    }
+
+    /**
+     * Middleware to block students and TAs from using inactive courses.
+     * Instructors can still access inactive courses so they can reactivate them.
+     * Attempts to infer courseId from body, query, or params.
+     */
+    async function requireActiveCourseForNonInstructors(req, res, next) {
+        try {
+            if (!req.user || req.user.role === 'instructor') {
+                return next();
+            }
+
+            // Allow students to inspect enrollment status for a stale/deactivated course
+            if (req.user.role === 'student' && req.method === 'GET' && req.path.endsWith('/student-enrollment')) {
+                return next();
+            }
+
+            const courseId = (req.body && req.body.courseId) || req.query.courseId || req.params.courseId;
+            if (!courseId) {
+                return next();
+            }
+
+            const CourseModel = require('../models/Course');
+            const course = await CourseModel.getCourseById(db, courseId);
+
+            if (!course) {
+                return next();
+            }
+
+            if (course.status === 'inactive' || course.status === 'deleted') {
+                return res.status(403).json({
+                    success: false,
+                    message: 'This course is currently deactivated by the instructor.'
+                });
+            }
+
+            next();
+        } catch (error) {
+            console.error('Error in requireActiveCourseForNonInstructors middleware:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Course access check failed'
             });
         }
     }
@@ -451,6 +499,7 @@ function createAuthMiddleware(db) {
         requireCourseContext,
         requireTAPermission,
         requireStudentEnrolled,
+        requireActiveCourseForNonInstructors,
         authService
     };
 }

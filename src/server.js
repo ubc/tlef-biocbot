@@ -479,23 +479,23 @@ function setupAPIRoutes() {
     app.use('/api/auth', authMiddleware.populateUser, authRoutes);
 
     // API endpoints (protected)
-    app.use('/api/courses', authMiddleware.requireAuth, coursesRoutes);
-    app.use('/api/flags', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireStudentEnrolled, flagsRoutes);
-    app.use('/api/lectures', authMiddleware.requireAuth, lecturesRoutes);
+    app.use('/api/courses', authMiddleware.requireAuth, authMiddleware.requireActiveCourseForNonInstructors, coursesRoutes);
+    app.use('/api/flags', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, flagsRoutes);
+    app.use('/api/lectures', authMiddleware.requireAuth, authMiddleware.requireActiveCourseForNonInstructors, lecturesRoutes);
 
-    app.use('/api/learning-objectives', authMiddleware.requireAuth, learningObjectivesRoutes);
-    app.use('/api/documents', authMiddleware.requireAuth, documentsRoutes);
-    app.use('/api/questions', authMiddleware.requireAuth, questionsRoutes);
+    app.use('/api/learning-objectives', authMiddleware.requireAuth, authMiddleware.requireActiveCourseForNonInstructors, learningObjectivesRoutes);
+    app.use('/api/documents', authMiddleware.requireAuth, authMiddleware.requireActiveCourseForNonInstructors, documentsRoutes);
+    app.use('/api/questions', authMiddleware.requireAuth, authMiddleware.requireActiveCourseForNonInstructors, questionsRoutes);
     app.use('/api/onboarding', authMiddleware.requireAuth, onboardingRoutes);
     app.use('/api/qdrant', authMiddleware.requireAuth, qdrantRoutes);
-    app.use('/api/chat', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireStudentEnrolled, chatRoutes);
-    app.use('/api/students', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireStudentEnrolled, studentsRoutes);
+    app.use('/api/chat', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, chatRoutes);
+    app.use('/api/students', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, studentsRoutes);
     app.use('/api/user-agreement', authMiddleware.requireAuth, userAgreementRoutes);
-    app.use('/api/settings', authMiddleware.requireAuth, authMiddleware.populateUser, settingsRoutes);
+    app.use('/api/settings', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, settingsRoutes);
     app.use('/api/student/struggle', authMiddleware.requireAuth, authMiddleware.populateUser, studentTrackerRoutes);
-    app.use('/api/struggle-activity', authMiddleware.requireAuth, struggleActivityRoutes);
-    app.use('/api/quiz', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireStudentEnrolled, quizRoutes);
-    app.use('/api/mental-health-flags', authMiddleware.requireAuth, authMiddleware.populateUser, mentalHealthFlagsRoutes);
+    app.use('/api/struggle-activity', authMiddleware.requireAuth, authMiddleware.requireActiveCourseForNonInstructors, struggleActivityRoutes);
+    app.use('/api/quiz', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, quizRoutes);
+    app.use('/api/mental-health-flags', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, mentalHealthFlagsRoutes);
 }
 
 // Initialize the application

@@ -1051,13 +1051,17 @@ async function getCoursesForUser(db, userId, role) {
     let query = {};
     if (role === 'instructor') {
         query = {
+            status: { $ne: 'deleted' },
             $or: [
                 { instructorId: userId },
                 { instructors: userId }
             ]
         };
     } else if (role === 'ta') {
-        query = { tas: userId };
+        query = {
+            tas: userId,
+            status: 'active'
+        };
     }
     
     const courses = await collection.find(query)
@@ -1096,9 +1100,19 @@ async function userHasCourseAccess(db, courseId, userId, role) {
         ];
     } else if (role === 'ta') {
         query.tas = userId;
+        query.status = 'active';
     } else if (role === 'student') {
-        // Students can access published courses (this might need to be more specific)
-        query.isPublished = true;
+        query.status = 'active';
+        const course = await collection.findOne(query, {
+            projection: { studentEnrollment: 1 }
+        });
+
+        if (!course) {
+            return false;
+        }
+
+        const enrollment = course.studentEnrollment && course.studentEnrollment[userId];
+        return !!(enrollment && enrollment.enrolled === true);
     }
     
     const course = await collection.findOne(query);
@@ -1204,6 +1218,11 @@ async function getTAPermissions(db, courseId, taId) {
  * @returns {Promise<boolean>} True if TA has permission
  */
 async function checkTAPermission(db, courseId, taId, feature) {
+    const course = await getCourseById(db, courseId);
+    if (!course || course.status === 'inactive' || course.status === 'deleted') {
+        return false;
+    }
+
     const result = await getTAPermissions(db, courseId, taId);
     
     if (!result.success) {
@@ -1272,11 +1291,20 @@ async function getStudentEnrollment(db, courseId, studentId) {
 
     const course = await collection.findOne(
         { courseId },
-        { projection: { studentEnrollment: 1 } }
+        { projection: { studentEnrollment: 1, status: 1 } }
     );
 
     if (!course) {
         return { success: false, error: 'Course not found' };
+    }
+
+    if (course.status === 'inactive' || course.status === 'deleted') {
+        return {
+            success: true,
+            enrolled: false,
+            status: 'banned',
+            reason: 'course_inactive'
+        };
     }
 
     const enrollment = course.studentEnrollment && course.studentEnrollment[studentId];
@@ -1312,6 +1340,10 @@ async function joinCourse(db, courseId, studentId, code) {
     const course = await collection.findOne({ courseId });
     if (!course) {
         return { success: false, error: 'Course not found' };
+    }
+
+    if (course.status === 'inactive' || course.status === 'deleted') {
+        return { success: false, error: 'Course is deactivated by the instructor' };
     }
 
     // Check if currently blocked
