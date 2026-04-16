@@ -1060,7 +1060,7 @@ async function getCoursesForUser(db, userId, role) {
     } else if (role === 'ta') {
         query = {
             tas: userId,
-            status: 'active'
+            status: { $ne: 'deleted' }
         };
     }
     
@@ -1100,7 +1100,7 @@ async function userHasCourseAccess(db, courseId, userId, role) {
         ];
     } else if (role === 'ta') {
         query.tas = userId;
-        query.status = 'active';
+        query.status = { $ne: 'deleted' };
     } else if (role === 'student') {
         query.status = 'active';
         const course = await collection.findOne(query, {
@@ -1219,7 +1219,7 @@ async function getTAPermissions(db, courseId, taId) {
  */
 async function checkTAPermission(db, courseId, taId, feature) {
     const course = await getCourseById(db, courseId);
-    if (!course || course.status === 'inactive' || course.status === 'deleted') {
+    if (!course || course.status === 'deleted') {
         return false;
     }
 

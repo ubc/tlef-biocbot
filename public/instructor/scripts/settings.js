@@ -287,7 +287,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (transferModalDescription) {
-            transferModalDescription.textContent = 'This will create a new course copy and may take a few minutes while materials are re-parsed and re-indexed.';
+            transferModalDescription.textContent = 'This will create a new course copy and may take a few minutes while materials and existing chunks are copied over.';
         }
 
         if (transferModalSummary) {
@@ -303,7 +303,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (transferModalLoadingText) {
-            transferModalLoadingText.textContent = 'We’re copying materials, re-parsing files, and rebuilding topics and vectors for the new course.';
+            transferModalLoadingText.textContent = 'We’re copying materials, stored chunks, and saved course data into the new course.';
         }
 
         if (transferModalCancelBtn) {
@@ -342,16 +342,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         const counts = getTransferSelectionCounts(payload.units || []);
         const summaryItems = [
             `New course name: ${payload.newCourseName}`,
-            `${counts.docsCount} of ${counts.totalUnits} unit${counts.totalUnits === 1 ? '' : 's'} will copy docs and parsed topics.`,
+            `${counts.docsCount} of ${counts.totalUnits} unit${counts.totalUnits === 1 ? '' : 's'} will copy docs and existing chunks.`,
             `${counts.objectivesCount} of ${counts.totalUnits} unit${counts.totalUnits === 1 ? '' : 's'} will copy learning objectives.`,
             `${counts.questionsCount} of ${counts.totalUnits} unit${counts.totalUnits === 1 ? '' : 's'} will copy assessment questions.`,
+            'Approved course topics will be copied exactly as-is.',
+            'All copied units will start unpublished in the new course.',
             payload.transferSettings ? 'Course settings will be copied.' : 'Course settings will not be copied.',
             payload.transferTAs ? 'TAs and their permissions will be copied.' : 'TAs will not be copied.',
             payload.deactivateSourceCourse ? 'The source course will be deactivated after the transfer finishes.' : 'The source course will stay active after the transfer.'
         ];
 
         if (transferModalDescription) {
-            transferModalDescription.textContent = 'This can take a few minutes because selected materials are copied, re-parsed, and re-indexed for the new course.';
+            transferModalDescription.textContent = 'This can take a few minutes because selected materials and their stored chunks are copied into the new course.';
         }
 
         if (transferModalSummary) {
@@ -383,7 +385,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (transferModalLoadingText) {
-            transferModalLoadingText.textContent = `Creating "${payload.newCourseName}" now. Please keep this tab open while materials are copied, parsed, and indexed.`;
+            transferModalLoadingText.textContent = `Creating "${payload.newCourseName}" now. Please keep this tab open while materials and stored chunks are copied.`;
         }
 
         if (transferModalCancelBtn) {
@@ -408,7 +410,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const header = `
             <div class="transfer-unit-grid-head">Unit</div>
-            <div class="transfer-unit-grid-head">Docs + Topics</div>
+            <div class="transfer-unit-grid-head">Docs + Chunks</div>
             <div class="transfer-unit-grid-head">Learning objectives</div>
             <div class="transfer-unit-grid-head">Questions</div>
         `;
@@ -442,8 +444,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         badge.classList.toggle('inactive', isInactive);
         badge.classList.toggle('active', !isInactive);
         note.textContent = isInactive
-            ? 'Students and TAs are currently blocked from this course.'
-            : 'Students and TAs can currently use this course.';
+            ? 'Students are currently blocked from this course. Instructors and TAs can still manage it.'
+            : 'Students, instructors, and TAs can currently use this course.';
         toggleCourseActiveBtn.textContent = isInactive ? 'Reactivate Course' : 'Deactivate Course';
         toggleCourseActiveBtn.classList.toggle('danger-button', !isInactive);
         toggleCourseActiveBtn.classList.toggle('secondary-button', isInactive);
@@ -649,8 +651,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             const isInactive = lifecycleCourseData.status === 'inactive';
             const nextStatus = isInactive ? 'active' : 'inactive';
             const confirmMessage = isInactive
-                ? 'Reactivate this course so students and TAs can use it again?'
-                : 'Deactivate this course? Students and TAs will be blocked until you reactivate it.';
+                ? 'Reactivate this course so students can use it again?'
+                : 'Deactivate this course? Students will be blocked until you reactivate it, but instructors and TAs will still be able to manage it.';
 
             if (!confirm(confirmMessage)) {
                 return;
@@ -681,7 +683,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 renderCourseStatus();
                 showNotification(
                     nextStatus === 'inactive'
-                        ? 'Course deactivated. Students and TAs are now blocked.'
+                        ? 'Course deactivated. Students are now blocked, but instructors and TAs still have access.'
                         : 'Course reactivated successfully.',
                     'success'
                 );

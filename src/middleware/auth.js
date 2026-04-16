@@ -443,13 +443,13 @@ function createAuthMiddleware(db) {
     }
 
     /**
-     * Middleware to block students and TAs from using inactive courses.
-     * Instructors can still access inactive courses so they can reactivate them.
+     * Middleware to block students from using inactive courses.
+     * Instructors and TAs can still access inactive courses so they can manage/reactivate them.
      * Attempts to infer courseId from body, query, or params.
      */
     async function requireActiveCourseForNonInstructors(req, res, next) {
         try {
-            if (!req.user || req.user.role === 'instructor') {
+            if (!req.user || req.user.role === 'instructor' || req.user.role === 'ta') {
                 return next();
             }
 

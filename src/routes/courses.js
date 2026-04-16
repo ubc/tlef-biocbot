@@ -4,23 +4,14 @@
  */
 
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
 const router = express.Router();
 const CourseModel = require('../models/Course');
 const UserModel = require('../models/User');
 const DocumentModel = require('../models/Document');
 const QdrantService = require('../services/qdrantService');
-const { DocumentParsingModule } = require('ubc-genai-toolkit-document-parsing');
-const { ConsoleLogger } = require('ubc-genai-toolkit-core');
 
 // Middleware to parse JSON bodies
 router.use(express.json());
-
-const docParser = new DocumentParsingModule({
-    logger: new ConsoleLogger(),
-    debug: true
-});
 
 function hasInstructorOrTAAccess(course, userId) {
     return course.instructorId === userId ||
@@ -129,72 +120,19 @@ function inferDocumentSize(sourceDocument, content = '', fileBuffer = null) {
     return Buffer.byteLength(content || '', 'utf8');
 }
 
-async function extractTextFromStoredDocument(sourceDocument) {
+function getStoredDocumentContent(sourceDocument, fileBuffer = null) {
     const contentType = sourceDocument.contentType || (sourceDocument.fileData ? 'file' : 'text');
 
     if (contentType === 'text') {
         return typeof sourceDocument.content === 'string' ? sourceDocument.content : '';
     }
 
-    const fileBuffer = getStoredFileBuffer(sourceDocument.fileData);
-    if (!fileBuffer) {
-        return typeof sourceDocument.content === 'string' ? sourceDocument.content : '';
-    }
-
     const mimeType = (sourceDocument.mimeType || '').toLowerCase();
-    if (mimeType === 'text/plain' || mimeType === 'text/markdown') {
+    if (fileBuffer && (mimeType === 'text/plain' || mimeType === 'text/markdown')) {
         return fileBuffer.toString('utf8');
     }
 
-    const safeName = path.basename(
-        sourceDocument.originalName ||
-        sourceDocument.filename ||
-        `transfer-${sourceDocument.documentId || Date.now()}`
-    );
-    const tempFilePath = `/tmp/${Date.now()}_${safeName}`;
-
-    try {
-        fs.writeFileSync(tempFilePath, fileBuffer);
-        const parsePromise = docParser.parse({ filePath: tempFilePath }, 'text');
-        const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Document parsing timed out after 60 seconds')), 60000)
-        );
-
-        const parseResult = await Promise.race([parsePromise, timeoutPromise]);
-        return parseResult && typeof parseResult.content === 'string'
-            ? parseResult.content
-            : (typeof sourceDocument.content === 'string' ? sourceDocument.content : '');
-    } catch (error) {
-        console.warn(`Warning: Failed to re-parse source document ${sourceDocument.documentId}:`, error.message);
-        return typeof sourceDocument.content === 'string' ? sourceDocument.content : '';
-    } finally {
-        try {
-            fs.unlinkSync(tempFilePath);
-        } catch (cleanupError) {
-            console.warn(`Warning: Failed to remove temp file ${tempFilePath}:`, cleanupError.message);
-        }
-    }
-}
-
-async function extractTopicsFromContent(content, llm, maxTopics = 8) {
-    if (!llm || typeof llm.sendMessage !== 'function' || typeof content !== 'string' || !content.trim()) {
-        return [];
-    }
-
-    try {
-        const prompt = buildTopicExtractionPrompt(content, maxTopics);
-        const response = await llm.sendMessage(prompt, {
-            temperature: 0.1,
-            maxTokens: 300,
-            systemPrompt: 'You extract concise chemistry/biochemistry topic labels from course content. Return strict JSON only.'
-        });
-
-        const parsed = extractFirstJSONObject(response?.content || '');
-        return CourseModel.normalizeTopicList(parsed?.topics || []).slice(0, maxTopics);
-    } catch (error) {
-        console.warn('Warning: Failed to extract topics during course transfer:', error.message);
-        return [];
-    }
+    return typeof sourceDocument.content === 'string' ? sourceDocument.content : '';
 }
 
 async function cloneDocumentForTransfer({
@@ -203,12 +141,11 @@ async function cloneDocumentForTransfer({
     targetCourseId,
     lectureName,
     instructorId,
-    llm,
     qdrantService
 }) {
     const contentType = sourceDocument.contentType || (sourceDocument.fileData ? 'file' : 'text');
     const fileBuffer = contentType === 'file' ? getStoredFileBuffer(sourceDocument.fileData) : null;
-    const reparsedContent = await extractTextFromStoredDocument(sourceDocument);
+    const storedContent = getStoredDocumentContent(sourceDocument, fileBuffer);
     const metadata = sourceDocument.metadata && typeof sourceDocument.metadata === 'object'
         ? deepClone(sourceDocument.metadata)
         : {};
@@ -221,9 +158,9 @@ async function cloneDocumentForTransfer({
         contentType,
         filename: sourceDocument.filename || sourceDocument.originalName || 'Transferred Material',
         originalName: sourceDocument.originalName || sourceDocument.filename || 'Transferred Material',
-        content: reparsedContent || '',
+        content: storedContent || '',
         mimeType: sourceDocument.mimeType || 'text/plain',
-        size: inferDocumentSize(sourceDocument, reparsedContent, fileBuffer),
+        size: inferDocumentSize(sourceDocument, storedContent, fileBuffer),
         metadata
     };
 
@@ -233,36 +170,33 @@ async function cloneDocumentForTransfer({
 
     const createdDocument = await DocumentModel.uploadDocument(db, documentData);
     const warnings = [];
+    const sourceStatus = sourceDocument.status || 'uploaded';
+    await DocumentModel.updateDocumentStatus(db, createdDocument.documentId, sourceStatus);
 
-    if (reparsedContent && reparsedContent.trim()) {
-        await DocumentModel.updateDocumentStatus(db, createdDocument.documentId, 'parsed');
-        try {
-            if (!qdrantService.client || !qdrantService.embeddings) {
-                await qdrantService.initialize();
-            }
-
-            const qdrantResult = await qdrantService.processAndStoreDocument({
-                courseId: targetCourseId,
-                lectureName,
-                documentId: createdDocument.documentId,
-                content: reparsedContent,
-                fileName: documentData.filename,
-                mimeType: documentData.mimeType,
-                documentType: documentData.documentType,
-                type: createdDocument.type
-            });
-
-            if (!qdrantResult.success) {
-                warnings.push(`Vector rebuild failed for "${documentData.originalName}": ${qdrantResult.error}`);
-            }
-        } catch (error) {
-            warnings.push(`Vector rebuild failed for "${documentData.originalName}": ${error.message}`);
+    try {
+        if (!qdrantService.client) {
+            await qdrantService.initialize();
         }
-    } else {
-        warnings.push(`No parsed text was available for "${documentData.originalName}", so topics and vectors were not rebuilt.`);
-    }
 
-    const topics = await extractTopicsFromContent(reparsedContent, llm);
+        const cloneResult = await qdrantService.cloneDocumentChunks({
+            sourceDocumentId: sourceDocument.documentId,
+            targetDocumentId: createdDocument.documentId,
+            targetCourseId,
+            targetLectureName: lectureName,
+            targetFileName: documentData.filename,
+            targetMimeType: documentData.mimeType,
+            targetDocumentType: documentData.documentType,
+            targetType: createdDocument.type
+        });
+
+        if (!cloneResult.success) {
+            warnings.push(`Chunk transfer failed for "${documentData.originalName}": ${cloneResult.error}`);
+        } else if (sourceStatus === 'parsed' && cloneResult.clonedCount === 0) {
+            warnings.push(`No stored chunks were found to transfer for "${documentData.originalName}".`);
+        }
+    } catch (error) {
+        warnings.push(`Chunk transfer failed for "${documentData.originalName}": ${error.message}`);
+    }
 
     return {
         document: createdDocument,
@@ -273,10 +207,9 @@ async function cloneDocumentForTransfer({
             originalName: documentData.originalName,
             mimeType: documentData.mimeType,
             size: documentData.size,
-            status: reparsedContent ? 'parsed' : 'uploaded',
+            status: sourceStatus,
             metadata
         },
-        topics,
         warnings
     };
 }
@@ -1352,7 +1285,7 @@ router.post('/:courseId/transfer', async (req, res) => {
             const config = transferUnitsByName.get(lecture.name);
             const lectureCopy = {
                 name: lecture.name,
-                isPublished: !!lecture.isPublished,
+                isPublished: false,
                 learningObjectives: config.transferLearningObjectives
                     ? deepClone(lecture.learningObjectives || [])
                     : [],
@@ -1391,7 +1324,7 @@ router.post('/:courseId/transfer', async (req, res) => {
             courseDescription: sourceCourse.courseDescription || '',
             assessmentCriteria: sourceCourse.assessmentCriteria || '',
             courseMaterials: Array.isArray(sourceCourse.courseMaterials) ? deepClone(sourceCourse.courseMaterials) : [],
-            approvedStruggleTopics: [],
+            approvedStruggleTopics: deepClone(CourseModel.normalizeTopicList(sourceCourse.approvedStruggleTopics || [])),
             courseStructure: sourceCourse.courseStructure
                 ? deepClone(sourceCourse.courseStructure)
                 : {
@@ -1437,27 +1370,16 @@ router.post('/:courseId/transfer', async (req, res) => {
 
         await db.collection('courses').insertOne(targetCourse);
 
-        const llm = req.app.locals.llm;
         const qdrantService = new QdrantService();
         const transferWarnings = [];
-        const aggregatedTopics = [];
         let documentsCopied = 0;
-        let documentsSelectedUnits = 0;
-        let allDocumentUnitsSelected = true;
 
         for (const lecture of sourceLectures) {
             const config = transferUnitsByName.get(lecture.name);
             const sourceDocuments = await DocumentModel.getDocumentsForLecture(db, courseId, lecture.name);
 
             if (!config.transferDocuments) {
-                if (sourceDocuments.length > 0) {
-                    allDocumentUnitsSelected = false;
-                }
                 continue;
-            }
-
-            if (sourceDocuments.length > 0) {
-                documentsSelectedUnits += 1;
             }
 
             for (const sourceDocument of sourceDocuments) {
@@ -1468,7 +1390,6 @@ router.post('/:courseId/transfer', async (req, res) => {
                         targetCourseId,
                         lectureName: lecture.name,
                         instructorId: user.userId,
-                        llm,
                         qdrantService
                     });
 
@@ -1481,22 +1402,11 @@ router.post('/:courseId/transfer', async (req, res) => {
                     );
 
                     documentsCopied += 1;
-                    aggregatedTopics.push(...transferResult.topics);
                     transferWarnings.push(...transferResult.warnings);
                 } catch (error) {
                     transferWarnings.push(`Failed to transfer "${sourceDocument.originalName || sourceDocument.filename || sourceDocument.documentId}" from ${lecture.name}: ${error.message}`);
                 }
             }
-        }
-
-        if (documentsSelectedUnits > 0) {
-            let approvedTopics = CourseModel.normalizeTopicList(aggregatedTopics);
-
-            if (approvedTopics.length === 0 && allDocumentUnitsSelected) {
-                approvedTopics = CourseModel.normalizeTopicList(sourceCourse.approvedStruggleTopics || []);
-            }
-
-            await CourseModel.setApprovedStruggleTopics(db, targetCourseId, approvedTopics, user.userId);
         }
 
         if (deactivateSourceCourse) {
