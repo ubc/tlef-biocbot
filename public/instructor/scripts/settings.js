@@ -2,6 +2,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     const saveSettingsBtn = document.getElementById('save-settings');
     const resetSettingsBtn = document.getElementById('reset-settings');
     const deleteCollectionBtn = document.getElementById('delete-collection');
+    const courseLifecycleSection = document.getElementById('course-lifecycle-section');
+    const toggleCourseActiveBtn = document.getElementById('toggle-course-active-btn');
+    const transferCourseBtn = document.getElementById('transfer-course-btn');
+    const transferUnitGrid = document.getElementById('transfer-unit-grid');
+    const transferCourseNameInput = document.getElementById('transfer-course-name');
+    const transferAllDocsToggle = document.getElementById('transfer-all-docs');
+    const transferAllObjectivesToggle = document.getElementById('transfer-all-objectives');
+    const transferAllQuestionsToggle = document.getElementById('transfer-all-questions');
+    const transferCourseModal = document.getElementById('transfer-course-modal');
+    const transferModalTitle = document.getElementById('transfer-modal-title');
+    const transferModalDescription = document.getElementById('transfer-modal-description');
+    const transferModalSummary = document.getElementById('transfer-modal-summary');
+    const transferModalConfirmation = document.getElementById('transfer-modal-confirmation');
+    const transferModalLoading = document.getElementById('transfer-modal-loading');
+    const transferModalLoadingText = document.getElementById('transfer-modal-loading-text');
+    const transferModalCancelBtn = document.getElementById('transfer-modal-cancel');
+    const transferModalConfirmBtn = document.getElementById('transfer-modal-confirm');
+    let lifecycleCourseData = null;
+    let pendingTransferPayload = null;
+    let isTransferInProgress = false;
     
     // Check if user can see the delete all button
     await waitForAuth();
@@ -24,12 +44,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Load mental health detection prompt
             await loadMentalHealthDetectionPrompt();
 
+            // Load course lifecycle controls for instructors
+            await initializeCourseLifecycle();
+
             // If user has permission, load global settings (login restriction)
             // and question generation prompts
             if (canManageDB) {
                 await loadAdminSettings();
                 await loadQuestionPrompts();
             }
+
+            consumeDeferredFlashMessage();
         } catch (error) {
             console.error('Error loading settings:', error);
             showNotification('Failed to load settings', 'error');
@@ -209,6 +234,272 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    function consumeDeferredFlashMessage() {
+        try {
+            const rawMessage = sessionStorage.getItem('settingsFlashMessage');
+            if (!rawMessage) return;
+
+            sessionStorage.removeItem('settingsFlashMessage');
+            const parsed = JSON.parse(rawMessage);
+            if (parsed && parsed.message) {
+                showNotification(parsed.message, parsed.type || 'info');
+            }
+        } catch (error) {
+            console.warn('Unable to display deferred settings message:', error);
+        }
+    }
+
+    function updateMasterTransferToggle(toggleId, selector) {
+        const toggle = document.getElementById(toggleId);
+        if (!toggle) return;
+
+        const checkboxes = Array.from(document.querySelectorAll(selector));
+        if (checkboxes.length === 0) {
+            toggle.checked = false;
+            toggle.indeterminate = false;
+            return;
+        }
+
+        const checkedCount = checkboxes.filter(checkbox => checkbox.checked).length;
+        toggle.checked = checkedCount === checkboxes.length;
+        toggle.indeterminate = checkedCount > 0 && checkedCount < checkboxes.length;
+    }
+
+    function syncTransferMasterToggles() {
+        updateMasterTransferToggle('transfer-all-docs', '.transfer-docs-checkbox');
+        updateMasterTransferToggle('transfer-all-objectives', '.transfer-objectives-checkbox');
+        updateMasterTransferToggle('transfer-all-questions', '.transfer-questions-checkbox');
+    }
+
+    function setTransferModalVisibility(isVisible) {
+        if (!transferCourseModal) return;
+        transferCourseModal.classList.toggle('show', isVisible);
+        transferCourseModal.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+        document.body.style.overflow = isVisible ? 'hidden' : '';
+    }
+
+    function resetTransferModalState() {
+        isTransferInProgress = false;
+        pendingTransferPayload = null;
+
+        if (transferModalTitle) {
+            transferModalTitle.textContent = 'Review Course Copy';
+        }
+
+        if (transferModalDescription) {
+            transferModalDescription.textContent = 'This will create a new course copy and may take a few minutes while materials and existing chunks are copied over.';
+        }
+
+        if (transferModalSummary) {
+            transferModalSummary.innerHTML = '';
+        }
+
+        if (transferModalConfirmation) {
+            transferModalConfirmation.hidden = false;
+        }
+
+        if (transferModalLoading) {
+            transferModalLoading.hidden = true;
+        }
+
+        if (transferModalLoadingText) {
+            transferModalLoadingText.textContent = 'We’re copying materials, stored chunks, and saved course data into the new course.';
+        }
+
+        if (transferModalCancelBtn) {
+            transferModalCancelBtn.disabled = false;
+            transferModalCancelBtn.hidden = false;
+        }
+
+        if (transferModalConfirmBtn) {
+            transferModalConfirmBtn.disabled = false;
+            transferModalConfirmBtn.textContent = 'Start Course Copy';
+            transferModalConfirmBtn.hidden = false;
+        }
+    }
+
+    function closeTransferModal({ force = false } = {}) {
+        if (isTransferInProgress && !force) return;
+        resetTransferModalState();
+        setTransferModalVisibility(false);
+    }
+
+    function getTransferSelectionCounts(units = []) {
+        return {
+            totalUnits: units.length,
+            docsCount: units.filter(unit => unit.transferDocuments).length,
+            objectivesCount: units.filter(unit => unit.transferLearningObjectives).length,
+            questionsCount: units.filter(unit => unit.transferAssessmentQuestions).length
+        };
+    }
+
+    function openTransferModal(payload) {
+        if (!transferCourseModal) return;
+
+        resetTransferModalState();
+        pendingTransferPayload = payload;
+
+        const counts = getTransferSelectionCounts(payload.units || []);
+        const summaryItems = [
+            `New course name: ${payload.newCourseName}`,
+            `${counts.docsCount} of ${counts.totalUnits} unit${counts.totalUnits === 1 ? '' : 's'} will copy docs and existing chunks.`,
+            `${counts.objectivesCount} of ${counts.totalUnits} unit${counts.totalUnits === 1 ? '' : 's'} will copy learning objectives.`,
+            `${counts.questionsCount} of ${counts.totalUnits} unit${counts.totalUnits === 1 ? '' : 's'} will copy assessment questions.`,
+            'Approved course topics will be copied exactly as-is.',
+            'All copied units will start unpublished in the new course.',
+            payload.transferSettings ? 'Course settings will be copied.' : 'Course settings will not be copied.',
+            payload.transferTAs ? 'TAs and their permissions will be copied.' : 'TAs will not be copied.',
+            payload.deactivateSourceCourse ? 'The source course will be deactivated after the transfer finishes.' : 'The source course will stay active after the transfer.'
+        ];
+
+        if (transferModalDescription) {
+            transferModalDescription.textContent = 'This can take a few minutes because selected materials and their stored chunks are copied into the new course.';
+        }
+
+        if (transferModalSummary) {
+            transferModalSummary.innerHTML = '';
+            summaryItems.forEach(item => {
+                const listItem = document.createElement('li');
+                listItem.textContent = item;
+                transferModalSummary.appendChild(listItem);
+            });
+        }
+
+        setTransferModalVisibility(true);
+        window.setTimeout(() => transferModalConfirmBtn?.focus(), 0);
+    }
+
+    function setTransferModalLoading(payload) {
+        isTransferInProgress = true;
+
+        if (transferModalTitle) {
+            transferModalTitle.textContent = 'Creating Course Copy...';
+        }
+
+        if (transferModalConfirmation) {
+            transferModalConfirmation.hidden = true;
+        }
+
+        if (transferModalLoading) {
+            transferModalLoading.hidden = false;
+        }
+
+        if (transferModalLoadingText) {
+            transferModalLoadingText.textContent = `Creating "${payload.newCourseName}" now. Please keep this tab open while materials and stored chunks are copied.`;
+        }
+
+        if (transferModalCancelBtn) {
+            transferModalCancelBtn.disabled = true;
+            transferModalCancelBtn.hidden = true;
+        }
+
+        if (transferModalConfirmBtn) {
+            transferModalConfirmBtn.disabled = true;
+            transferModalConfirmBtn.textContent = 'Creating...';
+        }
+    }
+
+    function renderTransferUnitGrid(lectures = []) {
+        if (!transferUnitGrid) return;
+
+        if (!Array.isArray(lectures) || lectures.length === 0) {
+            transferUnitGrid.innerHTML = '<div class="transfer-unit-grid-empty">No units found for this course yet.</div>';
+            syncTransferMasterToggles();
+            return;
+        }
+
+        const header = `
+            <div class="transfer-unit-grid-head">Unit</div>
+            <div class="transfer-unit-grid-head">Docs + Chunks</div>
+            <div class="transfer-unit-grid-head">Learning objectives</div>
+            <div class="transfer-unit-grid-head">Questions</div>
+        `;
+
+        const rows = lectures.map(lecture => `
+            <div class="transfer-unit-row" data-unit-name="${lecture.name}">
+                <div class="transfer-unit-name">${lecture.displayName || lecture.name}</div>
+                <label class="transfer-unit-checkbox">
+                    <input type="checkbox" class="transfer-docs-checkbox" data-unit-name="${lecture.name}" checked>
+                </label>
+                <label class="transfer-unit-checkbox">
+                    <input type="checkbox" class="transfer-objectives-checkbox" data-unit-name="${lecture.name}" checked>
+                </label>
+                <label class="transfer-unit-checkbox">
+                    <input type="checkbox" class="transfer-questions-checkbox" data-unit-name="${lecture.name}" checked>
+                </label>
+            </div>
+        `).join('');
+
+        transferUnitGrid.innerHTML = `${header}${rows}`;
+        syncTransferMasterToggles();
+    }
+
+    function renderCourseStatus() {
+        const badge = document.getElementById('course-status-badge');
+        const note = document.getElementById('course-status-note');
+        if (!badge || !note || !toggleCourseActiveBtn || !lifecycleCourseData) return;
+
+        const isInactive = lifecycleCourseData.status === 'inactive';
+        badge.textContent = isInactive ? 'Inactive' : 'Active';
+        badge.classList.toggle('inactive', isInactive);
+        badge.classList.toggle('active', !isInactive);
+        note.textContent = isInactive
+            ? 'Students are currently blocked from this course. Instructors and TAs can still manage it.'
+            : 'Students, instructors, and TAs can currently use this course.';
+        toggleCourseActiveBtn.textContent = isInactive ? 'Reactivate Course' : 'Deactivate Course';
+        toggleCourseActiveBtn.classList.toggle('danger-button', !isInactive);
+        toggleCourseActiveBtn.classList.toggle('secondary-button', isInactive);
+    }
+
+    async function initializeCourseLifecycle() {
+        const currentUser = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
+        if (!courseLifecycleSection) return;
+
+        if (!currentUser || currentUser.role !== 'instructor') {
+            courseLifecycleSection.style.display = 'none';
+            return;
+        }
+
+        courseLifecycleSection.style.display = '';
+
+        try {
+            const courseId = await getCurrentCourseId();
+            if (!courseId) {
+                lifecycleCourseData = null;
+                if (transferUnitGrid) {
+                    transferUnitGrid.innerHTML = '<div class="transfer-unit-grid-empty">Select a course first to use transfer and deactivate tools.</div>';
+                }
+                if (toggleCourseActiveBtn) toggleCourseActiveBtn.disabled = true;
+                if (transferCourseBtn) transferCourseBtn.disabled = true;
+                return;
+            }
+
+            const response = await fetch(`/api/courses/${courseId}`);
+            const result = await response.json();
+            if (!response.ok || !result.success || !result.data) {
+                throw new Error(result.message || 'Failed to load course lifecycle data');
+            }
+
+            lifecycleCourseData = result.data;
+            renderCourseStatus();
+            renderTransferUnitGrid(lifecycleCourseData.lectures || []);
+
+            if (transferCourseNameInput && !transferCourseNameInput.value.trim()) {
+                transferCourseNameInput.value = `${lifecycleCourseData.name} Copy`;
+            }
+
+            if (toggleCourseActiveBtn) toggleCourseActiveBtn.disabled = false;
+            if (transferCourseBtn) transferCourseBtn.disabled = false;
+        } catch (error) {
+            console.error('Error initializing course lifecycle section:', error);
+            if (transferUnitGrid) {
+                transferUnitGrid.innerHTML = '<div class="transfer-unit-grid-empty">Unable to load course transfer options right now.</div>';
+            }
+            if (toggleCourseActiveBtn) toggleCourseActiveBtn.disabled = true;
+            if (transferCourseBtn) transferCourseBtn.disabled = true;
+        }
+    }
+
     // Handle mental health prompt reset button
     const resetMHPromptBtn = document.getElementById('reset-mh-prompt');
     if (resetMHPromptBtn) {
@@ -231,6 +522,217 @@ document.addEventListener('DOMContentLoaded', async () => {
                 console.error('Error resetting MH detection prompt:', error);
                 showNotification('Failed to reset detection prompt', 'error');
             }
+        });
+    }
+
+    if (transferAllDocsToggle) {
+        transferAllDocsToggle.addEventListener('change', (event) => {
+            document.querySelectorAll('.transfer-docs-checkbox').forEach(checkbox => {
+                checkbox.checked = event.target.checked;
+            });
+            syncTransferMasterToggles();
+        });
+    }
+
+    if (transferAllObjectivesToggle) {
+        transferAllObjectivesToggle.addEventListener('change', (event) => {
+            document.querySelectorAll('.transfer-objectives-checkbox').forEach(checkbox => {
+                checkbox.checked = event.target.checked;
+            });
+            syncTransferMasterToggles();
+        });
+    }
+
+    if (transferAllQuestionsToggle) {
+        transferAllQuestionsToggle.addEventListener('change', (event) => {
+            document.querySelectorAll('.transfer-questions-checkbox').forEach(checkbox => {
+                checkbox.checked = event.target.checked;
+            });
+            syncTransferMasterToggles();
+        });
+    }
+
+    if (transferUnitGrid) {
+        transferUnitGrid.addEventListener('change', (event) => {
+            if (!event.target.matches('input[type="checkbox"]')) return;
+            syncTransferMasterToggles();
+        });
+    }
+
+    if (transferCourseModal) {
+        transferCourseModal.addEventListener('click', (event) => {
+            if (event.target === transferCourseModal) {
+                closeTransferModal();
+            }
+        });
+    }
+
+    if (transferModalCancelBtn) {
+        transferModalCancelBtn.addEventListener('click', () => {
+            closeTransferModal();
+        });
+    }
+
+    if (transferModalConfirmBtn) {
+        transferModalConfirmBtn.addEventListener('click', async () => {
+            if (!pendingTransferPayload || isTransferInProgress) return;
+
+            isTransferInProgress = true;
+            setTransferModalLoading(pendingTransferPayload);
+
+            transferCourseBtn.disabled = true;
+            const previousLabel = transferCourseBtn.textContent;
+            transferCourseBtn.textContent = 'Creating Copy...';
+
+            try {
+                const courseId = await getCurrentCourseId();
+                const response = await fetch(`/api/courses/${courseId}/transfer`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        newCourseName: pendingTransferPayload.newCourseName,
+                        transferSettings: pendingTransferPayload.transferSettings,
+                        transferTAs: pendingTransferPayload.transferTAs,
+                        deactivateSourceCourse: pendingTransferPayload.deactivateSourceCourse,
+                        units: pendingTransferPayload.units
+                    })
+                });
+
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.message || 'Failed to transfer course');
+                }
+
+                const warnings = Array.isArray(result.data?.warnings) ? result.data.warnings : [];
+                const summary = warnings.length > 0
+                    ? `Course copy created with ${warnings.length} warning${warnings.length === 1 ? '' : 's'}.`
+                    : 'Course copy created successfully.';
+
+                sessionStorage.setItem('settingsFlashMessage', JSON.stringify({
+                    message: warnings.length > 0
+                        ? `${summary} Switched to ${result.data.courseName}.`
+                        : `${summary} Switched to ${result.data.courseName}.`,
+                    type: warnings.length > 0 ? 'info' : 'success'
+                }));
+
+                localStorage.setItem('selectedCourseId', result.data.courseId);
+                if (typeof setCurrentCourseId === 'function') {
+                    await setCurrentCourseId(result.data.courseId);
+                }
+
+                closeTransferModal({ force: true });
+
+                if (warnings.length > 0) {
+                    alert(`${summary}\n\n${warnings.slice(0, 8).join('\n')}`);
+                }
+
+                window.location.href = `/instructor/settings?courseId=${encodeURIComponent(result.data.courseId)}`;
+            } catch (error) {
+                console.error('Error transferring course:', error);
+                closeTransferModal({ force: true });
+                showNotification(error.message || 'Failed to transfer course', 'error');
+            } finally {
+                transferCourseBtn.disabled = false;
+                transferCourseBtn.textContent = previousLabel;
+            }
+        });
+    }
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && transferCourseModal?.classList.contains('show')) {
+            closeTransferModal();
+        }
+    });
+
+    if (toggleCourseActiveBtn) {
+        toggleCourseActiveBtn.addEventListener('click', async () => {
+            if (!lifecycleCourseData) return;
+
+            const isInactive = lifecycleCourseData.status === 'inactive';
+            const nextStatus = isInactive ? 'active' : 'inactive';
+            const confirmMessage = isInactive
+                ? 'Reactivate this course so students can use it again?'
+                : 'Deactivate this course? Students will be blocked until you reactivate it, but instructors and TAs will still be able to manage it.';
+
+            if (!confirm(confirmMessage)) {
+                return;
+            }
+
+            toggleCourseActiveBtn.disabled = true;
+            const previousLabel = toggleCourseActiveBtn.textContent;
+            toggleCourseActiveBtn.textContent = isInactive ? 'Reactivating...' : 'Deactivating...';
+
+            try {
+                const courseId = await getCurrentCourseId();
+                const instructorId = getCurrentInstructorId();
+                const response = await fetch(`/api/courses/${courseId}?instructorId=${encodeURIComponent(instructorId)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        instructorId,
+                        status: nextStatus
+                    })
+                });
+
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.message || 'Failed to update course status');
+                }
+
+                lifecycleCourseData.status = nextStatus;
+                renderCourseStatus();
+                showNotification(
+                    nextStatus === 'inactive'
+                        ? 'Course deactivated. Students are now blocked, but instructors and TAs still have access.'
+                        : 'Course reactivated successfully.',
+                    'success'
+                );
+            } catch (error) {
+                console.error('Error updating course status:', error);
+                showNotification(error.message || 'Failed to update course status', 'error');
+            } finally {
+                toggleCourseActiveBtn.disabled = false;
+                if (toggleCourseActiveBtn.textContent === 'Reactivating...' || toggleCourseActiveBtn.textContent === 'Deactivating...') {
+                    toggleCourseActiveBtn.textContent = previousLabel;
+                }
+                renderCourseStatus();
+            }
+        });
+    }
+
+    if (transferCourseBtn) {
+        transferCourseBtn.addEventListener('click', async () => {
+            if (!lifecycleCourseData) {
+                showNotification('Course data is still loading. Please try again.', 'warning');
+                return;
+            }
+
+            const newCourseName = transferCourseNameInput?.value?.trim() || '';
+            if (!newCourseName) {
+                showNotification('Please enter a name for the new course.', 'error');
+                transferCourseNameInput?.focus();
+                return;
+            }
+
+            const unitRows = Array.from(document.querySelectorAll('.transfer-unit-row'));
+            const units = unitRows.map(row => {
+                const unitName = row.getAttribute('data-unit-name');
+                return {
+                    unitName,
+                    transferDocuments: row.querySelector('.transfer-docs-checkbox')?.checked !== false,
+                    transferLearningObjectives: row.querySelector('.transfer-objectives-checkbox')?.checked !== false,
+                    transferAssessmentQuestions: row.querySelector('.transfer-questions-checkbox')?.checked !== false
+                };
+            });
+
+            const deactivateSourceCourse = document.getElementById('deactivate-source-after-transfer-toggle')?.checked === true;
+            openTransferModal({
+                newCourseName,
+                transferSettings: document.getElementById('transfer-settings-toggle')?.checked === true,
+                transferTAs: document.getElementById('transfer-tas-toggle')?.checked === true,
+                deactivateSourceCourse,
+                units
+            });
         });
     }
 

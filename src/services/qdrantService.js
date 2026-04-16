@@ -648,6 +648,110 @@ class QdrantService {
     }
 
     /**
+     * Clone all stored chunks for one document onto another document/course/unit without re-chunking.
+     * Reuses the existing vectors and chunk text payload so transfers stay 1:1 with the source.
+     * @param {Object} params
+     * @param {string} params.sourceDocumentId
+     * @param {string} params.targetDocumentId
+     * @param {string} params.targetCourseId
+     * @param {string} params.targetLectureName
+     * @param {string} params.targetFileName
+     * @param {string} params.targetMimeType
+     * @param {string} params.targetDocumentType
+     * @param {string} params.targetType
+     * @returns {Promise<Object>} Result of clone operation
+     */
+    async cloneDocumentChunks({
+        sourceDocumentId,
+        targetDocumentId,
+        targetCourseId,
+        targetLectureName,
+        targetFileName,
+        targetMimeType,
+        targetDocumentType,
+        targetType
+    }) {
+        try {
+            if (!sourceDocumentId || !targetDocumentId || !targetCourseId || !targetLectureName) {
+                throw new Error('Missing required chunk clone parameters');
+            }
+
+            await this.ensureCollectionExists();
+
+            const filter = {
+                must: [
+                    { key: 'documentId', match: { value: sourceDocumentId } }
+                ]
+            };
+
+            const sourcePoints = [];
+            let nextOffset = null;
+            let loopCount = 0;
+            const MAX_LOOPS = 100;
+
+            do {
+                loopCount += 1;
+                const scrollResult = await this.client.scroll(this.collectionName, {
+                    filter,
+                    limit: 1000,
+                    with_payload: true,
+                    with_vector: true,
+                    offset: nextOffset
+                });
+
+                const points = scrollResult.points || [];
+                nextOffset = scrollResult.next_page_offset;
+
+                sourcePoints.push(...points);
+
+                if (points.length === 0 || loopCount >= MAX_LOOPS) {
+                    break;
+                }
+            } while (nextOffset);
+
+            if (sourcePoints.length === 0) {
+                return {
+                    success: true,
+                    clonedCount: 0,
+                    message: 'No stored chunks were found for the source document'
+                };
+            }
+
+            const clonedPoints = sourcePoints.map((point) => ({
+                id: randomUUID(),
+                vector: point.vector,
+                payload: {
+                    ...(point.payload || {}),
+                    courseId: targetCourseId,
+                    lectureName: targetLectureName,
+                    documentId: targetDocumentId,
+                    fileName: targetFileName,
+                    mimeType: targetMimeType,
+                    documentType: targetDocumentType || point.payload?.documentType || 'unknown',
+                    type: targetType || point.payload?.type || 'unknown',
+                    timestamp: new Date().toISOString()
+                }
+            }));
+
+            await this.client.upsert(this.collectionName, {
+                points: clonedPoints
+            });
+
+            return {
+                success: true,
+                clonedCount: clonedPoints.length,
+                message: `Cloned ${clonedPoints.length} stored chunks successfully`
+            };
+        } catch (error) {
+            console.error('❌ Error cloning document chunks:', error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
      * Delete all chunks for a specific document
      * @param {string} documentId - Document ID to delete
      * @param {string} [courseId] - Optional course ID to scope the deletion

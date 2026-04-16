@@ -302,3 +302,382 @@ input.is-invalid {
     font-size: 0.9rem;
     padding: 0.5rem;
 }
+
+/* Course Lifecycle */
+.course-status-panel,
+.transfer-course-builder {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    width: 100%;
+}
+
+.course-status-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.course-state-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.8rem;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.course-state-badge.active {
+    background: #e8f7ef;
+    color: #1f7a46;
+}
+
+.course-state-badge.inactive {
+    background: #fdecec;
+    color: #b42318;
+}
+
+.course-state-note {
+    color: var(--text-secondary, #666);
+    font-size: 0.95rem;
+}
+
+.transfer-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.transfer-course-name-input {
+    width: 100%;
+    max-width: 420px;
+}
+
+.transfer-global-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.75rem;
+}
+
+.setting-item .transfer-option,
+.setting-item .transfer-master-option {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    color: var(--text-primary, #333);
+    font-size: 0.95rem;
+    margin-bottom: 0;
+}
+
+.setting-item .transfer-option {
+    min-height: 56px;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 10px;
+    background: white;
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.setting-item .transfer-option:hover,
+.setting-item .transfer-master-option:hover {
+    border-color: var(--primary-color, #0055b7);
+    background: rgba(var(--primary-rgb), 0.04);
+}
+
+.setting-item .transfer-option span,
+.setting-item .transfer-master-option span {
+    line-height: 1.35;
+}
+
+.transfer-unit-section {
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 10px;
+    padding: 1rem;
+    background: #fafbfd;
+}
+
+.transfer-unit-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.transfer-unit-header > div:first-child {
+    flex: 1 1 360px;
+    min-width: 0;
+}
+
+.transfer-unit-header h4 {
+    margin: 0 0 0.35rem 0;
+    font-size: 1rem;
+}
+
+.transfer-unit-header p {
+    margin: 0;
+    color: var(--text-secondary, #666);
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
+.transfer-unit-masters {
+    display: grid;
+    grid-template-columns: repeat(3, max-content);
+    gap: 0.65rem 0.85rem;
+    justify-content: flex-end;
+    align-items: start;
+    flex: 0 0 auto;
+}
+
+.setting-item .transfer-master-option {
+    padding: 0.55rem 0.8rem;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 999px;
+    background: white;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.transfer-unit-grid {
+    display: grid;
+    grid-template-columns: minmax(180px, 2fr) repeat(3, minmax(110px, 1fr));
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.transfer-unit-grid-head {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--text-secondary, #666);
+    padding: 0 0.25rem 0.35rem;
+    line-height: 1.3;
+}
+
+.transfer-unit-row {
+    display: contents;
+}
+
+.transfer-unit-name {
+    padding: 0.85rem 0.95rem;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 10px;
+    background: white;
+    font-weight: 500;
+}
+
+.transfer-unit-checkbox {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 52px;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 10px;
+    background: white;
+}
+
+.transfer-unit-checkbox input,
+.setting-item .transfer-master-option input,
+.setting-item .transfer-option input {
+    accent-color: var(--primary-color, #0055b7);
+    width: auto;
+    height: 16px;
+    padding: 0;
+    margin: 0;
+    flex: 0 0 auto;
+}
+
+.transfer-unit-grid-empty {
+    grid-column: 1 / -1;
+    padding: 1rem;
+    color: var(--text-secondary, #666);
+    text-align: center;
+    border: 1px dashed var(--border-color, #d9d9d9);
+    border-radius: 10px;
+    background: white;
+}
+
+.transfer-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.transfer-modal-overlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    justify-content: center;
+    align-items: center;
+    padding: 1.5rem;
+    background: rgba(15, 23, 42, 0.58);
+    z-index: 10000;
+}
+
+.transfer-modal-overlay.show {
+    display: flex;
+}
+
+.transfer-modal {
+    width: min(100%, 560px);
+    background: #fff;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 16px;
+    box-shadow: 0 24px 64px rgba(15, 23, 42, 0.2);
+    overflow: hidden;
+}
+
+.transfer-modal-header,
+.transfer-modal-body,
+.transfer-modal-footer {
+    padding: 1.25rem 1.35rem;
+}
+
+.transfer-modal-header {
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+}
+
+.transfer-modal-header h2 {
+    margin: 0;
+    font-size: 1.2rem;
+    color: var(--text-primary, #333);
+}
+
+.transfer-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.transfer-modal-body p {
+    margin: 0;
+    color: var(--text-secondary, #666);
+    line-height: 1.55;
+}
+
+.transfer-modal-summary {
+    margin: 0;
+    padding-left: 1.1rem;
+    color: var(--text-primary, #333);
+    line-height: 1.5;
+}
+
+.transfer-modal-summary li + li {
+    margin-top: 0.35rem;
+}
+
+.transfer-modal-note {
+    padding: 0.9rem 1rem;
+    border-radius: 12px;
+    background: #f4f7fb;
+    border: 1px solid #dbe5f0;
+    color: var(--text-primary, #333);
+    line-height: 1.45;
+    font-size: 0.95rem;
+}
+
+.transfer-modal-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.85rem;
+    text-align: center;
+    padding: 0.5rem 0 0.25rem;
+}
+
+#transfer-modal-confirmation[hidden],
+.transfer-modal-loading[hidden] {
+    display: none !important;
+}
+
+.transfer-modal-loading h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    color: var(--text-primary, #333);
+}
+
+.transfer-modal-spinner {
+    width: 54px;
+    height: 54px;
+    border-radius: 50%;
+    border: 4px solid #dfe5ec;
+    border-top-color: var(--primary-color, #0055b7);
+    animation: transferModalSpin 0.9s linear infinite;
+}
+
+@keyframes transferModalSpin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.transfer-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    border-top: 1px solid var(--border-color, #e0e0e0);
+}
+
+.transfer-modal-footer button[disabled] {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+    .transfer-global-options {
+        grid-template-columns: 1fr;
+    }
+
+    .transfer-unit-header {
+        flex-direction: column;
+    }
+
+    .transfer-unit-masters {
+        grid-template-columns: 1fr;
+        width: 100%;
+        justify-content: stretch;
+    }
+
+    .setting-item .transfer-master-option {
+        justify-content: space-between;
+    }
+
+    .transfer-unit-grid {
+        grid-template-columns: minmax(120px, 1.6fr) repeat(3, minmax(70px, 1fr));
+        font-size: 0.9rem;
+    }
+
+    .transfer-unit-name,
+    .transfer-unit-checkbox {
+        min-height: 48px;
+        padding: 0.7rem;
+    }
+
+    .transfer-actions {
+        justify-content: stretch;
+    }
+
+    .transfer-actions button {
+        width: 100%;
+    }
+
+    .transfer-modal-overlay {
+        padding: 1rem;
+    }
+
+    .transfer-modal-footer {
+        flex-direction: column-reverse;
+    }
+
+    .transfer-modal-footer button {
+        width: 100%;
+    }
+}

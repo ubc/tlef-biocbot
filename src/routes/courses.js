@@ -58,6 +58,162 @@ ${truncatedContent}
 `;
 }
 
+function generateCourseCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+}
+
+function generateCourseId(courseName = '') {
+    return `${String(courseName)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'course'}-${Date.now()}`;
+}
+
+function deepClone(value) {
+    return JSON.parse(JSON.stringify(value));
+}
+
+function normalizeTransferUnitConfig(unit = {}) {
+    return {
+        unitName: unit.unitName || unit.name || unit.lectureName || '',
+        transferDocuments: unit.transferDocuments !== false,
+        transferLearningObjectives: unit.transferLearningObjectives !== false,
+        transferAssessmentQuestions: unit.transferAssessmentQuestions !== false
+    };
+}
+
+function getStoredFileBuffer(fileData) {
+    if (!fileData) {
+        return null;
+    }
+
+    if (Buffer.isBuffer(fileData)) {
+        return fileData;
+    }
+
+    if (fileData.buffer) {
+        return Buffer.from(fileData.buffer);
+    }
+
+    if (typeof fileData === 'string') {
+        return Buffer.from(fileData, 'base64');
+    }
+
+    return null;
+}
+
+function inferDocumentSize(sourceDocument, content = '', fileBuffer = null) {
+    if (typeof sourceDocument.size === 'number' && sourceDocument.size > 0) {
+        return sourceDocument.size;
+    }
+
+    if (fileBuffer) {
+        return fileBuffer.length;
+    }
+
+    return Buffer.byteLength(content || '', 'utf8');
+}
+
+function getStoredDocumentContent(sourceDocument, fileBuffer = null) {
+    const contentType = sourceDocument.contentType || (sourceDocument.fileData ? 'file' : 'text');
+
+    if (contentType === 'text') {
+        return typeof sourceDocument.content === 'string' ? sourceDocument.content : '';
+    }
+
+    const mimeType = (sourceDocument.mimeType || '').toLowerCase();
+    if (fileBuffer && (mimeType === 'text/plain' || mimeType === 'text/markdown')) {
+        return fileBuffer.toString('utf8');
+    }
+
+    return typeof sourceDocument.content === 'string' ? sourceDocument.content : '';
+}
+
+async function cloneDocumentForTransfer({
+    db,
+    sourceDocument,
+    targetCourseId,
+    lectureName,
+    instructorId,
+    qdrantService
+}) {
+    const contentType = sourceDocument.contentType || (sourceDocument.fileData ? 'file' : 'text');
+    const fileBuffer = contentType === 'file' ? getStoredFileBuffer(sourceDocument.fileData) : null;
+    const storedContent = getStoredDocumentContent(sourceDocument, fileBuffer);
+    const metadata = sourceDocument.metadata && typeof sourceDocument.metadata === 'object'
+        ? deepClone(sourceDocument.metadata)
+        : {};
+
+    const documentData = {
+        courseId: targetCourseId,
+        lectureName,
+        documentType: sourceDocument.documentType || 'additional',
+        instructorId,
+        contentType,
+        filename: sourceDocument.filename || sourceDocument.originalName || 'Transferred Material',
+        originalName: sourceDocument.originalName || sourceDocument.filename || 'Transferred Material',
+        content: storedContent || '',
+        mimeType: sourceDocument.mimeType || 'text/plain',
+        size: inferDocumentSize(sourceDocument, storedContent, fileBuffer),
+        metadata
+    };
+
+    if (contentType === 'file' && fileBuffer) {
+        documentData.fileData = fileBuffer;
+    }
+
+    const createdDocument = await DocumentModel.uploadDocument(db, documentData);
+    const warnings = [];
+    const sourceStatus = sourceDocument.status || 'uploaded';
+    await DocumentModel.updateDocumentStatus(db, createdDocument.documentId, sourceStatus);
+
+    try {
+        if (!qdrantService.client) {
+            await qdrantService.initialize();
+        }
+
+        const cloneResult = await qdrantService.cloneDocumentChunks({
+            sourceDocumentId: sourceDocument.documentId,
+            targetDocumentId: createdDocument.documentId,
+            targetCourseId,
+            targetLectureName: lectureName,
+            targetFileName: documentData.filename,
+            targetMimeType: documentData.mimeType,
+            targetDocumentType: documentData.documentType,
+            targetType: createdDocument.type
+        });
+
+        if (!cloneResult.success) {
+            warnings.push(`Chunk transfer failed for "${documentData.originalName}": ${cloneResult.error}`);
+        } else if (sourceStatus === 'parsed' && cloneResult.clonedCount === 0) {
+            warnings.push(`No stored chunks were found to transfer for "${documentData.originalName}".`);
+        }
+    } catch (error) {
+        warnings.push(`Chunk transfer failed for "${documentData.originalName}": ${error.message}`);
+    }
+
+    return {
+        document: createdDocument,
+        reference: {
+            documentId: createdDocument.documentId,
+            documentType: documentData.documentType,
+            filename: documentData.filename,
+            originalName: documentData.originalName,
+            mimeType: documentData.mimeType,
+            size: documentData.size,
+            status: sourceStatus,
+            metadata
+        },
+        warnings
+    };
+}
+
 /**
  * POST /api/courses
  * Create a new course for an instructor (updated for onboarding)
@@ -861,6 +1017,23 @@ async function getCourseForStudent(req, res, courseId) {
                 message: 'Course not found'
             });
         }
+
+        const enrollment = await CourseModel.getStudentEnrollment(db, courseId, req.user.userId);
+        if (!enrollment.success) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        if (!enrollment.enrolled) {
+            return res.status(403).json({
+                success: false,
+                message: enrollment.reason === 'course_inactive'
+                    ? 'This course is currently deactivated by the instructor.'
+                    : 'Your access to this course is disabled by the instructor.'
+            });
+        }
         
         console.log(`Course found: ${courseId}, lectures count: ${course.lectures?.length || 0}`);
         console.log('Raw course data from DB:', JSON.stringify(course, null, 2));
@@ -1030,6 +1203,251 @@ router.put('/:courseId', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Internal server error'
+        });
+    }
+});
+
+/**
+ * POST /api/courses/:courseId/transfer
+ * Create a brand-new course copy with selective per-unit transfer options.
+ */
+router.post('/:courseId/transfer', async (req, res) => {
+    try {
+        const { courseId } = req.params;
+        const {
+            newCourseName,
+            transferSettings = true,
+            transferTAs = true,
+            deactivateSourceCourse = false,
+            units = []
+        } = req.body;
+
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+        }
+
+        if (user.role !== 'instructor') {
+            return res.status(403).json({
+                success: false,
+                message: 'Only instructors can transfer courses'
+            });
+        }
+
+        if (!newCourseName || typeof newCourseName !== 'string' || !newCourseName.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: 'A new course name is required'
+            });
+        }
+
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({
+                success: false,
+                message: 'Database connection not available'
+            });
+        }
+
+        const sourceCourse = await CourseModel.getCourseById(db, courseId);
+        if (!sourceCourse) {
+            return res.status(404).json({
+                success: false,
+                message: 'Source course not found'
+            });
+        }
+
+        const hasInstructorAccess = sourceCourse.instructorId === user.userId ||
+            (Array.isArray(sourceCourse.instructors) && sourceCourse.instructors.includes(user.userId));
+
+        if (!hasInstructorAccess) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have permission to transfer this course'
+            });
+        }
+
+        const sourceLectures = Array.isArray(sourceCourse.lectures) ? sourceCourse.lectures : [];
+        const normalizedUnits = Array.isArray(units) ? units.map(normalizeTransferUnitConfig) : [];
+        const transferUnitsByName = new Map(
+            sourceLectures.map(lecture => {
+                const provided = normalizedUnits.find(unit => unit.unitName === lecture.name);
+                return [lecture.name, provided || normalizeTransferUnitConfig({ unitName: lecture.name })];
+            })
+        );
+
+        const now = new Date();
+        const targetCourseId = generateCourseId(newCourseName);
+        const targetLectures = sourceLectures.map(lecture => {
+            const config = transferUnitsByName.get(lecture.name);
+            const lectureCopy = {
+                name: lecture.name,
+                isPublished: false,
+                learningObjectives: config.transferLearningObjectives
+                    ? deepClone(lecture.learningObjectives || [])
+                    : [],
+                passThreshold: typeof lecture.passThreshold === 'number' ? lecture.passThreshold : 2,
+                createdAt: now,
+                updatedAt: now,
+                documents: [],
+                assessmentQuestions: config.transferAssessmentQuestions
+                    ? deepClone(lecture.assessmentQuestions || [])
+                    : []
+            };
+
+            if (lecture.displayName) {
+                lectureCopy.displayName = lecture.displayName;
+            }
+
+            if (lecture.materialsConfirmed) {
+                lectureCopy.materialsConfirmed = true;
+            }
+
+            if (lecture.materialsConfirmedAt) {
+                lectureCopy.materialsConfirmedAt = lecture.materialsConfirmedAt;
+            }
+
+            return lectureCopy;
+        });
+
+        const targetCourse = {
+            courseId: targetCourseId,
+            courseName: newCourseName.trim(),
+            courseCode: generateCourseCode(),
+            instructorId: user.userId,
+            instructors: [user.userId],
+            tas: transferTAs ? deepClone(sourceCourse.tas || []) : [],
+            taPermissions: transferTAs ? deepClone(sourceCourse.taPermissions || {}) : {},
+            courseDescription: sourceCourse.courseDescription || '',
+            assessmentCriteria: sourceCourse.assessmentCriteria || '',
+            courseMaterials: Array.isArray(sourceCourse.courseMaterials) ? deepClone(sourceCourse.courseMaterials) : [],
+            approvedStruggleTopics: deepClone(CourseModel.normalizeTopicList(sourceCourse.approvedStruggleTopics || [])),
+            courseStructure: sourceCourse.courseStructure
+                ? deepClone(sourceCourse.courseStructure)
+                : {
+                    weeks: sourceLectures.length,
+                    lecturesPerWeek: 1,
+                    totalUnits: sourceLectures.length
+                },
+            isOnboardingComplete: true,
+            status: 'active',
+            lectures: targetLectures,
+            createdAt: now,
+            updatedAt: now,
+            lastUpdatedById: user.userId
+        };
+
+        if (transferSettings) {
+            if (sourceCourse.prompts) {
+                targetCourse.prompts = deepClone(sourceCourse.prompts);
+            }
+
+            if (sourceCourse.quizSettings) {
+                targetCourse.quizSettings = deepClone(sourceCourse.quizSettings);
+            }
+
+            if (sourceCourse.questionPrompts) {
+                targetCourse.questionPrompts = deepClone(sourceCourse.questionPrompts);
+            }
+
+            if (sourceCourse.mentalHealthDetectionPrompt) {
+                targetCourse.mentalHealthDetectionPrompt = sourceCourse.mentalHealthDetectionPrompt;
+            }
+
+            if (typeof sourceCourse.isAdditiveRetrieval === 'boolean') {
+                targetCourse.isAdditiveRetrieval = sourceCourse.isAdditiveRetrieval;
+            }
+
+            if (sourceCourse.anonymizeStudents && sourceCourse.anonymizeStudents[user.userId]) {
+                targetCourse.anonymizeStudents = {
+                    [user.userId]: deepClone(sourceCourse.anonymizeStudents[user.userId])
+                };
+            }
+        }
+
+        await db.collection('courses').insertOne(targetCourse);
+
+        const qdrantService = new QdrantService();
+        const transferWarnings = [];
+        let documentsCopied = 0;
+
+        for (const lecture of sourceLectures) {
+            const config = transferUnitsByName.get(lecture.name);
+            const sourceDocuments = await DocumentModel.getDocumentsForLecture(db, courseId, lecture.name);
+
+            if (!config.transferDocuments) {
+                continue;
+            }
+
+            for (const sourceDocument of sourceDocuments) {
+                try {
+                    const transferResult = await cloneDocumentForTransfer({
+                        db,
+                        sourceDocument,
+                        targetCourseId,
+                        lectureName: lecture.name,
+                        instructorId: user.userId,
+                        qdrantService
+                    });
+
+                    await CourseModel.addDocumentToUnit(
+                        db,
+                        targetCourseId,
+                        lecture.name,
+                        transferResult.reference,
+                        user.userId
+                    );
+
+                    documentsCopied += 1;
+                    transferWarnings.push(...transferResult.warnings);
+                } catch (error) {
+                    transferWarnings.push(`Failed to transfer "${sourceDocument.originalName || sourceDocument.filename || sourceDocument.documentId}" from ${lecture.name}: ${error.message}`);
+                }
+            }
+        }
+
+        if (deactivateSourceCourse) {
+            await db.collection('courses').updateOne(
+                { courseId, $or: [{ instructorId: user.userId }, { instructors: user.userId }] },
+                {
+                    $set: {
+                        status: 'inactive',
+                        updatedAt: new Date(),
+                        lastUpdatedById: user.userId
+                    }
+                }
+            );
+        }
+
+        return res.json({
+            success: true,
+            message: transferWarnings.length > 0
+                ? 'Course transfer completed with warnings'
+                : 'Course transferred successfully',
+            data: {
+                courseId: targetCourseId,
+                courseName: targetCourse.courseName,
+                courseCode: targetCourse.courseCode,
+                sourceCourseId: courseId,
+                sourceDeactivated: !!deactivateSourceCourse,
+                warnings: transferWarnings,
+                summary: {
+                    totalUnits: sourceLectures.length,
+                    documentsCopied,
+                    settingsTransferred: !!transferSettings,
+                    tasTransferred: !!transferTAs
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error transferring course:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error while transferring course',
+            error: error.message
         });
     }
 });
@@ -1347,6 +1765,10 @@ router.get('/available/all', async (req, res) => {
 
         let availableCourses = courses;
 
+        if (user && (user.role === 'student' || user.role === 'ta')) {
+            availableCourses = availableCourses.filter(course => (course.status || 'active') === 'active');
+        }
+
         // Restriction for TAs: Only show courses they are invited to or already assigned to
         if (user && user.role === 'ta') {
             console.log(`Filtering courses for TA ${user.userId}`);
@@ -1465,6 +1887,13 @@ router.post('/:courseId/join', async (req, res) => {
                 return res.status(404).json({
                     success: false,
                     message: 'Course not found'
+                });
+            }
+
+            if ((course.status || 'active') !== 'active') {
+                return res.status(403).json({
+                    success: false,
+                    message: 'This course is currently deactivated by the instructor.'
                 });
             }
 
