@@ -56,21 +56,36 @@
                         <div class="current-course-display" id="current-course-display">
                             <span class="course-label">Current Course:</span>
                             <span class="course-name-display" id="course-name-display">No course selected</span>
-                            <span class="course-code-label" style="margin-left: 15px; font-weight: bold; display: none;">Code:</span>
-                            <span class="course-code-display" id="course-code-display" style="font-family: monospace; background: #e9ecef; padding: 4px 8px; border-radius: 4px; font-weight: bold; color: #495057; display: none;"></span>
+                            <span class="course-code-label" id="student-course-code-label" style="margin-left: 15px; font-weight: bold; display: none;">Student Code:</span>
+                            <span class="course-code-display" id="student-course-code-display" style="font-family: monospace; background: #e9ecef; padding: 4px 8px; border-radius: 4px; font-weight: bold; color: #495057; display: none;"></span>
+                            <span class="course-code-label" id="instructor-course-code-label" style="margin-left: 15px; font-weight: bold; display: none;">Instructor Code:</span>
+                            <span class="course-code-display" id="instructor-course-code-display" style="font-family: monospace; background: #e9ecef; padding: 4px 8px; border-radius: 4px; font-weight: bold; color: #495057; display: none;"></span>
                             <button class="action-btn secondary" id="change-course-btn">Change Course</button>
                         </div>
                         <div class="course-selector" id="course-selector" style="display: none;">
-                            <label for="course-select-dropdown">Select or Join a Course:</label>
+                            <label for="course-select-dropdown">Select One of Your Courses:</label>
                             <select id="course-select-dropdown" class="course-select-dropdown">
                                 <option value="">Choose a course...</option>
                             </select>
-                            <div id="selected-course-details" class="selected-course-details" style="display: none;">
+
+                            <div style="margin-top: 18px;">
+                                <label for="join-course-select-dropdown">Join Another Course:</label>
+                                <select id="join-course-select-dropdown" class="course-select-dropdown">
+                                    <option value="">Choose a course to join...</option>
+                                </select>
+                            </div>
+
+                            <div id="selected-course-details" class="selected-course-details" style="display: none; margin-top: 14px;">
                                 <div class="course-info">
                                     <h4 id="selected-course-name"></h4>
                                     <p><strong>Course ID:</strong> <span id="selected-course-id"></span></p>
-                                    <p>You will be added as an instructor to this course.</p>
+                                    <p id="join-course-description">Enter the instructor course code to join this course.</p>
                                 </div>
+                            </div>
+                            <div id="instructor-code-entry-group" style="display: none; margin-top: 12px;">
+                                <label for="instructor-course-code-input">Instructor Course Code</label>
+                                <input type="text" id="instructor-course-code-input" class="course-select-dropdown" style="text-transform: uppercase;" placeholder="Enter instructor code">
+                                <p id="instructor-course-code-help" style="margin: 8px 0 0; color: #666; font-size: 0.9rem;">Ask the course owner for the instructor code for this course.</p>
                             </div>
                             <div class="course-selector-actions">
                                 <button class="action-btn primary" id="join-course-btn" style="display: none;">Join Course</button>

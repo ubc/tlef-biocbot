@@ -7,6 +7,16 @@ const express = require('express');
 const router = express.Router();
 const CourseModel = require('../models/Course');
 
+function hasInstructorAccess(course, userId) {
+    return course.instructorId === userId ||
+        (Array.isArray(course.instructors) && course.instructors.includes(userId));
+}
+
+function hasInstructorOrTAAccess(course, userId) {
+    return hasInstructorAccess(course, userId) ||
+        (Array.isArray(course.tas) && course.tas.includes(userId));
+}
+
 function isInactiveCourse(course = {}) {
     return (course.status || 'active') === 'inactive';
 }
@@ -144,6 +154,7 @@ router.post('/', async (req, res) => {
  */
 router.get('/:courseId', async (req, res) => {
     const { courseId } = req.params;
+    const user = req.user;
     
     if (!courseId) {
         return res.status(400).json({
@@ -171,6 +182,13 @@ router.get('/:courseId', async (req, res) => {
                 message: 'Course not found'
             });
         }
+
+        if (!user || !hasInstructorOrTAAccess(courseData, user.userId)) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have access to this course'
+            });
+        }
         
         res.json({
             success: true,
@@ -192,11 +210,19 @@ router.get('/:courseId', async (req, res) => {
  */
 router.get('/instructor/:instructorId', async (req, res) => {
     const { instructorId } = req.params;
+    const user = req.user;
     
     if (!instructorId) {
         return res.status(400).json({
             success: false,
             message: 'Missing required parameter: instructorId'
+        });
+    }
+
+    if (!user || user.role !== 'instructor' || user.userId !== instructorId) {
+        return res.status(403).json({
+            success: false,
+            message: 'You do not have access to this instructor course list'
         });
     }
     
@@ -246,6 +272,7 @@ router.get('/instructor/:instructorId', async (req, res) => {
 router.put('/:courseId/unit-files', async (req, res) => {
     const { courseId } = req.params;
     const { unitName, files } = req.body;
+    const user = req.user;
     
     if (!courseId || !unitName || !Array.isArray(files)) {
         return res.status(400).json({
@@ -261,6 +288,21 @@ router.put('/:courseId/unit-files', async (req, res) => {
             return res.status(503).json({
                 success: false,
                 message: 'Database connection not available'
+            });
+        }
+
+        const course = await CourseModel.getCourseById(db, courseId);
+        if (!course) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        if (!user || user.role !== 'instructor' || !hasInstructorAccess(course, user.userId)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only instructors with course access can update unit files'
             });
         }
         
@@ -310,6 +352,7 @@ router.put('/:courseId/unit-files', async (req, res) => {
 router.put('/:courseId', async (req, res) => {
     const { courseId } = req.params;
     const updates = req.body;
+    const user = req.user;
     
     if (!courseId || !updates || Object.keys(updates).length === 0) {
         return res.status(400).json({
@@ -325,6 +368,21 @@ router.put('/:courseId', async (req, res) => {
             return res.status(503).json({
                 success: false,
                 message: 'Database connection not available'
+            });
+        }
+
+        const course = await CourseModel.getCourseById(db, courseId);
+        if (!course) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        if (!user || user.role !== 'instructor' || !hasInstructorAccess(course, user.userId)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only instructors with course access can update onboarding fields'
             });
         }
         
@@ -367,6 +425,7 @@ router.put('/:courseId', async (req, res) => {
  */
 router.delete('/:courseId', async (req, res) => {
     const { courseId } = req.params;
+    const user = req.user;
     
     if (!courseId) {
         return res.status(400).json({
@@ -382,6 +441,21 @@ router.delete('/:courseId', async (req, res) => {
             return res.status(503).json({
                 success: false,
                 message: 'Database connection not available'
+            });
+        }
+
+        const course = await CourseModel.getCourseById(db, courseId);
+        if (!course) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        if (!user || user.role !== 'instructor' || !hasInstructorAccess(course, user.userId)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only instructors with course access can delete onboarding data'
             });
         }
         
@@ -416,6 +490,7 @@ router.delete('/:courseId', async (req, res) => {
  */
 router.delete('/:courseId/unit/:unitName', async (req, res) => {
     const { courseId, unitName } = req.params;
+    const user = req.user;
     
     if (!courseId || !unitName) {
         return res.status(400).json({
@@ -431,6 +506,21 @@ router.delete('/:courseId/unit/:unitName', async (req, res) => {
             return res.status(503).json({
                 success: false,
                 message: 'Database connection not available'
+            });
+        }
+
+        const course = await CourseModel.getCourseById(db, courseId);
+        if (!course) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        if (!user || user.role !== 'instructor' || !hasInstructorAccess(course, user.userId)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only instructors with course access can delete units'
             });
         }
         
@@ -541,6 +631,21 @@ router.post('/complete', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const course = await CourseModel.getCourseById(db, courseId);
+        if (!course) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        if (!hasInstructorAccess(course, user.userId)) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have access to this course'
+            });
+        }
         
         // Update the course to mark onboarding as complete
         const coursesCollection = db.collection('courses');
@@ -553,14 +658,6 @@ router.post('/complete', async (req, res) => {
                 }
             }
         );
-        
-        if (result.matchedCount === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Course not found'
-            });
-        }
-        
         console.log(`✅ [ONBOARDING] Marked onboarding as complete for course ${courseId} by instructor ${instructorId}`);
         
         res.json({

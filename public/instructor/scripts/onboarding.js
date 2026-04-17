@@ -21,6 +21,7 @@ let uploadedFile = null;
 let currentWeek = null;
 let currentContentType = null;
 let topicReviewResolve = null;
+let canBypassOnboardingInstructorCourseCodes = false;
 
 function normalizeTopicLabel(topic) {
     if (typeof topic !== 'string') return '';
@@ -457,10 +458,42 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     // Wait for authentication to be ready before loading courses
     await waitForAuth();
+
+    canBypassOnboardingInstructorCourseCodes = await checkCourseCodeBypassPermission();
+    applyJoinCourseCodePermission();
     
     // Load available courses for course selection
     loadAvailableCourses();
 });
+
+async function checkCourseCodeBypassPermission() {
+    try {
+        const response = await fetch('/api/settings/can-delete-all', {
+            credentials: 'include'
+        });
+
+        const result = await response.json();
+        return !!(result.success && result.canDeleteAll);
+    } catch (error) {
+        console.error('Error checking onboarding instructor-code bypass permission:', error);
+        return false;
+    }
+}
+
+function applyJoinCourseCodePermission() {
+    const codeHelp = document.getElementById('instructor-course-code-help');
+    const codeGroup = document.getElementById('instructor-course-code-group');
+
+    if (codeHelp) {
+        codeHelp.textContent = canBypassOnboardingInstructorCourseCodes
+            ? 'You have admin access, so no instructor code is required for you to join this course.'
+            : 'Ask the course owner for the instructor course code.';
+    }
+
+    if (codeGroup && onboardingState.existingCourseId) {
+        codeGroup.style.display = canBypassOnboardingInstructorCourseCodes ? 'none' : 'block';
+    }
+}
 
 /**
  * Check if onboarding is already complete for this instructor
@@ -771,6 +804,8 @@ function handleCourseSelection(event) {
     const joinCourseSection = document.getElementById('join-course-section');
     const continueBtn = document.getElementById('continue-btn');
     const joinCourseBtn = document.getElementById('join-course-btn');
+    const codeGroup = document.getElementById('instructor-course-code-group');
+    const codeInput = document.getElementById('instructor-course-code');
     
     if (courseSelect.value === 'custom') {
         // Show custom course input and course structure
@@ -783,6 +818,8 @@ function handleCourseSelection(event) {
         // Clear course data
         onboardingState.courseData.course = null;
         onboardingState.existingCourseId = null;
+        if (codeGroup) codeGroup.style.display = 'none';
+        if (codeInput) codeInput.value = '';
     } else if (courseSelect.value === '') {
         // No course selected
         customCourseSection.style.display = 'none';
@@ -794,6 +831,8 @@ function handleCourseSelection(event) {
         // Clear course data
         onboardingState.courseData.course = null;
         onboardingState.existingCourseId = null;
+        if (codeGroup) codeGroup.style.display = 'none';
+        if (codeInput) codeInput.value = '';
     } else {
         // Existing course selected
         customCourseSection.style.display = 'none';
@@ -801,6 +840,10 @@ function handleCourseSelection(event) {
         joinCourseSection.style.display = 'block';
         continueBtn.style.display = 'none';
         joinCourseBtn.style.display = 'inline-block';
+        if (codeGroup) {
+            codeGroup.style.display = canBypassOnboardingInstructorCourseCodes ? 'none' : 'block';
+        }
+        if (codeInput) codeInput.value = '';
         
         // Store course data and populate course details
         onboardingState.courseData.course = courseSelect.value;
@@ -831,7 +874,9 @@ function populateSelectedCourseDetails(courseId) {
             <div class="course-info">
                 <h4>${courseName}</h4>
                 <p><strong>Course ID:</strong> ${courseId}</p>
-                <p>You will be added as an instructor to this existing course.</p>
+                <p>${canBypassOnboardingInstructorCourseCodes
+                    ? 'You have admin access, so you can join this course without entering an instructor code.'
+                    : 'Enter the instructor course code to join this course.'}</p>
             </div>
         `;
         
@@ -846,6 +891,13 @@ function populateSelectedCourseDetails(courseId) {
 async function joinExistingCourse() {
     if (!onboardingState.existingCourseId) {
         showNotification('No course selected to join.', 'error');
+        return;
+    }
+
+    const codeInput = document.getElementById('instructor-course-code');
+    const code = codeInput ? codeInput.value.trim().toUpperCase() : '';
+    if (!canBypassOnboardingInstructorCourseCodes && !code) {
+        showNotification('Instructor course code is required to join this course.', 'error');
         return;
     }
     
@@ -866,7 +918,8 @@ async function joinExistingCourse() {
             },
             credentials: 'include',
             body: JSON.stringify({
-                instructorId: getCurrentInstructorId()
+                instructorId: getCurrentInstructorId(),
+                code
             })
         });
         
@@ -1005,31 +1058,44 @@ async function handleCourseSetup(event) {
  */
 async function checkExistingCourse() {
     try {
+        const courseSelect = document.getElementById('course-select');
+        const selectedCourseId = courseSelect ? courseSelect.value : '';
+        if (selectedCourseId && selectedCourseId !== 'custom') {
+            const selectedOption = courseSelect.options[courseSelect.selectedIndex];
+            return {
+                courseId: selectedCourseId,
+                courseName: selectedOption ? selectedOption.textContent : selectedCourseId
+            };
+        }
+
         const courseName = onboardingState.courseData.course;
         if (!courseName) {
             return null;
         }
-        
-        // First check if instructor already has a course
+
         const instructorId = getCurrentInstructorId();
         if (instructorId) {
             const response = await authenticatedFetch(`/api/onboarding/instructor/${instructorId}`);
-            
+
             if (response.ok) {
                 const result = await response.json();
-                if (result.data && result.data.courses && result.data.courses.length > 0) {
-                    // Return the first course found for this instructor
-                    return result.data.courses[0];
+                if (result.data && result.data.courses) {
+                    const existingInstructorCourse = result.data.courses.find(course =>
+                        course.courseName && course.courseName.toLowerCase() === courseName.toLowerCase()
+                    );
+
+                    if (existingInstructorCourse) {
+                        return existingInstructorCourse;
+                    }
                 }
             }
         }
-        
-        // Check if a course with this name already exists globally
-        const allCoursesResponse = await authenticatedFetch('/api/courses/available/all');
-        if (allCoursesResponse.ok) {
-            const allCoursesResult = await allCoursesResponse.json();
-            if (allCoursesResult.success && allCoursesResult.data) {
-                const existingCourse = allCoursesResult.data.find(course => 
+
+        const joinableCoursesResponse = await authenticatedFetch('/api/courses/available/joinable');
+        if (joinableCoursesResponse.ok) {
+            const joinableCoursesResult = await joinableCoursesResponse.json();
+            if (joinableCoursesResult.success && joinableCoursesResult.data) {
+                const existingCourse = joinableCoursesResult.data.find(course =>
                     course.courseName.toLowerCase() === courseName.toLowerCase()
                 );
                 if (existingCourse) {
@@ -3625,7 +3691,7 @@ async function loadAvailableCourses() {
         if (!courseSelect) return;
         
         // Fetch courses from the API
-        const response = await fetch('/api/courses/available/all');
+        const response = await fetch('/api/courses/available/joinable');
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);

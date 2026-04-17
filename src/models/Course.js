@@ -11,6 +11,8 @@ const { MongoClient } = require('mongodb');
  *   _id: ObjectId,
  *   courseId: String,           // Unique course identifier
  *   courseName: String,         // Display name of the course
+ *   courseCode: String,         // Student course code
+ *   instructorCourseCode: String, // Instructor course code
  *   instructorId: String,       // ID of the primary instructor (for backward compatibility)
  *   instructors: [String],      // Array of instructor IDs (primary instructor + additional instructors)
  *   tas: [String],              // Array of TA IDs
@@ -64,6 +66,32 @@ function generateCourseCode() {
         code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return code;
+}
+
+function generateDistinctCourseCode(existingCodes = []) {
+    const normalizedExistingCodes = new Set(
+        existingCodes
+            .filter(Boolean)
+            .map((code) => String(code).trim().toUpperCase())
+    );
+
+    let code = generateCourseCode();
+    let attempts = 0;
+
+    while (normalizedExistingCodes.has(code) && attempts < 20) {
+        code = generateCourseCode();
+        attempts += 1;
+    }
+
+    return code;
+}
+
+function normalizeCode(code) {
+    if (typeof code !== 'string') {
+        return '';
+    }
+
+    return code.trim().toUpperCase();
 }
 
 /**
@@ -134,22 +162,37 @@ function compareCoursesWithInactiveLast(a = {}, b = {}) {
 }
 
 /**
- * Ensure all courses have a course code (Migration)
+ * Ensure all courses have both student and instructor course codes (Migration)
  * @param {Object} db - MongoDB database instance
  */
 async function ensureCourseCodes(db) {
     const collection = getCoursesCollection(db);
-    const courses = await collection.find({ courseCode: { $exists: false } }).toArray();
+    const courses = await collection.find({
+        $or: [
+            { courseCode: { $exists: false } },
+            { instructorCourseCode: { $exists: false } },
+            { $expr: { $eq: ['$courseCode', '$instructorCourseCode'] } }
+        ]
+    }).toArray();
     
     if (courses.length > 0) {
-        console.log(`Migrating ${courses.length} courses to have course codes...`);
+        console.log(`Migrating ${courses.length} courses to have student/instructor course codes...`);
         for (const course of courses) {
-            const code = generateCourseCode();
+            const studentCode = course.courseCode || generateDistinctCourseCode([course.instructorCourseCode]);
+            const instructorCode = (!course.instructorCourseCode || normalizeCode(course.instructorCourseCode) === normalizeCode(studentCode))
+                ? generateDistinctCourseCode([studentCode])
+                : course.instructorCourseCode;
+
             await collection.updateOne(
                 { _id: course._id },
-                { $set: { courseCode: code } }
+                {
+                    $set: {
+                        courseCode: studentCode,
+                        instructorCourseCode: instructorCode
+                    }
+                }
             );
-            console.log(`Assigned code ${code} to course ${course.courseId}`);
+            console.log(`Assigned missing course codes to course ${course.courseId}`);
         }
     }
 }
@@ -173,9 +216,15 @@ async function upsertCourse(db, courseData) {
         course.createdAt = now;
     }
 
-    // Ensure course code exists
+    // Ensure course codes exist
     if (!course.courseCode) {
-        course.courseCode = generateCourseCode();
+        course.courseCode = generateDistinctCourseCode([course.instructorCourseCode]);
+    }
+
+    if (!course.instructorCourseCode) {
+        course.instructorCourseCode = generateDistinctCourseCode([course.courseCode]);
+    } else if (normalizeCode(course.instructorCourseCode) === normalizeCode(course.courseCode)) {
+        course.instructorCourseCode = generateDistinctCourseCode([course.courseCode]);
     }
     
     const result = await collection.updateOne(
@@ -688,10 +737,14 @@ async function createCourseFromOnboarding(db, onboardingData) {
         }
         
         // Prepare the course document
+        const studentCourseCode = generateCourseCode();
+        const instructorCourseCode = generateDistinctCourseCode([studentCourseCode]);
+
         const course = {
             courseId,
             courseName,
-            courseCode: generateCourseCode(), // Generate course code
+            courseCode: studentCourseCode, // Generate student course code
+            instructorCourseCode, // Generate instructor course code
             instructorId,
             instructors: [instructorId], // Initialize with primary instructor
             tas: [], // Initialize empty TA array
@@ -1351,16 +1404,19 @@ async function getStudentEnrollment(db, courseId, studentId) {
 }
 
 /**
- * Join a course using a course code
+ * Join a course using a student course code
  * @param {Object} db - MongoDB database instance
  * @param {string} courseId - Course identifier
  * @param {string} studentId - Student identifier
  * @param {string} code - Course code provided by student
+ * @param {Object} options - Join options
+ * @param {boolean} options.skipCodeValidation - Whether to bypass code validation
  * @returns {Promise<{ success: boolean, enrolled?: boolean, error?: string, message?: string }>} Result
  */
-async function joinCourse(db, courseId, studentId, code) {
+async function joinCourse(db, courseId, studentId, code, options = {}) {
     const collection = getCoursesCollection(db);
     const now = new Date();
+    const { skipCodeValidation = false } = options;
 
     const course = await collection.findOne({ courseId });
     if (!course) {
@@ -1378,7 +1434,7 @@ async function joinCourse(db, courseId, studentId, code) {
     }
 
     // Verify code (case-insensitive)
-    if (!course.courseCode || course.courseCode.toUpperCase() !== code.toUpperCase()) {
+    if (!skipCodeValidation && normalizeCode(course.courseCode) !== normalizeCode(code)) {
         return { success: false, error: 'Invalid course code' };
     }
 
@@ -1398,6 +1454,55 @@ async function joinCourse(db, courseId, studentId, code) {
     );
 
     return { success: true, enrolled: true, message: 'Successfully joined course' };
+}
+
+/**
+ * Join a course as an instructor using an instructor course code
+ * @param {Object} db - MongoDB database instance
+ * @param {string} courseId - Course identifier
+ * @param {string} instructorId - Instructor identifier
+ * @param {string} code - Instructor course code provided by instructor
+ * @param {Object} options - Join options
+ * @param {boolean} options.skipCodeValidation - Whether to bypass code validation
+ * @returns {Promise<{ success: boolean, alreadyJoined?: boolean, error?: string, message?: string }>} Result
+ */
+async function joinCourseAsInstructor(db, courseId, instructorId, code, options = {}) {
+    const collection = getCoursesCollection(db);
+    const now = new Date();
+    const { skipCodeValidation = false } = options;
+
+    const course = await collection.findOne({ courseId });
+    if (!course) {
+        return { success: false, error: 'Course not found' };
+    }
+
+    const instructors = Array.isArray(course.instructors) ? course.instructors : [];
+    if (course.instructorId === instructorId || instructors.includes(instructorId)) {
+        return {
+            success: true,
+            alreadyJoined: true,
+            message: 'Instructor already has access to this course'
+        };
+    }
+
+    if (!skipCodeValidation && normalizeCode(course.instructorCourseCode) !== normalizeCode(code)) {
+        return { success: false, error: 'Invalid instructor course code' };
+    }
+
+    const updateData = {
+        $addToSet: { instructors: instructorId },
+        $set: {
+            updatedAt: now
+        }
+    };
+
+    if (!course.instructorId) {
+        updateData.$set.instructorId = instructorId;
+    }
+
+    await collection.updateOne({ courseId }, updateData);
+
+    return { success: true, message: 'Successfully joined course as instructor' };
 }
 
 /**
@@ -1606,6 +1711,7 @@ module.exports = {
     updateStudentEnrollment,
     getStudentEnrollment,
     joinCourse,
+    joinCourseAsInstructor,
     updateUnitDisplayName,
     getApprovedStruggleTopics,
     setApprovedStruggleTopics,
