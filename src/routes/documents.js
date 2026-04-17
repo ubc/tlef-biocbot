@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const fs = require('fs');
+const path = require('path');
 
 // Import the Document model and Course model
 const DocumentModel = require('../models/Document');
@@ -12,6 +13,76 @@ const { encodingForModel } = require('js-tiktoken');
 
 // Token encoder using cl100k_base (same as tokencounter.space)
 const tokenEncoder = encodingForModel('gpt-4o');
+
+function inferExtensionFromMimeType(mimeType) {
+    switch ((mimeType || '').toLowerCase()) {
+        case 'application/pdf':
+            return '.pdf';
+        case 'text/markdown':
+            return '.md';
+        case 'application/msword':
+            return '.doc';
+        case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+            return '.docx';
+        case 'application/rtf':
+            return '.rtf';
+        case 'text/plain':
+            return '.txt';
+        default:
+            return '';
+    }
+}
+
+function resolveDownloadFilename(document) {
+    const fallbackName = `document-${document.documentId || Date.now()}`;
+    const rawOriginal = (document.originalName || '').trim();
+    const rawFile = (document.filename || '').trim();
+    const preferredName = rawOriginal || rawFile || fallbackName;
+    let safeName = path.basename(preferredName).replace(/[\r\n]/g, '');
+
+    if (!path.extname(safeName)) {
+        if (rawFile && path.extname(rawFile)) {
+            safeName = path.basename(rawFile).replace(/[\r\n]/g, '');
+        } else {
+            safeName += inferExtensionFromMimeType(document.mimeType);
+        }
+    }
+
+    return safeName || `${fallbackName}.txt`;
+}
+
+function setAttachmentHeaders(res, filename) {
+    const encodedName = encodeURIComponent(filename);
+    const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+    res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedName}`
+    );
+}
+
+function getStoredFileBuffer(fileData) {
+    if (!fileData) {
+        return null;
+    }
+
+    if (Buffer.isBuffer(fileData)) {
+        return fileData;
+    }
+
+    if (fileData.buffer) {
+        return Buffer.from(fileData.buffer);
+    }
+
+    if (Array.isArray(fileData.data)) {
+        return Buffer.from(fileData.data);
+    }
+
+    if (typeof fileData === 'string') {
+        return Buffer.from(fileData, 'base64');
+    }
+
+    return null;
+}
 
 /**
  * Count tokens accurately using tiktoken (cl100k_base encoding)
@@ -482,6 +553,89 @@ router.get('/stats', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Internal server error while fetching document stats'
+        });
+    }
+});
+
+/**
+ * GET /api/documents/:documentId/download
+ * Download the original source document for instructors/TAs
+ */
+router.get('/:documentId/download', async (req, res) => {
+    try {
+        const { documentId } = req.params;
+
+        if (!documentId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required parameter: documentId'
+            });
+        }
+
+        const user = req.user;
+        if (!user || !['instructor', 'ta'].includes(user.role)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only instructors and TAs can download course materials from this page'
+            });
+        }
+
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({
+                success: false,
+                message: 'Database connection not available'
+            });
+        }
+
+        const document = await DocumentModel.getDocumentById(db, documentId);
+        if (!document) {
+            return res.status(404).json({
+                success: false,
+                message: 'Document not found'
+            });
+        }
+
+        let hasAccess = await CourseModel.userHasCourseAccess(db, document.courseId, user.userId, user.role);
+
+        if (hasAccess && user.role === 'ta') {
+            hasAccess = await CourseModel.checkTAPermission(db, document.courseId, user.userId, 'courses');
+        }
+
+        if (!hasAccess) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have permission to download this document'
+            });
+        }
+
+        const downloadFilename = resolveDownloadFilename(document);
+        setAttachmentHeaders(res, downloadFilename);
+
+        const isFileDocument = document.contentType === 'file' || (!!document.fileData && document.contentType !== 'text');
+
+        if (isFileDocument) {
+            const payload = getStoredFileBuffer(document.fileData);
+
+            if (!payload) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Stored file data is invalid'
+                });
+            }
+
+            res.setHeader('Content-Type', document.mimeType || 'application/octet-stream');
+            return res.send(payload);
+        }
+
+        const textContent = typeof document.content === 'string' ? document.content : '';
+        res.setHeader('Content-Type', `${document.mimeType || 'text/plain'}; charset=utf-8`);
+        return res.send(textContent);
+    } catch (error) {
+        console.error('Error downloading document:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while downloading document'
         });
     }
 });
