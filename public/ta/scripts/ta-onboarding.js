@@ -11,6 +11,51 @@ let taOnboardingState = {
     isSubmitting: false
 };
 
+function isCourseDeactive(course = {}) {
+    return (course.status || 'active') === 'inactive';
+}
+
+function getCourseDisplayName(course = {}) {
+    const courseName = course.courseName || course.courseId || 'Untitled Course';
+    return isCourseDeactive(course) ? `${courseName} (deactive)` : courseName;
+}
+
+function dedupeCourses(courses = []) {
+    return courses.filter((course, index, self) =>
+        index === self.findIndex(candidate => candidate.courseId === course.courseId)
+    );
+}
+
+function appendCourseGroup(selectElement, label, courses) {
+    if (!courses.length) {
+        return;
+    }
+
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = label;
+
+    courses.forEach(course => {
+        const option = document.createElement('option');
+        option.value = course.courseId;
+        option.textContent = getCourseDisplayName(course);
+        option.dataset.status = course.status || 'active';
+        optgroup.appendChild(option);
+    });
+
+    selectElement.appendChild(optgroup);
+}
+
+function populateAvailableCourses(selectElement, courses, placeholderText) {
+    selectElement.innerHTML = `<option value="">${placeholderText}</option>`;
+
+    const uniqueCourses = dedupeCourses(courses);
+    const activeCourses = uniqueCourses.filter(course => !isCourseDeactive(course));
+    const inactiveCourses = uniqueCourses.filter(isCourseDeactive);
+
+    appendCourseGroup(selectElement, 'Active Courses', activeCourses);
+    appendCourseGroup(selectElement, 'Deactive Courses', inactiveCourses);
+}
+
 document.addEventListener('DOMContentLoaded', async function() {
     // Initialize TA onboarding functionality
     initializeTAOnboarding();
@@ -212,22 +257,13 @@ async function loadAvailableCourses() {
             throw new Error(result.message || 'Failed to fetch courses');
         }
         
-        const courses = result.data;
+        const courses = result.data || [];
         
         console.log('Available courses for TA:', courses);
+
+        populateAvailableCourses(courseSelect, courses, 'Choose a course to join...');
         
-        // Clear existing options except the first placeholder
-        courseSelect.innerHTML = '<option value="">Choose a course to join...</option>';
-        
-        // Add course options
-        courses.forEach(course => {
-            const option = document.createElement('option');
-            option.value = course.courseId;
-            option.textContent = course.courseName;
-            courseSelect.appendChild(option);
-        });
-        
-        console.log('Available courses loaded for TA:', courses.length);
+        console.log('Available courses loaded for TA:', dedupeCourses(courses).length);
         
     } catch (error) {
         console.error('Error loading available courses:', error);

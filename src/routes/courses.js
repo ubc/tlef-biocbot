@@ -19,6 +19,32 @@ function hasInstructorOrTAAccess(course, userId) {
         (Array.isArray(course.tas) && course.tas.includes(userId));
 }
 
+function isInactiveCourse(course = {}) {
+    return (course.status || 'active') === 'inactive';
+}
+
+function sortCoursesWithInactiveLast(courses = []) {
+    return [...courses].sort((a, b) => {
+        const aInactive = isInactiveCourse(a) ? 1 : 0;
+        const bInactive = isInactiveCourse(b) ? 1 : 0;
+
+        if (aInactive !== bInactive) {
+            return aInactive - bInactive;
+        }
+
+        const aUpdatedAt = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const bUpdatedAt = new Date(b.updatedAt || b.createdAt || 0).getTime();
+
+        if (aUpdatedAt !== bUpdatedAt) {
+            return bUpdatedAt - aUpdatedAt;
+        }
+
+        return String(a.courseName || a.courseId || '').localeCompare(
+            String(b.courseName || b.courseId || '')
+        );
+    });
+}
+
 function extractFirstJSONObject(text = '') {
     if (!text || typeof text !== 'string') return null;
     const start = text.indexOf('{');
@@ -1759,7 +1785,7 @@ router.get('/available/all', async (req, res) => {
         
         const user = req.user;
         
-        // Query database for all active courses
+        // Query database for all non-deleted courses, then filter by role below
         const collection = db.collection('courses');
         const courses = await collection.find({ status: { $ne: 'deleted' } }).toArray();
 
@@ -1783,6 +1809,8 @@ router.get('/available/all', async (req, res) => {
             console.log(`TA ${user.userId} sees ${availableCourses.length} courses (from total ${courses.length})`);
         }
         
+        availableCourses = sortCoursesWithInactiveLast(availableCourses);
+
         // Transform the data to match expected format for both sides
         // For students, check enrollment status
         const transformedCourses = await Promise.all(availableCourses.map(async (course) => {
@@ -1887,13 +1915,6 @@ router.post('/:courseId/join', async (req, res) => {
                 return res.status(404).json({
                     success: false,
                     message: 'Course not found'
-                });
-            }
-
-            if ((course.status || 'active') !== 'active') {
-                return res.status(403).json({
-                    success: false,
-                    message: 'This course is currently deactivated by the instructor.'
                 });
             }
 
@@ -2128,6 +2149,7 @@ router.get('/ta/:taId', async (req, res) => {
             instructorId: course.instructorId,
             instructors: course.instructors || [course.instructorId],
             tas: course.tas || [],
+            status: course.status || 'active',
             createdAt: course.createdAt?.toISOString() || new Date().toISOString(),
             updatedAt: course.updatedAt?.toISOString() || new Date().toISOString(),
             totalUnits: course.courseStructure?.totalUnits || 0

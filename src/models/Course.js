@@ -109,6 +109,30 @@ function getCoursesCollection(db) {
     return db.collection('courses');
 }
 
+function isInactiveCourse(course = {}) {
+    return (course.status || 'active') === 'inactive';
+}
+
+function compareCoursesWithInactiveLast(a = {}, b = {}) {
+    const aInactive = isInactiveCourse(a) ? 1 : 0;
+    const bInactive = isInactiveCourse(b) ? 1 : 0;
+
+    if (aInactive !== bInactive) {
+        return aInactive - bInactive;
+    }
+
+    const aUpdatedAt = new Date(a.updatedAt || a.createdAt || 0).getTime();
+    const bUpdatedAt = new Date(b.updatedAt || b.createdAt || 0).getTime();
+
+    if (aUpdatedAt !== bUpdatedAt) {
+        return bUpdatedAt - aUpdatedAt;
+    }
+
+    return String(a.courseName || a.courseId || '').localeCompare(
+        String(b.courseName || b.courseId || '')
+    );
+}
+
 /**
  * Ensure all courses have a course code (Migration)
  * @param {Object} db - MongoDB database instance
@@ -1071,14 +1095,15 @@ async function getCoursesForUser(db, userId, role) {
             instructorId: 1,
             instructors: 1,
             tas: 1,
+            status: 1,
             courseStructure: 1,
             createdAt: 1,
             updatedAt: 1
         })
         .sort({ updatedAt: -1 })
         .toArray();
-    
-    return courses;
+
+    return courses.sort(compareCoursesWithInactiveLast);
 }
 
 /**

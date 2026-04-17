@@ -1305,6 +1305,56 @@ async function initializeCourseSelection() {
     updateNavigationLinks();
 }
 
+function isCourseDeactive(course = {}) {
+    return (course.status || 'active') === 'inactive';
+}
+
+function getCourseDisplayName(course = {}) {
+    const courseName = course.courseName || course.courseId || 'Untitled Course';
+    return isCourseDeactive(course) ? `${courseName} (deactive)` : courseName;
+}
+
+function dedupeCourses(courses = []) {
+    return courses.filter((course, index, self) =>
+        index === self.findIndex(candidate => candidate.courseId === course.courseId)
+    );
+}
+
+function appendCourseGroup(selectElement, label, courses) {
+    if (!courses.length) {
+        return;
+    }
+
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = label;
+
+    courses.forEach(course => {
+        const option = document.createElement('option');
+        option.value = course.courseId;
+        option.textContent = getCourseDisplayName(course);
+        option.dataset.status = course.status || 'active';
+        optgroup.appendChild(option);
+    });
+
+    selectElement.appendChild(optgroup);
+}
+
+function populateCourseDropdown(selectElement, courses, placeholderText) {
+    selectElement.innerHTML = '';
+
+    const placeholderOption = document.createElement('option');
+    placeholderOption.value = '';
+    placeholderOption.textContent = placeholderText;
+    selectElement.appendChild(placeholderOption);
+
+    const uniqueCourses = dedupeCourses(courses);
+    const activeCourses = uniqueCourses.filter(course => !isCourseDeactive(course));
+    const inactiveCourses = uniqueCourses.filter(isCourseDeactive);
+
+    appendCourseGroup(selectElement, 'Active Courses', activeCourses);
+    appendCourseGroup(selectElement, 'Deactive Courses', inactiveCourses);
+}
+
 /**
  * Load available courses for selection
  */
@@ -1329,24 +1379,10 @@ async function loadAvailableCourses() {
         }
         
         const courses = result.data || [];
+
+        populateCourseDropdown(courseSelectDropdown, courses, 'Choose a course...');
         
-        // Filter out duplicate courses by courseId
-        const uniqueCourses = courses.filter((course, index, self) => 
-            index === self.findIndex(c => c.courseId === course.courseId)
-        );
-        
-        // Clear existing options except the first placeholder
-        courseSelectDropdown.innerHTML = '<option value="">Choose a course...</option>';
-        
-        // Add course options
-        uniqueCourses.forEach(course => {
-            const option = document.createElement('option');
-            option.value = course.courseId;
-            option.textContent = course.courseName;
-            courseSelectDropdown.appendChild(option);
-        });
-        
-        console.log('Available courses loaded:', uniqueCourses.length);
+        console.log('Available courses loaded:', dedupeCourses(courses).length);
         
     } catch (error) {
         console.error('Error loading available courses:', error);
@@ -1377,8 +1413,8 @@ async function loadCurrentCourse() {
                 if (response.ok) {
                     const result = await response.json();
                     if (result.data && result.data.courses && result.data.courses.length > 0) {
-                        const firstCourse = result.data.courses[0];
-                        await setSelectedCourse(firstCourse.courseId, firstCourse.courseName);
+                        const firstCourse = dedupeCourses(result.data.courses)[0];
+                        await setSelectedCourse(firstCourse.courseId, getCourseDisplayName(firstCourse));
                         return;
                     }
                 }
@@ -1394,7 +1430,11 @@ async function loadCurrentCourse() {
         if (response.ok) {
             const result = await response.json();
             if (result.success && result.data) {
-                await setSelectedCourse(courseId, result.data.courseName || courseId);
+                await setSelectedCourse(courseId, getCourseDisplayName({
+                    courseId,
+                    courseName: result.data.courseName || courseId,
+                    status: result.data.status
+                }));
             } else {
                 // Course not found, clear selection
                 clearSelectedCourse();
