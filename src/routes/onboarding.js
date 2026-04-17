@@ -7,6 +7,32 @@ const express = require('express');
 const router = express.Router();
 const CourseModel = require('../models/Course');
 
+function isInactiveCourse(course = {}) {
+    return (course.status || 'active') === 'inactive';
+}
+
+function sortCoursesWithInactiveLast(courses = []) {
+    return [...courses].sort((a, b) => {
+        const aInactive = isInactiveCourse(a) ? 1 : 0;
+        const bInactive = isInactiveCourse(b) ? 1 : 0;
+
+        if (aInactive !== bInactive) {
+            return aInactive - bInactive;
+        }
+
+        const aUpdatedAt = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const bUpdatedAt = new Date(b.updatedAt || b.createdAt || 0).getTime();
+
+        if (aUpdatedAt !== bUpdatedAt) {
+            return bUpdatedAt - aUpdatedAt;
+        }
+
+        return String(a.courseName || a.courseId || '').localeCompare(
+            String(b.courseName || b.courseId || '')
+        );
+    });
+}
+
 /**
  * GET /api/onboarding/test
  * Test endpoint to verify onboarding routes are working
@@ -187,17 +213,20 @@ router.get('/instructor/:instructorId', async (req, res) => {
         // Fetch courses for instructor (check both primary instructorId and instructors array)
         const collection = db.collection('courses');
         const courses = await collection.find({
+            status: { $ne: 'deleted' },
             $or: [
                 { instructorId: instructorId },
                 { instructors: { $in: [instructorId] } }
             ]
         }).toArray();
+
+        const sortedCourses = sortCoursesWithInactiveLast(courses);
         
         res.json({
             success: true,
             data: {
-                courses: courses,
-                count: courses.length
+                courses: sortedCourses,
+                count: sortedCourses.length
             }
         });
         

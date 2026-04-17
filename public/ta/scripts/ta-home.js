@@ -6,6 +6,15 @@
 let taCourses = [];
 let taPermissions = {}; // Store TA permissions for each course
 
+function isCourseDeactive(course = {}) {
+    return (course.status || 'active') === 'inactive';
+}
+
+function getCourseDisplayName(course = {}) {
+    const courseName = course.courseName || course.courseId || 'Untitled Course';
+    return isCourseDeactive(course) ? `${courseName} (deactive)` : courseName;
+}
+
 document.addEventListener('DOMContentLoaded', async function() {
     // Wait for authentication to be ready
     await waitForAuth();
@@ -309,12 +318,14 @@ function displayTACourses() {
         const coursePermissions = taPermissions[course.courseId] || {};
         const canAccessCourses = coursePermissions.canAccessCourses !== false; // Default to true
         const canAccessFlags = coursePermissions.canAccessFlags !== false; // Default to true
+        const isInactive = isCourseDeactive(course);
+        const statusLabel = isInactive ? 'Deactive' : 'Active';
         
         return `
         <div class="course-card">
             <div class="course-header">
-                <h3>${course.courseName}</h3>
-                <span class="course-status">Active</span>
+                <h3>${getCourseDisplayName(course)}</h3>
+                <span class="course-status ${isInactive ? 'inactive' : 'active'}">${statusLabel}</span>
             </div>
             <div class="course-info">
                 <p><strong>Course ID:</strong> ${course.courseId}</p>

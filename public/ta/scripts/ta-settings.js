@@ -6,6 +6,15 @@
 let taCourses = [];
 let taPermissions = {};
 
+function isCourseDeactive(course = {}) {
+    return (course.status || 'active') === 'inactive';
+}
+
+function getCourseDisplayName(course = {}) {
+    const courseName = course.courseName || course.courseId || 'Untitled Course';
+    return isCourseDeactive(course) ? `${courseName} (deactive)` : courseName;
+}
+
 document.addEventListener('DOMContentLoaded', async function() {
     console.log('🚀 [TA SETTINGS] Page loaded');
     
@@ -153,15 +162,19 @@ function updateCourseAssignments() {
         return;
     }
     
-    container.innerHTML = taCourses.map(course => `
+    container.innerHTML = taCourses.map(course => {
+        const isInactive = isCourseDeactive(course);
+
+        return `
         <div class="course-assignment">
             <div class="course-info">
-                <h4>${course.courseName}</h4>
+                <h4>${getCourseDisplayName(course)}</h4>
                 <p>Course ID: ${course.courseId}</p>
             </div>
-            <div class="course-status active">Active</div>
+            <div class="course-status ${isInactive ? 'inactive' : 'active'}">${isInactive ? 'Deactive' : 'Active'}</div>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 /**

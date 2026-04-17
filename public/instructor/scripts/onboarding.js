@@ -3570,6 +3570,51 @@ async function saveUnit1PassThreshold(courseId, lectureName, passThreshold, inst
     }
 }
 
+function isCourseDeactive(course = {}) {
+    return (course.status || 'active') === 'inactive';
+}
+
+function getCourseDisplayName(course = {}) {
+    const courseName = course.courseName || course.courseId || 'Untitled Course';
+    return isCourseDeactive(course) ? `${courseName} (deactive)` : courseName;
+}
+
+function dedupeCourses(courses = []) {
+    return courses.filter((course, index, self) =>
+        index === self.findIndex(candidate => candidate.courseId === course.courseId)
+    );
+}
+
+function appendCourseGroup(selectElement, label, courses) {
+    if (!courses.length) {
+        return;
+    }
+
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = label;
+
+    courses.forEach(course => {
+        const option = document.createElement('option');
+        option.value = course.courseId;
+        option.textContent = getCourseDisplayName(course);
+        option.dataset.status = course.status || 'active';
+        optgroup.appendChild(option);
+    });
+
+    selectElement.appendChild(optgroup);
+}
+
+function populateAvailableCourses(selectElement, courses) {
+    selectElement.innerHTML = '<option value="">Choose a course...</option>';
+
+    const uniqueCourses = dedupeCourses(courses);
+    const activeCourses = uniqueCourses.filter(course => !isCourseDeactive(course));
+    const inactiveCourses = uniqueCourses.filter(isCourseDeactive);
+
+    appendCourseGroup(selectElement, 'Active Courses', activeCourses);
+    appendCourseGroup(selectElement, 'Deactive Courses', inactiveCourses);
+}
+
 /**
  * Load available courses for the instructor
  */
@@ -3592,27 +3637,11 @@ async function loadAvailableCourses() {
             throw new Error(result.message || 'Failed to fetch courses');
         }
         
-        const courses = result.data;
+        const courses = result.data || [];
         
         console.log('All available courses from API:', courses);
-        
-        // Filter out duplicate courses by courseId
-        const uniqueCourses = courses.filter((course, index, self) => 
-            index === self.findIndex(c => c.courseId === course.courseId)
-        );
-        
-        console.log('Unique courses after deduplication:', uniqueCourses);
-        
-        // Clear existing options except the first placeholder
-        courseSelect.innerHTML = '<option value="">Choose a course...</option>';
-        
-        // Add course options
-        uniqueCourses.forEach(course => {
-            const option = document.createElement('option');
-            option.value = course.courseId;
-            option.textContent = course.courseName;
-            courseSelect.appendChild(option);
-        });
+
+        populateAvailableCourses(courseSelect, courses);
         
         // Add custom course option
         const customOption = document.createElement('option');
@@ -3620,7 +3649,7 @@ async function loadAvailableCourses() {
         customOption.textContent = 'Enter custom course name...';
         courseSelect.appendChild(customOption);
         
-        console.log('Available courses loaded and deduplicated:', uniqueCourses);
+        console.log('Available courses loaded and deduplicated:', dedupeCourses(courses));
         
     } catch (error) {
         console.error('Error loading available courses:', error);
