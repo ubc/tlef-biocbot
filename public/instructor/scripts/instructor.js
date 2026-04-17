@@ -1247,6 +1247,41 @@ async function handleUpload() {
 }
 
 /**
+ * Build action buttons for a course material row
+ * @param {string} documentId - Document identifier
+ * @returns {string} HTML for action buttons
+ */
+function buildDocumentActionButtons(documentId) {
+    if (!documentId) {
+        return '';
+    }
+
+    return `
+        <button class="action-button view" onclick="viewDocument('${documentId}')">View</button>
+        <button class="action-button download" onclick="downloadDocument('${documentId}')">Download</button>
+        <button class="action-button delete" onclick="deleteDocument('${documentId}')">Delete</button>
+    `;
+}
+
+function extractFilenameFromDisposition(contentDisposition) {
+    if (!contentDisposition) {
+        return null;
+    }
+
+    const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match && utf8Match[1]) {
+        try {
+            return decodeURIComponent(utf8Match[1]);
+        } catch (error) {
+            console.warn('Unable to decode UTF-8 download filename:', error);
+        }
+    }
+
+    const asciiMatch = contentDisposition.match(/filename="([^\"]+)"/i);
+    return asciiMatch && asciiMatch[1] ? asciiMatch[1] : null;
+}
+
+/**
  * Add content to a specific week
  * @param {string} week - The week identifier
  * @param {string} fileName - The file name to display
@@ -1308,29 +1343,7 @@ function addContentToWeek(week, fileName, description, documentId, status = 'upl
         
         // Update action buttons - replace all buttons
         const actionsDiv = targetFileItem.querySelector('.file-actions');
-        actionsDiv.innerHTML = ''; // Clear existing buttons
-        
-        // Add view button
-        const viewButton = document.createElement('button');
-        viewButton.className = 'action-button view';
-        viewButton.textContent = 'View';
-        viewButton.onclick = () => {
-            if (documentId) {
-                viewDocument(documentId);
-            }
-        };
-        actionsDiv.appendChild(viewButton);
-        
-        // Add delete button
-        const deleteButton = document.createElement('button');
-        deleteButton.className = 'action-button delete';
-        deleteButton.textContent = 'Delete';
-        deleteButton.onclick = () => {
-            if (documentId) {
-                deleteDocument(documentId);
-            }
-        };
-        actionsDiv.appendChild(deleteButton);
+        actionsDiv.innerHTML = buildDocumentActionButtons(documentId);
         
         console.log(`✅ [ADD_CONTENT] Successfully replaced placeholder with uploaded content: ${fileName}`);
     } else {
@@ -1355,8 +1368,7 @@ function addContentToWeek(week, fileName, description, documentId, status = 'upl
                 <span class="status-text ${status}">${status === 'processed' ? 'Processed' : 'Uploaded'}</span>
             </div>
             <div class="file-actions">
-                ${documentId ? `<button class="action-button view" onclick="viewDocument('${documentId}')">View</button>` : ''}
-                ${documentId ? `<button class="action-button delete" onclick="deleteDocument('${documentId}')">Delete</button>` : ''}
+                ${buildDocumentActionButtons(documentId)}
             </div>
         `;
         
@@ -2450,12 +2462,55 @@ function createDocumentItem(doc) {
             <span class="status-text">${statusText}</span>
         </div>
         <div class="file-actions">
-            <button class="action-button view" onclick="viewDocument('${doc.documentId}')">View</button>
-            <button class="action-button delete" onclick="deleteDocument('${doc.documentId}')">Delete</button>
+            ${buildDocumentActionButtons(doc.documentId)}
         </div>
     `;
     
     return documentItem;
+}
+
+/**
+ * Download the original source file for a document
+ * @param {string} documentId - Document identifier
+ */
+async function downloadDocument(documentId) {
+    try {
+        const response = await fetch(`/api/documents/${documentId}/download`);
+
+        if (!response.ok) {
+            const contentType = response.headers.get('Content-Type') || '';
+            let message = 'Unable to download this document.';
+
+            if (contentType.includes('application/json')) {
+                const errorData = await response.json();
+                message = errorData.message || message;
+            } else {
+                const errorText = await response.text();
+                if (errorText && errorText.trim()) {
+                    message = errorText.trim();
+                }
+            }
+
+            throw new Error(message);
+        }
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const disposition = response.headers.get('Content-Disposition') || '';
+        const fileName = extractFilenameFromDisposition(disposition) || `document-${documentId}`;
+        const link = document.createElement('a');
+
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error) {
+        console.error('Error downloading document:', error);
+        showNotification(`Error downloading document: ${error.message}`, 'error');
+    }
 }
 
 /**
