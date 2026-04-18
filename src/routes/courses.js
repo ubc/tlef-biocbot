@@ -9,6 +9,7 @@ const CourseModel = require('../models/Course');
 const UserModel = require('../models/User');
 const DocumentModel = require('../models/Document');
 const QdrantService = require('../services/qdrantService');
+const configService = require('../services/config');
 
 // Middleware to parse JSON bodies
 router.use(express.json());
@@ -17,6 +18,11 @@ function hasInstructorOrTAAccess(course, userId) {
     return course.instructorId === userId ||
         (Array.isArray(course.instructors) && course.instructors.includes(userId)) ||
         (Array.isArray(course.tas) && course.tas.includes(userId));
+}
+
+function hasInstructorAccess(course, userId) {
+    return course.instructorId === userId ||
+        (Array.isArray(course.instructors) && course.instructors.includes(userId));
 }
 
 function isInactiveCourse(course = {}) {
@@ -91,6 +97,43 @@ function generateCourseCode() {
         code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return code;
+}
+
+function generateDistinctCourseCode(existingCodes = []) {
+    const normalizedExistingCodes = new Set(
+        existingCodes
+            .filter(Boolean)
+            .map((code) => String(code).trim().toUpperCase())
+    );
+
+    let code = generateCourseCode();
+    let attempts = 0;
+
+    while (normalizedExistingCodes.has(code) && attempts < 20) {
+        code = generateCourseCode();
+        attempts += 1;
+    }
+
+    return code;
+}
+
+async function userCanBypassCourseCodes(db, user) {
+    if (!user) {
+        return false;
+    }
+
+    let userEmail = user.email;
+
+    if (!userEmail && user.userId && db) {
+        const hydratedUser = await UserModel.getUserById(db, user.userId);
+        userEmail = hydratedUser && hydratedUser.email ? hydratedUser.email : null;
+    }
+
+    if (!userEmail) {
+        return false;
+    }
+
+    return configService.getAllowedDeleteButtonEmails().includes(userEmail);
 }
 
 function generateCourseId(courseName = '') {
@@ -759,8 +802,12 @@ router.get('/:courseId', async (req, res) => {
         // Transform the data to match expected format
         const transformedCourse = {
             id: course.courseId,
+            courseId: course.courseId,
             name: course.courseName,
-            courseCode: course.courseCode, // Include course code for instructors
+            courseName: course.courseName,
+            courseCode: course.courseCode, // Backward compatible student code field
+            studentCourseCode: course.courseCode,
+            instructorCourseCode: course.instructorCourseCode,
             approvedStruggleTopics: CourseModel.normalizeTopicList(course.approvedStruggleTopics || []),
             weeks: course.courseStructure?.weeks || 0,
             lecturesPerWeek: course.courseStructure?.lecturesPerWeek || 0,
@@ -1339,10 +1386,14 @@ router.post('/:courseId/transfer', async (req, res) => {
             return lectureCopy;
         });
 
+        const studentCourseCode = generateCourseCode();
+        const instructorCourseCode = generateDistinctCourseCode([studentCourseCode]);
+
         const targetCourse = {
             courseId: targetCourseId,
             courseName: newCourseName.trim(),
-            courseCode: generateCourseCode(),
+            courseCode: studentCourseCode,
+            instructorCourseCode,
             instructorId: user.userId,
             instructors: [user.userId],
             tas: transferTAs ? deepClone(sourceCourse.tas || []) : [],
@@ -1457,6 +1508,8 @@ router.post('/:courseId/transfer', async (req, res) => {
                 courseId: targetCourseId,
                 courseName: targetCourse.courseName,
                 courseCode: targetCourse.courseCode,
+                studentCourseCode: targetCourse.courseCode,
+                instructorCourseCode: targetCourse.instructorCourseCode,
                 sourceCourseId: courseId,
                 sourceDeactivated: !!deactivateSourceCourse,
                 warnings: transferWarnings,
@@ -1769,8 +1822,7 @@ router.post('/course-materials/confirm', async (req, res) => {
 
 /**
  * GET /api/courses/available/all
- * Get all available courses for both students and instructors
- * This endpoint provides a unified way to get course information
+ * Get courses available in the current user's normal selector
  */
 router.get('/available/all', async (req, res) => {
     try {
@@ -1790,6 +1842,10 @@ router.get('/available/all', async (req, res) => {
         const courses = await collection.find({ status: { $ne: 'deleted' } }).toArray();
 
         let availableCourses = courses;
+
+        if (user && user.role === 'instructor') {
+            availableCourses = availableCourses.filter(course => hasInstructorAccess(course, user.userId));
+        }
 
         if (user && (user.role === 'student' || user.role === 'ta')) {
             availableCourses = availableCourses.filter(course => (course.status || 'active') === 'active');
@@ -1851,6 +1907,57 @@ router.get('/available/all', async (req, res) => {
 });
 
 /**
+ * GET /api/courses/available/joinable
+ * Get courses that an instructor can join with an instructor course code
+ */
+router.get('/available/joinable', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({
+                success: false,
+                message: 'Database connection not available'
+            });
+        }
+
+        const user = req.user;
+        if (!user || user.role !== 'instructor') {
+            return res.status(403).json({
+                success: false,
+                message: 'Only instructors can view joinable courses'
+            });
+        }
+
+        const collection = db.collection('courses');
+        const courses = await collection.find({ status: { $ne: 'deleted' } }).toArray();
+        const joinableCourses = sortCoursesWithInactiveLast(
+            courses.filter(course => !hasInstructorAccess(course, user.userId))
+        );
+
+        const transformedCourses = joinableCourses.map((course) => ({
+            courseId: course.courseId,
+            courseName: course.courseName || course.courseId,
+            instructorId: course.instructorId,
+            instructors: course.instructors || [course.instructorId],
+            tas: course.tas || [],
+            status: course.status || 'active',
+            createdAt: course.createdAt?.toISOString() || new Date().toISOString()
+        }));
+
+        return res.json({
+            success: true,
+            data: transformedCourses
+        });
+    } catch (error) {
+        console.error('Error fetching joinable courses:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error while fetching joinable courses'
+        });
+    }
+});
+
+/**
  * POST /api/courses/:courseId/join
  * Join a course (Student via code, TA direct join)
  */
@@ -1876,17 +1983,21 @@ router.post('/:courseId/join', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const canBypassCourseCodes = await userCanBypassCourseCodes(db, user);
         
         // Handle Student Join
         if (user.role === 'student') {
-            if (!code) {
+            if (!canBypassCourseCodes && !code) {
                 return res.status(400).json({
                     success: false,
                     message: 'Course code is required'
                 });
             }
             
-            const result = await CourseModel.joinCourse(db, courseId, user.userId, code);
+            const result = await CourseModel.joinCourse(db, courseId, user.userId, code, {
+                skipCodeValidation: canBypassCourseCodes
+            });
             
             if (!result.success) {
                 // Return 403 for revoked access or invalid code
@@ -1960,12 +2071,12 @@ router.post('/:courseId/join', async (req, res) => {
 
 /**
  * POST /api/courses/:courseId/instructors
- * Add an instructor to a course
+ * Join a course as an instructor using an instructor course code
  */
 router.post('/:courseId/instructors', async (req, res) => {
     try {
         const { courseId } = req.params;
-        const { instructorId } = req.body;
+        const { instructorId, code } = req.body;
         
         // Get authenticated user information
         const user = req.user;
@@ -1976,11 +2087,11 @@ router.post('/:courseId/instructors', async (req, res) => {
             });
         }
         
-        // Only instructors can add other instructors
+        // Only instructors can join as instructors
         if (user.role !== 'instructor') {
             return res.status(403).json({
                 success: false,
-                message: 'Only instructors can add other instructors to courses'
+                message: 'Only instructors can join courses as instructors'
             });
         }
         
@@ -1988,6 +2099,13 @@ router.post('/:courseId/instructors', async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: 'instructorId is required'
+            });
+        }
+
+        if (user.userId !== instructorId) {
+            return res.status(403).json({
+                success: false,
+                message: 'You can only join courses for your own instructor account'
             });
         }
         
@@ -1999,26 +2117,50 @@ router.post('/:courseId/instructors', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
-        
-        // Add instructor to course using Course model
-        const result = await CourseModel.addInstructorToCourse(db, courseId, instructorId);
-        
-        if (!result.success) {
+
+        const canBypassCourseCodes = await userCanBypassCourseCodes(db, user);
+        const existingCourse = await db.collection('courses').findOne(
+            { courseId },
+            { projection: { instructorId: 1, instructors: 1 } }
+        );
+
+        if (!existingCourse) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        const alreadyHasAccess = hasInstructorAccess(existingCourse, instructorId);
+
+        if (!canBypassCourseCodes && !alreadyHasAccess && !code) {
             return res.status(400).json({
                 success: false,
-                message: result.error || 'Failed to add instructor to course'
+                message: 'Instructor course code is required'
             });
         }
         
-        console.log(`Added instructor ${instructorId} to course ${courseId}`);
+        const result = await CourseModel.joinCourseAsInstructor(db, courseId, instructorId, code, {
+            skipCodeValidation: canBypassCourseCodes
+        });
+        
+        if (!result.success) {
+            return res.status(403).json({
+                success: false,
+                message: result.error || 'Failed to join course as instructor'
+            });
+        }
+        
+        console.log(`Instructor ${instructorId} joined course ${courseId}`);
         
         res.json({
             success: true,
-            message: 'Instructor added to course successfully',
+            message: result.message || 'Instructor added to course successfully',
             data: {
                 courseId,
                 instructorId,
-                modifiedCount: result.modifiedCount
+                modifiedCount: result.alreadyJoined ? 0 : 1,
+                alreadyJoined: !!result.alreadyJoined
             }
         });
         

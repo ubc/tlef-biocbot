@@ -165,9 +165,15 @@
                         <div id="join-course-section" class="form-section" style="display: none;">
                             <div class="join-course-info">
                                 <h3>Join Existing Course</h3>
-                                <p>You've selected an existing course. Click "Join Course" to become an instructor for this course.</p>
+                                <p>You've selected an existing course. Enter the instructor course code to become an instructor for this course.</p>
                                 <div class="course-details" id="selected-course-details">
                                     <!-- Course details will be populated here -->
+                                </div>
+                                <div class="form-group" id="instructor-course-code-group" style="display: none;">
+                                    <label for="instructor-course-code">Instructor Course Code</label>
+                                    <input type="text" id="instructor-course-code" name="instructorCourseCode" placeholder="Enter instructor code" style="text-transform: uppercase;">
+                                    <small id="instructor-course-code-help">Ask the course owner for the instructor course code.</small>
+                                    <small id="instructor-course-code-error" class="field-feedback error" style="display: none;" role="alert"></small>
                                 </div>
                             </div>
                         </div>

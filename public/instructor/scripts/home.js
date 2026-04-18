@@ -4,6 +4,7 @@
  */
 
 let anonymizeStudentsEnabled = false;
+let canBypassInstructorCourseCodes = false;
 
 document.addEventListener('DOMContentLoaded', function() {
     // Wait for auth to be ready before initializing
@@ -1202,23 +1203,7 @@ function renderWeeklyStruggleChart(weekData, totalWeeksAvailable) {
  * @param {string} message - Info message
  */
 function showInfoMessage(message) {
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.className = 'notification info';
-    notification.innerHTML = `
-        <span>${message}</span>
-        <button class="notification-close" onclick="this.parentElement.remove()">×</button>
-    `;
-    
-    // Add to page
-    document.body.appendChild(notification);
-    
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-        if (notification.parentElement) {
-            notification.remove();
-        }
-    }, 5000);
+    showNotificationMessage(message, 'info');
 }
 
 /**
@@ -1226,23 +1211,7 @@ function showInfoMessage(message) {
  * @param {string} message - Error message
  */
 function showErrorMessage(message) {
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.className = 'notification error';
-    notification.innerHTML = `
-        <span>${message}</span>
-        <button class="notification-close" onclick="this.parentElement.remove()">×</button>
-    `;
-    
-    // Add to page
-    document.body.appendChild(notification);
-    
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-        if (notification.parentElement) {
-            notification.remove();
-        }
-    }, 5000);
+    showNotificationMessage(message, 'error');
 }
 
 /**
@@ -1250,23 +1219,85 @@ function showErrorMessage(message) {
  * @param {string} message - Success message
  */
 function showSuccessMessage(message) {
-    // Create notification element
+    showNotificationMessage(message, 'success');
+}
+
+function getNotificationContainer() {
+    let container = document.querySelector('.notification-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'notification-container';
+        document.body.appendChild(container);
+    }
+
+    return container;
+}
+
+function showNotificationMessage(message, type) {
     const notification = document.createElement('div');
-    notification.className = 'notification success';
-    notification.innerHTML = `
-        <span>${message}</span>
-        <button class="notification-close" onclick="this.parentElement.remove()">×</button>
-    `;
-    
-    // Add to page
-    document.body.appendChild(notification);
-    
-    // Auto-remove after 5 seconds
+    notification.className = `notification ${type}`;
+
+    const messageSpan = document.createElement('span');
+    messageSpan.textContent = message;
+
+    const closeButton = document.createElement('button');
+    closeButton.className = 'notification-close';
+    closeButton.type = 'button';
+    closeButton.textContent = '×';
+    closeButton.addEventListener('click', () => notification.remove());
+
+    notification.appendChild(messageSpan);
+    notification.appendChild(closeButton);
+
+    getNotificationContainer().appendChild(notification);
+
     setTimeout(() => {
         if (notification.parentElement) {
             notification.remove();
         }
     }, 5000);
+}
+
+function animateFieldError(input) {
+    if (!input) {
+        return;
+    }
+
+    input.classList.remove('field-error-shake');
+    void input.offsetWidth;
+    input.classList.add('field-error-shake');
+}
+
+function setJoinCourseCodeFeedback(message) {
+    const codeInput = document.getElementById('instructor-course-code-input');
+    const feedback = document.getElementById('instructor-course-code-feedback');
+
+    if (codeInput) {
+        codeInput.classList.add('input-error');
+        codeInput.setAttribute('aria-invalid', 'true');
+        animateFieldError(codeInput);
+        codeInput.focus();
+    }
+
+    if (feedback) {
+        feedback.textContent = message;
+        feedback.style.display = 'block';
+    }
+}
+
+function clearJoinCourseCodeFeedback() {
+    const codeInput = document.getElementById('instructor-course-code-input');
+    const feedback = document.getElementById('instructor-course-code-feedback');
+
+    if (codeInput) {
+        codeInput.classList.remove('input-error', 'field-error-shake');
+        codeInput.removeAttribute('aria-invalid');
+    }
+
+    if (feedback) {
+        feedback.textContent = '';
+        feedback.style.display = 'none';
+    }
 }
 
 /**
@@ -1278,6 +1309,11 @@ async function initializeCourseSelection() {
     const cancelCourseSelectBtn = document.getElementById('cancel-course-select-btn');
     const joinCourseBtn = document.getElementById('join-course-btn');
     const courseSelectDropdown = document.getElementById('course-select-dropdown');
+    const joinCourseSelectDropdown = document.getElementById('join-course-select-dropdown');
+    const instructorCodeInput = document.getElementById('instructor-course-code-input');
+
+    canBypassInstructorCourseCodes = await checkCourseCodeBypassPermission();
+    applyInstructorCodeJoinPermissions();
     
     if (changeCourseBtn) {
         changeCourseBtn.addEventListener('click', showCourseSelector);
@@ -1292,11 +1328,27 @@ async function initializeCourseSelection() {
     }
     
     if (courseSelectDropdown) {
-        courseSelectDropdown.addEventListener('change', handleCourseSelectionChange);
+        courseSelectDropdown.addEventListener('change', async (event) => {
+            const courseId = event.target.value;
+            if (!courseId) return;
+
+            const selectedOption = event.target.options[event.target.selectedIndex];
+            await setSelectedCourse(courseId, selectedOption ? selectedOption.textContent : courseId);
+        });
+    }
+
+    if (joinCourseSelectDropdown) {
+        joinCourseSelectDropdown.addEventListener('change', handleJoinCourseSelectionChange);
+    }
+
+    if (instructorCodeInput) {
+        instructorCodeInput.addEventListener('input', clearJoinCourseCodeFeedback);
     }
     
-    // Load available courses
-    await loadAvailableCourses();
+    await Promise.all([
+        loadAvailableCourses(),
+        loadJoinableCourses()
+    ]);
     
     // Load and display current course
     await loadCurrentCourse();
@@ -1355,6 +1407,67 @@ function populateCourseDropdown(selectElement, courses, placeholderText) {
     appendCourseGroup(selectElement, 'Deactive Courses', inactiveCourses);
 }
 
+async function checkCourseCodeBypassPermission() {
+    try {
+        const response = await fetch('/api/settings/can-delete-all', {
+            credentials: 'include'
+        });
+
+        const result = await response.json();
+        return !!(result.success && result.canDeleteAll);
+    } catch (error) {
+        console.error('Error checking instructor course-code bypass permission:', error);
+        return false;
+    }
+}
+
+function applyInstructorCodeJoinPermissions() {
+    const codeEntryGroup = document.getElementById('instructor-code-entry-group');
+    const codeHelp = document.getElementById('instructor-course-code-help');
+
+    if (codeEntryGroup) {
+        codeEntryGroup.style.display = 'none';
+    }
+
+    if (codeHelp) {
+        codeHelp.textContent = canBypassInstructorCourseCodes
+            ? 'You have admin access, so no instructor code is required for you to join this course.'
+            : 'Ask the course owner for the instructor code for this course.';
+    }
+}
+
+function updateCourseCodeDisplay(courseData = {}) {
+    const studentCodeLabel = document.getElementById('student-course-code-label');
+    const studentCodeDisplay = document.getElementById('student-course-code-display');
+    const instructorCodeLabel = document.getElementById('instructor-course-code-label');
+    const instructorCodeDisplay = document.getElementById('instructor-course-code-display');
+
+    const studentCode = courseData.studentCourseCode || courseData.courseCode;
+    const instructorCode = courseData.instructorCourseCode;
+
+    if (studentCodeLabel && studentCodeDisplay) {
+        if (studentCode) {
+            studentCodeDisplay.textContent = studentCode;
+            studentCodeDisplay.style.display = 'inline-block';
+            studentCodeLabel.style.display = 'inline-block';
+        } else {
+            studentCodeDisplay.style.display = 'none';
+            studentCodeLabel.style.display = 'none';
+        }
+    }
+
+    if (instructorCodeLabel && instructorCodeDisplay) {
+        if (instructorCode) {
+            instructorCodeDisplay.textContent = instructorCode;
+            instructorCodeDisplay.style.display = 'inline-block';
+            instructorCodeLabel.style.display = 'inline-block';
+        } else {
+            instructorCodeDisplay.style.display = 'none';
+            instructorCodeLabel.style.display = 'none';
+        }
+    }
+}
+
 /**
  * Load available courses for selection
  */
@@ -1380,7 +1493,7 @@ async function loadAvailableCourses() {
         
         const courses = result.data || [];
 
-        populateCourseDropdown(courseSelectDropdown, courses, 'Choose a course...');
+        populateCourseDropdown(courseSelectDropdown, courses, 'Choose one of your courses...');
         
         console.log('Available courses loaded:', dedupeCourses(courses).length);
         
@@ -1390,6 +1503,35 @@ async function loadAvailableCourses() {
         const courseSelectDropdown = document.getElementById('course-select-dropdown');
         if (courseSelectDropdown) {
             courseSelectDropdown.innerHTML = '<option value="">Error loading courses</option>';
+        }
+    }
+}
+
+async function loadJoinableCourses() {
+    try {
+        const joinCourseSelectDropdown = document.getElementById('join-course-select-dropdown');
+        if (!joinCourseSelectDropdown) return;
+
+        const response = await fetch('/api/courses/available/joinable', {
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to fetch joinable courses');
+        }
+
+        const courses = result.data || [];
+        populateCourseDropdown(joinCourseSelectDropdown, courses, 'Choose a course to join...');
+    } catch (error) {
+        console.error('Error loading joinable courses:', error);
+        const joinCourseSelectDropdown = document.getElementById('join-course-select-dropdown');
+        if (joinCourseSelectDropdown) {
+            joinCourseSelectDropdown.innerHTML = '<option value="">Error loading joinable courses</option>';
         }
     }
 }
@@ -1432,9 +1574,9 @@ async function loadCurrentCourse() {
             if (result.success && result.data) {
                 await setSelectedCourse(courseId, getCourseDisplayName({
                     courseId,
-                    courseName: result.data.courseName || courseId,
+                    courseName: result.data.courseName || result.data.name || courseId,
                     status: result.data.status
-                }));
+                }), result.data);
             } else {
                 // Course not found, clear selection
                 clearSelectedCourse();
@@ -1456,8 +1598,11 @@ async function loadCurrentCourse() {
  * Set the selected course and update UI
  * @param {string} courseId - Course ID to set
  * @param {string} courseName - Course name to display
+ * @param {Object|null} courseData - Optional course details payload
  */
-async function setSelectedCourse(courseId, courseName) {
+async function setSelectedCourse(courseId, courseName, courseData = null) {
+    let resolvedCourseData = courseData;
+
     // Store in localStorage
     localStorage.setItem('selectedCourseId', courseId);
     
@@ -1468,55 +1613,26 @@ async function setSelectedCourse(courseId, courseName) {
         window.history.replaceState({}, '', `${window.location.pathname}?${urlParams.toString()}`);
     }
     
-    // Auto-add instructor to course's instructors array when they select a course
-    // This ensures they have full access to the course features
-    const instructorId = getCurrentInstructorId();
-    if (instructorId) {
-        try {
-            await fetch(`/api/courses/${courseId}/instructors`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ instructorId })
-            });
-            console.log(`✅ Auto-added instructor ${instructorId} to course ${courseId}`);
-        } catch (error) {
-            console.warn('Could not auto-add instructor to course:', error);
+    if (!resolvedCourseData) {
+        const response = await authenticatedFetch(`/api/courses/${courseId}`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch course details for ${courseId}`);
         }
+
+        const result = await response.json();
+        if (!result.success || !result.data) {
+            throw new Error(result.message || `Course ${courseId} is not accessible`);
+        }
+
+        resolvedCourseData = result.data;
     }
     
     // Update UI
     const courseNameDisplay = document.getElementById('course-name-display');
     if (courseNameDisplay) {
-        courseNameDisplay.textContent = courseName || courseId;
+        courseNameDisplay.textContent = courseName || resolvedCourseData.courseName || resolvedCourseData.name || courseId;
     }
-
-    // Update Course Code display
-    const courseCodeLabel = document.querySelector('.course-code-label');
-    const courseCodeDisplay = document.getElementById('course-code-display');
-    
-    if (courseCodeDisplay && courseCodeLabel) {
-        // We need to fetch the course details to get the code if we don't have it
-        // Usually setSelectedCourse is called after fetching details, but let's be safe
-        try {
-            const response = await authenticatedFetch(`/api/courses/${courseId}`);
-            if (response.ok) {
-                const result = await response.json();
-                if (result.success && result.data && result.data.courseCode) {
-                    courseCodeDisplay.textContent = result.data.courseCode;
-                    courseCodeDisplay.style.display = 'inline-block';
-                    courseCodeLabel.style.display = 'inline-block';
-                } else {
-                    courseCodeDisplay.style.display = 'none';
-                    courseCodeLabel.style.display = 'none';
-                }
-            }
-        } catch (e) {
-            console.error('Error fetching course code:', e);
-            courseCodeDisplay.style.display = 'none';
-            courseCodeLabel.style.display = 'none';
-        }
-    }
+    updateCourseCodeDisplay(resolvedCourseData);
     
     // Show course selection container
     const courseSelectionContainer = document.getElementById('course-selection-container');
@@ -1584,8 +1700,6 @@ function clearSelectedCourse() {
 function showCourseSelector() {
     const currentCourseDisplay = document.querySelector('.current-course-display');
     const courseSelector = document.getElementById('course-selector');
-    const selectedCourseDetails = document.getElementById('selected-course-details');
-    const joinCourseBtn = document.getElementById('join-course-btn');
     
     if (currentCourseDisplay) {
         currentCourseDisplay.style.display = 'none';
@@ -1594,14 +1708,10 @@ function showCourseSelector() {
     if (courseSelector) {
         courseSelector.style.display = 'flex';
     }
-    
-    if (selectedCourseDetails) {
-        selectedCourseDetails.style.display = 'none';
-    }
-    
-    if (joinCourseBtn) {
-        joinCourseBtn.style.display = 'none';
-    }
+
+    resetJoinCourseSelection();
+    loadAvailableCourses();
+    loadJoinableCourses();
 }
 
 /**
@@ -1610,8 +1720,6 @@ function showCourseSelector() {
 function hideCourseSelector() {
     const currentCourseDisplay = document.querySelector('.current-course-display');
     const courseSelector = document.getElementById('course-selector');
-    const selectedCourseDetails = document.getElementById('selected-course-details');
-    const joinCourseBtn = document.getElementById('join-course-btn');
     const courseSelectDropdown = document.getElementById('course-select-dropdown');
     
     if (currentCourseDisplay) {
@@ -1622,63 +1730,100 @@ function hideCourseSelector() {
         courseSelector.style.display = 'none';
     }
     
+    if (courseSelectDropdown) {
+        courseSelectDropdown.value = '';
+    }
+
+    resetJoinCourseSelection();
+}
+
+/**
+ * Reset join-course selection state
+ */
+function resetJoinCourseSelection() {
+    const selectedCourseDetails = document.getElementById('selected-course-details');
+    const joinCourseBtn = document.getElementById('join-course-btn');
+    const joinCourseSelectDropdown = document.getElementById('join-course-select-dropdown');
+    const codeEntryGroup = document.getElementById('instructor-code-entry-group');
+    const codeInput = document.getElementById('instructor-course-code-input');
+
     if (selectedCourseDetails) {
         selectedCourseDetails.style.display = 'none';
     }
     
     if (joinCourseBtn) {
         joinCourseBtn.style.display = 'none';
+        joinCourseBtn.disabled = false;
+        joinCourseBtn.textContent = 'Join Course';
+        delete joinCourseBtn.dataset.courseId;
+        delete joinCourseBtn.dataset.courseName;
     }
-    
-    if (courseSelectDropdown) {
-        courseSelectDropdown.value = '';
+
+    if (joinCourseSelectDropdown) {
+        joinCourseSelectDropdown.value = '';
     }
+
+    if (codeEntryGroup) {
+        codeEntryGroup.style.display = 'none';
+    }
+
+    if (codeInput) {
+        codeInput.value = '';
+    }
+
+    clearJoinCourseCodeFeedback();
 }
 
 /**
- * Handle course selection dropdown change
+ * Handle join-course dropdown change
  */
-function handleCourseSelectionChange(event) {
+function handleJoinCourseSelectionChange(event) {
     const courseId = event.target.value;
     const selectedCourseDetails = document.getElementById('selected-course-details');
     const joinCourseBtn = document.getElementById('join-course-btn');
     const selectedCourseName = document.getElementById('selected-course-name');
     const selectedCourseId = document.getElementById('selected-course-id');
-    
+    const joinCourseDescription = document.getElementById('join-course-description');
+    const codeEntryGroup = document.getElementById('instructor-code-entry-group');
+    clearJoinCourseCodeFeedback();
+
     if (!courseId) {
-        if (selectedCourseDetails) {
-            selectedCourseDetails.style.display = 'none';
-        }
-        if (joinCourseBtn) {
-            joinCourseBtn.style.display = 'none';
-        }
+        resetJoinCourseSelection();
         return;
     }
-    
-    // Get course name from dropdown
+
     const selectedOption = event.target.options[event.target.selectedIndex];
-    const courseName = selectedOption.textContent;
-    
-    // Show course details
+    const courseName = selectedOption ? selectedOption.textContent : courseId;
+
     if (selectedCourseDetails) {
         selectedCourseDetails.style.display = 'block';
     }
-    
+
     if (selectedCourseName) {
         selectedCourseName.textContent = courseName;
     }
-    
+
     if (selectedCourseId) {
         selectedCourseId.textContent = courseId;
     }
-    
+
+    if (joinCourseDescription) {
+        joinCourseDescription.textContent = canBypassInstructorCourseCodes
+            ? 'You have admin access, so you can join this course without entering an instructor code.'
+            : 'Enter the instructor course code to join this course.';
+    }
+
+    if (codeEntryGroup) {
+        codeEntryGroup.style.display = canBypassInstructorCourseCodes ? 'none' : 'block';
+    }
+
     if (joinCourseBtn) {
         joinCourseBtn.style.display = 'inline-block';
+        joinCourseBtn.disabled = false;
+        joinCourseBtn.textContent = 'Join Course';
+        joinCourseBtn.dataset.courseId = courseId;
+        joinCourseBtn.dataset.courseName = courseName;
     }
-    
-    // Store selected course ID for joining
-    joinCourseBtn.dataset.courseId = courseId;
-    joinCourseBtn.dataset.courseName = courseName;
 }
 
 /**
@@ -1686,15 +1831,24 @@ function handleCourseSelectionChange(event) {
  */
 async function handleJoinCourse() {
     const joinCourseBtn = document.getElementById('join-course-btn');
+    const instructorCodeInput = document.getElementById('instructor-course-code-input');
     if (!joinCourseBtn) return;
     
     const courseId = joinCourseBtn.dataset.courseId;
     const courseName = joinCourseBtn.dataset.courseName;
+    const code = instructorCodeInput ? instructorCodeInput.value.trim().toUpperCase() : '';
     
     if (!courseId) {
         showErrorMessage('No course selected');
         return;
     }
+
+    if (!canBypassInstructorCourseCodes && !code) {
+        setJoinCourseCodeFeedback('Instructor course code is required to join this course.');
+        return;
+    }
+
+    clearJoinCourseCodeFeedback();
     
     try {
         // Show loading state
@@ -1715,7 +1869,8 @@ async function handleJoinCourse() {
             },
             credentials: 'include',
             body: JSON.stringify({
-                instructorId: instructorId
+                instructorId: instructorId,
+                code
             })
         });
         
@@ -1726,6 +1881,11 @@ async function handleJoinCourse() {
         
         const result = await response.json();
         console.log('Successfully joined course:', result);
+
+        await Promise.all([
+            loadAvailableCourses(),
+            loadJoinableCourses()
+        ]);
         
         // Mark instructor's onboarding as complete since they joined an existing course
         if (typeof markInstructorOnboardingComplete === 'function') {
@@ -1761,7 +1921,11 @@ async function handleJoinCourse() {
         
     } catch (error) {
         console.error('Error joining course:', error);
-        showErrorMessage(`Error joining course: ${error.message}`);
+        if (instructorCodeInput && /course code|required|invalid/i.test(error.message)) {
+            setJoinCourseCodeFeedback(error.message);
+        } else {
+            showErrorMessage(`Error joining course: ${error.message}`);
+        }
         
         // Reset button state
         if (joinCourseBtn) {
