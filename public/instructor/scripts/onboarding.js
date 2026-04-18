@@ -493,6 +493,10 @@ function applyJoinCourseCodePermission() {
     if (codeGroup && onboardingState.existingCourseId) {
         codeGroup.style.display = canBypassOnboardingInstructorCourseCodes ? 'none' : 'block';
     }
+
+    if (canBypassOnboardingInstructorCourseCodes) {
+        clearOnboardingJoinCourseCodeFeedback();
+    }
 }
 
 /**
@@ -775,6 +779,11 @@ function initializeFormHandlers() {
     if (customCourseName) {
         customCourseName.addEventListener('input', handleCustomCourseInput);
     }
+
+    const instructorCourseCode = document.getElementById('instructor-course-code');
+    if (instructorCourseCode) {
+        instructorCourseCode.addEventListener('input', clearOnboardingJoinCourseCodeFeedback);
+    }
     
     // Course setup form handler
     const courseSetupForm = document.getElementById('course-setup-form');
@@ -806,6 +815,7 @@ function handleCourseSelection(event) {
     const joinCourseBtn = document.getElementById('join-course-btn');
     const codeGroup = document.getElementById('instructor-course-code-group');
     const codeInput = document.getElementById('instructor-course-code');
+    clearOnboardingJoinCourseCodeFeedback();
     
     if (courseSelect.value === 'custom') {
         // Show custom course input and course structure
@@ -885,6 +895,48 @@ function populateSelectedCourseDetails(courseId) {
     }
 }
 
+function animateOnboardingJoinCourseCodeError(field) {
+    if (!field) {
+        return;
+    }
+
+    field.classList.remove('field-error-shake');
+    void field.offsetWidth;
+    field.classList.add('field-error-shake');
+}
+
+function setOnboardingJoinCourseCodeFeedback(message) {
+    const codeInput = document.getElementById('instructor-course-code');
+    const errorElement = document.getElementById('instructor-course-code-error');
+
+    if (codeInput) {
+        codeInput.classList.add('input-error');
+        codeInput.setAttribute('aria-invalid', 'true');
+        animateOnboardingJoinCourseCodeError(codeInput);
+        codeInput.focus();
+    }
+
+    if (errorElement) {
+        errorElement.textContent = message;
+        errorElement.style.display = 'block';
+    }
+}
+
+function clearOnboardingJoinCourseCodeFeedback() {
+    const codeInput = document.getElementById('instructor-course-code');
+    const errorElement = document.getElementById('instructor-course-code-error');
+
+    if (codeInput) {
+        codeInput.classList.remove('input-error', 'field-error-shake');
+        codeInput.removeAttribute('aria-invalid');
+    }
+
+    if (errorElement) {
+        errorElement.textContent = '';
+        errorElement.style.display = 'none';
+    }
+}
+
 /**
  * Join an existing course
  */
@@ -897,9 +949,11 @@ async function joinExistingCourse() {
     const codeInput = document.getElementById('instructor-course-code');
     const code = codeInput ? codeInput.value.trim().toUpperCase() : '';
     if (!canBypassOnboardingInstructorCourseCodes && !code) {
-        showNotification('Instructor course code is required to join this course.', 'error');
+        setOnboardingJoinCourseCodeFeedback('Instructor course code is required to join this course.');
         return;
     }
+
+    clearOnboardingJoinCourseCodeFeedback();
     
     try {
         console.log(`🚀 [ONBOARDING] Joining existing course: ${onboardingState.existingCourseId}`);
@@ -944,7 +998,11 @@ async function joinExistingCourse() {
         
     } catch (error) {
         console.error('❌ [ONBOARDING] Error joining course:', error);
-        showNotification(`Error joining course: ${error.message}`, 'error');
+        if (codeInput && /course code|required|invalid/i.test(error.message)) {
+            setOnboardingJoinCourseCodeFeedback(error.message);
+        } else {
+            showNotification(`Error joining course: ${error.message}`, 'error');
+        }
         
         // Reset button state
         const joinBtn = document.getElementById('join-course-btn');

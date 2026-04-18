@@ -2119,7 +2119,21 @@ router.post('/:courseId/instructors', async (req, res) => {
         }
 
         const canBypassCourseCodes = await userCanBypassCourseCodes(db, user);
-        if (!canBypassCourseCodes && !code) {
+        const existingCourse = await db.collection('courses').findOne(
+            { courseId },
+            { projection: { instructorId: 1, instructors: 1 } }
+        );
+
+        if (!existingCourse) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        const alreadyHasAccess = hasInstructorAccess(existingCourse, instructorId);
+
+        if (!canBypassCourseCodes && !alreadyHasAccess && !code) {
             return res.status(400).json({
                 success: false,
                 message: 'Instructor course code is required'

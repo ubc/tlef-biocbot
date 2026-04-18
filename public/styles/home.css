@@ -54,12 +54,17 @@
 }
 
 .course-selector label {
+  display: block;
+  margin-bottom: 8px;
   font-size: 1rem;
   color: var(--text-color);
   font-weight: 500;
 }
 
-.course-select-dropdown {
+.course-selector .course-select-dropdown {
+  width: 100%;
+  max-width: 470px;
+  box-sizing: border-box;
   padding: 10px 15px;
   border-radius: 6px;
   border: 1px solid var(--border-color);
