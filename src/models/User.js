@@ -8,6 +8,7 @@ const { MongoClient } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const StruggleActivity = require('./StruggleActivity');
 const PersistenceTopic = require('./PersistenceTopic');
+const { applyAccessState, normalizeEmail } = require('../services/authorization');
 
 /**
  * User Schema Structure:
@@ -43,6 +44,27 @@ function getUsersCollection(db) {
     return db.collection('users');
 }
 
+function toSessionUser(user) {
+    const resolvedUser = applyAccessState(user);
+
+    if (!resolvedUser) {
+        return null;
+    }
+
+    return {
+        userId: resolvedUser.userId,
+        username: resolvedUser.username,
+        email: resolvedUser.email,
+        role: resolvedUser.role,
+        baseRole: resolvedUser.baseRole,
+        displayName: resolvedUser.displayName,
+        authProvider: resolvedUser.authProvider,
+        preferences: resolvedUser.preferences,
+        permissions: resolvedUser.permissions,
+        invitedCourses: resolvedUser.invitedCourses || []
+    };
+}
+
 /**
  * Create a new user account
  * @param {Object} db - MongoDB database instance
@@ -67,7 +89,7 @@ async function createUser(db, userData) {
     const user = {
         userId,
         username: userData.username,
-        email: userData.email && userData.email.trim() !== '' ? userData.email : null,
+        email: normalizeEmail(userData.email),
         passwordHash,
         role: userData.role, // "instructor", "student", or "ta"
         displayName: userData.displayName && userData.displayName.trim() !== '' ? userData.displayName : userData.username,
@@ -83,6 +105,9 @@ async function createUser(db, userData) {
             notifications: true,
             courseId: userData.courseId || null
         },
+        permissions: {
+            systemAdmin: !!(userData.permissions && userData.permissions.systemAdmin === true)
+        },
         struggleState: {
             topics: [] // Array of { topic: String, count: Number, lastStruggle: Date, isActive: Boolean }
         }
@@ -92,8 +117,8 @@ async function createUser(db, userData) {
     const queryConditions = [{ username: userData.username }];
     
     // Only check email if it's provided and not empty
-    if (userData.email && userData.email.trim() !== '') {
-        queryConditions.push({ email: userData.email });
+    if (user.email) {
+        queryConditions.push({ email: user.email });
     }
     
     const existingUser = await collection.findOne({
@@ -102,7 +127,7 @@ async function createUser(db, userData) {
     
     if (existingUser) {
         let errorMessage = 'User already exists with this username';
-        if (userData.email && userData.email.trim() !== '' && existingUser.email === userData.email) {
+        if (user.email && existingUser.email === user.email) {
             errorMessage = 'User already exists with this email address';
         } else if (existingUser.username === userData.username) {
             errorMessage = 'User already exists with this username';
@@ -127,8 +152,10 @@ async function createUser(db, userData) {
             username: user.username,
             email: user.email,
             role: user.role,
+            baseRole: user.role,
             displayName: user.displayName,
-            authProvider: user.authProvider
+            authProvider: user.authProvider,
+            permissions: user.permissions
         }
     };
 }
@@ -142,12 +169,13 @@ async function createUser(db, userData) {
  */
 async function authenticateUser(db, username, password) {
     const collection = getUsersCollection(db);
+    const normalizedUsername = normalizeEmail(username) || username;
     
     // Find user by username or email
     const user = await collection.findOne({
         $or: [
             { username: username },
-            { email: username }
+            { email: normalizedUsername }
         ],
         isActive: true
     });
@@ -181,16 +209,7 @@ async function authenticateUser(db, username, password) {
     
     return {
         success: true,
-        user: {
-            userId: user.userId,
-            username: user.username,
-            email: user.email,
-            role: user.role,
-            displayName: user.displayName,
-            authProvider: user.authProvider,
-            preferences: user.preferences,
-            invitedCourses: user.invitedCourses || []
-        }
+        user: toSessionUser(user)
     };
 }
 
@@ -211,19 +230,22 @@ async function getUserById(db, userId) {
     if (!user) {
         return null;
     }
-    
+
+    const resolvedUser = applyAccessState(user);
+
     return {
-        userId: user.userId,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        displayName: user.displayName,
-        authProvider: user.authProvider,
-        authProvider: user.authProvider,
-        preferences: user.preferences,
-        lastLogin: user.lastLogin,
-        struggleState: user.struggleState,
-        invitedCourses: user.invitedCourses || []
+        userId: resolvedUser.userId,
+        username: resolvedUser.username,
+        email: resolvedUser.email,
+        role: resolvedUser.role,
+        baseRole: resolvedUser.baseRole,
+        displayName: resolvedUser.displayName,
+        authProvider: resolvedUser.authProvider,
+        preferences: resolvedUser.preferences,
+        lastLogin: resolvedUser.lastLogin,
+        struggleState: resolvedUser.struggleState,
+        invitedCourses: resolvedUser.invitedCourses || [],
+        permissions: resolvedUser.permissions
     };
 }
 
@@ -249,17 +271,21 @@ async function getUserByPuid(db, puid) {
     if (!user) {
         return null;
     }
-    
+
+    const resolvedUser = applyAccessState(user);
+
     return {
-        userId: user.userId,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        displayName: user.displayName,
-        authProvider: user.authProvider,
-        preferences: user.preferences,
-        lastLogin: user.lastLogin,
-        puid: user.puid
+        userId: resolvedUser.userId,
+        username: resolvedUser.username,
+        email: resolvedUser.email,
+        role: resolvedUser.role,
+        baseRole: resolvedUser.baseRole,
+        displayName: resolvedUser.displayName,
+        authProvider: resolvedUser.authProvider,
+        preferences: resolvedUser.preferences,
+        lastLogin: resolvedUser.lastLogin,
+        puid: resolvedUser.puid,
+        permissions: resolvedUser.permissions
     };
 }
 
@@ -308,6 +334,7 @@ async function updateUserPreferences(db, userId, preferences) {
  */
 async function createOrGetSAMLUser(db, samlData) {
     const collection = getUsersCollection(db);
+    const normalizedEmail = normalizeEmail(samlData.email);
     
     // For CWL users, PUID is the primary identifier for user lookup
     // Check if user already exists by PUID first (most reliable for CWL)
@@ -322,6 +349,10 @@ async function createOrGetSAMLUser(db, samlData) {
     // Also check by samlId as fallback (for non-CWL SAML users)
     if (samlData.samlId) {
         queryConditions.push({ samlId: samlData.samlId, authProvider: 'saml' });
+    }
+
+    if (normalizedEmail) {
+        queryConditions.push({ email: normalizedEmail, authProvider: 'saml' });
     }
     
     // If no query conditions, we can't look up existing users
@@ -348,6 +379,29 @@ async function createOrGetSAMLUser(db, samlData) {
         if (samlData.puid && !existingUser.puid) {
             updateFields.puid = samlData.puid;
             console.log(`Updating existing user ${existingUser.userId} with PUID: ${samlData.puid}`);
+        }
+
+        if (samlData.samlId && !existingUser.samlId) {
+            updateFields.samlId = samlData.samlId;
+        }
+
+        if (normalizedEmail && existingUser.email !== normalizedEmail) {
+            updateFields.email = normalizedEmail;
+        }
+
+        if (samlData.username && (!existingUser.username || existingUser.username === existingUser.email)) {
+            updateFields.username = samlData.username;
+        }
+
+        if (
+            samlData.displayName &&
+            (
+                !existingUser.displayName ||
+                existingUser.displayName === existingUser.email ||
+                existingUser.displayName === existingUser.username
+            )
+        ) {
+            updateFields.displayName = samlData.displayName;
         }
 
         // Always re-apply the role determined by the Passport strategy on each login.
@@ -378,20 +432,12 @@ async function createOrGetSAMLUser(db, samlData) {
             { $set: updateFields }
         );
 
-        // Use the freshly determined role in the returned object
-        const resolvedRole = updateFields.role || existingUser.role;
-
         return {
             success: true,
-            user: {
-                userId: existingUser.userId,
-                username: existingUser.username,
-                email: existingUser.email,
-                role: resolvedRole,
-                displayName: existingUser.displayName,
-                authProvider: existingUser.authProvider,
-                preferences: existingUser.preferences
-            }
+            user: toSessionUser({
+                ...existingUser,
+                ...updateFields
+            })
         };
     }
     
@@ -401,8 +447,8 @@ async function createOrGetSAMLUser(db, samlData) {
     
     const user = {
         userId,
-        username: samlData.username || samlData.email,
-        email: samlData.email,
+        username: samlData.username || normalizedEmail,
+        email: normalizedEmail,
         passwordHash: null, // No password for SAML users
         role: samlData.role || 'student', // Default to student, can be updated
         displayName: samlData.displayName || samlData.username,
@@ -417,6 +463,9 @@ async function createOrGetSAMLUser(db, samlData) {
             theme: 'light',
             notifications: true,
             courseId: null
+        },
+        permissions: {
+            systemAdmin: false
         }
     };
     
@@ -428,15 +477,7 @@ async function createOrGetSAMLUser(db, samlData) {
         success: true,
         userId,
         insertedId: result.insertedId,
-        user: {
-            userId,
-            username: user.username,
-            email: user.email,
-            role: user.role,
-            displayName: user.displayName,
-            authProvider: user.authProvider,
-            preferences: user.preferences
-        }
+        user: toSessionUser(user)
     };
 }
 

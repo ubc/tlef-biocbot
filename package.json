@@ -9,6 +9,7 @@
     "dev:server": "cross-env NODE_ENV=development nodemon src/server.js",
     "dev:client": "browser-sync start --proxy 'http://localhost:8085' --files 'public'",
     "diagnose": "node diagnose.js",
+    "grant:system-admin": "node scripts/grant-system-admin.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

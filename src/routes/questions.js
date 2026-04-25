@@ -4,6 +4,7 @@ const router = express.Router();
 // Import the Course model instead of Question model
 const CourseModel = require('../models/Course');
 const prompts = require('../services/prompts');
+const { hasSystemAdminAccess } = require('../services/authorization');
 
 // Middleware for JSON parsing
 router.use(express.json());
@@ -1123,7 +1124,7 @@ router.post('/generate-ai', async (req, res) => {
             course.instructors?.includes(user.userId) ||
             course.instructors?.includes(user.email) ||
             course.tas?.some(ta => ta.email === user.email || ta.userId === user.userId) ||
-            user.role === 'admin'
+            hasSystemAdminAccess(user)
         );
         
         if (!hasAccess) {

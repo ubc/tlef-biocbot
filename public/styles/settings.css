@@ -631,7 +631,74 @@ input.is-invalid {
     cursor: not-allowed;
 }
 
+.system-admin-grant-row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.system-admin-email-input {
+    flex: 1 1 280px;
+}
+
+.system-admin-list {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.system-admin-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 12px;
+    background: #fff;
+}
+
+.system-admin-row.is-self {
+    border-color: #0f5f8f;
+    background: #f4fbff;
+}
+
+.system-admin-name-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.system-admin-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    background: rgba(15, 95, 143, 0.12);
+    color: #0f5f8f;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.system-admin-email,
+.system-admin-meta,
+.system-admin-empty {
+    color: var(--text-secondary, #666);
+    font-size: 0.92rem;
+}
+
 @media (max-width: 768px) {
+    .system-admin-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .system-admin-revoke-btn,
+    .system-admin-grant-row button {
+        width: 100%;
+    }
+
     .transfer-global-options {
         grid-template-columns: 1fr;
     }

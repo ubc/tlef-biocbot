@@ -1,21 +1,19 @@
 /**
  * Mental Health Flags API Routes
  * Handles CRUD operations for AI-detected mental health concern flags.
- * Regular instructors see anonymized flags; CAN_SEE_DELTE_ALL_BUTTON admins see student names.
+ * Regular instructors see anonymized flags; system admins see student names.
  */
 
 const express = require('express');
 const router = express.Router();
 const MentalHealthFlag = require('../models/MentalHealthFlag');
-const configService = require('../services/config');
+const { hasSystemAdminAccess } = require('../services/authorization');
 
 /**
- * Check if the current user is an admin (CAN_SEE_DELTE_ALL_BUTTON)
+ * Check if the current user is a system admin
  */
-function isAdmin(userEmail) {
-    if (!userEmail) return false;
-    const allowedEmails = configService.getAllowedDeleteButtonEmails();
-    return allowedEmails.includes(userEmail);
+function isAdmin(user) {
+    return hasSystemAdminAccess(user);
 }
 
 /**
@@ -47,7 +45,7 @@ router.get('/course/:courseId', async (req, res) => {
         let flags = await MentalHealthFlag.getMentalHealthFlagsForCourse(db, courseId, status);
 
         // Anonymize for non-admin users
-        const userIsAdmin = isAdmin(req.user?.email);
+        const userIsAdmin = isAdmin(req.user);
         if (!userIsAdmin) {
             flags = anonymizeFlags(flags);
         }
@@ -112,7 +110,7 @@ router.put('/:flagId/dismiss', async (req, res) => {
 
 /**
  * PUT /api/mental-health-flags/:flagId/resolve
- * Admin resolves an escalated flag. Requires CAN_SEE_DELTE_ALL_BUTTON.
+ * Admin resolves an escalated flag. Requires system admin access.
  */
 router.put('/:flagId/resolve', async (req, res) => {
     try {
@@ -121,7 +119,7 @@ router.put('/:flagId/resolve', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        if (!isAdmin(req.user?.email)) {
+        if (!isAdmin(req.user)) {
             return res.status(403).json({ success: false, message: 'Access denied' });
         }
 
@@ -138,7 +136,7 @@ router.put('/:flagId/resolve', async (req, res) => {
 
 /**
  * PUT /api/mental-health-flags/:flagId/disregard
- * Admin disregards an escalated flag. Requires CAN_SEE_DELTE_ALL_BUTTON.
+ * Admin disregards an escalated flag. Requires system admin access.
  */
 router.put('/:flagId/disregard', async (req, res) => {
     try {
@@ -147,7 +145,7 @@ router.put('/:flagId/disregard', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        if (!isAdmin(req.user?.email)) {
+        if (!isAdmin(req.user)) {
             return res.status(403).json({ success: false, message: 'Access denied' });
         }
 

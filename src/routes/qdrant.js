@@ -6,6 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const QdrantService = require('../services/qdrantService');
+const { hasSystemAdminAccess } = require('../services/authorization');
 
 // Initialize Qdrant service
 const qdrantService = new QdrantService();
@@ -285,6 +286,13 @@ router.delete('/collection', async (req, res) => {
  */
 router.delete('/delete-all-collections', async (req, res) => {
     try {
+        if (!hasSystemAdminAccess(req.user)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied'
+            });
+        }
+
         // Delete Qdrant collection
         const qdrantResult = await qdrantService.deleteCollection();
         if (!qdrantResult.success) {
@@ -502,7 +510,6 @@ router.post('/cleanup-vectors', async (req, res) => {
 });
 
 module.exports = router;
-
 
 
 

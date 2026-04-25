@@ -5,17 +5,34 @@
 
 const express = require('express');
 const router = express.Router();
-const configService = require('../services/config');
 const prompts = require('../services/prompts');
+const { hasSystemAdminAccess, normalizeEmail } = require('../services/authorization');
+const {
+    listSystemAdmins,
+    grantSystemAdminByEmail,
+    revokeSystemAdminByEmail
+} = require('../services/systemAdmin');
+
+function requireSystemAdmin(req, res) {
+    if (!req.user) {
+        res.status(401).json({ success: false, error: 'Not authenticated' });
+        return false;
+    }
+
+    if (!hasSystemAdminAccess(req.user)) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return false;
+    }
+
+    return true;
+}
 
 /**
  * GET /api/settings/can-delete-all
- * Check if the current user is allowed to see the delete all button
- * Returns true if the user's email is in the CAN_SEE_DELETE_ALL_BUTTON env variable
+ * Check if the current user has system admin access
  */
 router.get('/can-delete-all', async (req, res) => {
     try {
-        // Check if user is authenticated
         if (!req.user) {
             return res.status(401).json({
                 success: false,
@@ -24,24 +41,12 @@ router.get('/can-delete-all', async (req, res) => {
             });
         }
 
-        // Get user's email
-        const userEmail = req.user.email;
-        if (!userEmail) {
-            return res.json({
-                success: true,
-                canDeleteAll: false
-            });
-        }
-
-        // Get allowed emails from config
-        const allowedEmails = configService.getAllowedDeleteButtonEmails();
-        
-        // Check if user's email is in the allowed list
-        const canDeleteAll = allowedEmails.includes(userEmail);
+        const canDeleteAll = hasSystemAdminAccess(req.user);
 
         res.json({
             success: true,
-            canDeleteAll: canDeleteAll
+            canDeleteAll,
+            isSystemAdmin: canDeleteAll
         });
 
     } catch (error) {
@@ -50,6 +55,98 @@ router.get('/can-delete-all', async (req, res) => {
             success: false,
             error: 'Failed to check delete all permission',
             canDeleteAll: false
+        });
+    }
+});
+
+router.get('/system-admins', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const admins = await listSystemAdmins(db);
+
+        res.json({
+            success: true,
+            admins
+        });
+    } catch (error) {
+        console.error('Error fetching system admins:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch system admins'
+        });
+    }
+});
+
+router.post('/system-admins', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const email = normalizeEmail(req.body && req.body.email);
+        const result = await grantSystemAdminByEmail(db, email, {
+            grantedBy: normalizeEmail(req.user.email)
+        });
+
+        if (!result.success) {
+            return res.status(400).json(result);
+        }
+
+        res.json({
+            success: true,
+            email: result.email,
+            message: 'System admin access granted.'
+        });
+    } catch (error) {
+        console.error('Error granting system admin access:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to grant system admin access'
+        });
+    }
+});
+
+router.post('/system-admins/revoke', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const email = normalizeEmail(req.body && req.body.email);
+        const result = await revokeSystemAdminByEmail(db, email);
+
+        if (!result.success) {
+            return res.status(400).json(result);
+        }
+
+        res.json({
+            success: true,
+            email: result.email,
+            message: 'System admin access revoked.'
+        });
+    } catch (error) {
+        console.error('Error revoking system admin access:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to revoke system admin access'
         });
     }
 });
@@ -219,7 +316,7 @@ router.post('/prompts/reset', async (req, res) => {
 /**
  * GET /api/settings/global
  * Get global settings (e.g. login restrictions)
- * Requires can-delete-all permission to view
+ * Requires system admin access
  */
 router.get('/global', async (req, res) => {
     try {
@@ -228,18 +325,8 @@ router.get('/global', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        // Check authentication
-        if (!req.user) {
-            return res.status(401).json({ success: false, error: 'Not authenticated' });
-        }
-
-        // Check permission
-        const userEmail = req.user.email;
-        const allowedEmails = configService.getAllowedDeleteButtonEmails();
-        const hasPermission = userEmail && allowedEmails.includes(userEmail);
-
-        if (!hasPermission) {
-            return res.status(403).json({ success: false, error: 'Access denied' });
+        if (!requireSystemAdmin(req, res)) {
+            return;
         }
 
         // Get global settings
@@ -259,7 +346,7 @@ router.get('/global', async (req, res) => {
 /**
  * POST /api/settings/global
  * Update global settings
- * Requires can-delete-all permission
+ * Requires system admin access
  */
 router.post('/global', async (req, res) => {
     try {
@@ -268,18 +355,8 @@ router.post('/global', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        // Check authentication
-        if (!req.user) {
-            return res.status(401).json({ success: false, error: 'Not authenticated' });
-        }
-
-        // Check permission
-        const userEmail = req.user.email;
-        const allowedEmails = configService.getAllowedDeleteButtonEmails();
-        const hasPermission = userEmail && allowedEmails.includes(userEmail);
-
-        if (!hasPermission) {
-            return res.status(403).json({ success: false, error: 'Access denied' });
+        if (!requireSystemAdmin(req, res)) {
+            return;
         }
 
         const { allowLocalLogin } = req.body;
@@ -291,7 +368,7 @@ router.post('/global', async (req, res) => {
                 $set: { 
                     allowLocalLogin: !!allowLocalLogin,
                     updatedAt: new Date(),
-                    updatedBy: userEmail
+                    updatedBy: normalizeEmail(req.user.email)
                 } 
             },
             { upsert: true }
@@ -312,7 +389,7 @@ router.post('/global', async (req, res) => {
 /**
  * GET /api/settings/question-prompts
  * Get question generation prompts for a specific course
- * Requires CAN_SEE_DELETE_ALL_BUTTON permission
+ * Requires system admin access
  */
 router.get('/question-prompts', async (req, res) => {
     try {
@@ -321,18 +398,8 @@ router.get('/question-prompts', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        // Check authentication
-        if (!req.user) {
-            return res.status(401).json({ success: false, error: 'Not authenticated' });
-        }
-
-        // Check permission - only privileged users can access question prompts
-        const userEmail = req.user.email;
-        const allowedEmails = configService.getAllowedDeleteButtonEmails();
-        const hasPermission = userEmail && allowedEmails.includes(userEmail);
-
-        if (!hasPermission) {
-            return res.status(403).json({ success: false, error: 'Access denied' });
+        if (!requireSystemAdmin(req, res)) {
+            return;
         }
 
         const courseId = req.query.courseId;
@@ -378,7 +445,7 @@ router.get('/question-prompts', async (req, res) => {
 /**
  * POST /api/settings/question-prompts
  * Save custom question generation prompts for a specific course
- * Requires CAN_SEE_DELETE_ALL_BUTTON permission
+ * Requires system admin access
  */
 router.post('/question-prompts', async (req, res) => {
     try {
@@ -387,18 +454,8 @@ router.post('/question-prompts', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        // Check authentication
-        if (!req.user) {
-            return res.status(401).json({ success: false, error: 'Not authenticated' });
-        }
-
-        // Check permission - only privileged users can modify question prompts
-        const userEmail = req.user.email;
-        const allowedEmails = configService.getAllowedDeleteButtonEmails();
-        const hasPermission = userEmail && allowedEmails.includes(userEmail);
-
-        if (!hasPermission) {
-            return res.status(403).json({ success: false, error: 'Access denied' });
+        if (!requireSystemAdmin(req, res)) {
+            return;
         }
 
         const { systemPrompt, trueFalse, multipleChoice, shortAnswer, courseId } = req.body;
@@ -444,7 +501,7 @@ router.post('/question-prompts', async (req, res) => {
 /**
  * POST /api/settings/question-prompts/reset
  * Reset question generation prompts to defaults for a specific course
- * Requires CAN_SEE_DELETE_ALL_BUTTON permission
+ * Requires system admin access
  */
 router.post('/question-prompts/reset', async (req, res) => {
     try {
@@ -453,18 +510,8 @@ router.post('/question-prompts/reset', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        // Check authentication
-        if (!req.user) {
-            return res.status(401).json({ success: false, error: 'Not authenticated' });
-        }
-
-        // Check permission
-        const userEmail = req.user.email;
-        const allowedEmails = configService.getAllowedDeleteButtonEmails();
-        const hasPermission = userEmail && allowedEmails.includes(userEmail);
-
-        if (!hasPermission) {
-            return res.status(403).json({ success: false, error: 'Access denied' });
+        if (!requireSystemAdmin(req, res)) {
+            return;
         }
 
         const { courseId } = req.body;
@@ -625,6 +672,10 @@ router.get('/mental-health-prompt', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
         const courseId = req.query.courseId;
 
         if (!courseId) {
@@ -661,6 +712,10 @@ router.post('/mental-health-prompt', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
         const { prompt, courseId } = req.body;
 
         if (!courseId) {
@@ -691,6 +746,10 @@ router.post('/mental-health-prompt/reset', async (req, res) => {
         const db = req.app.locals.db;
         if (!db) {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
         }
 
         const { courseId } = req.body;
