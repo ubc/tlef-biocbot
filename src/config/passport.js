@@ -257,55 +257,33 @@ function initializePassport(db) {
 
                             // --- Role Determination Logic ---
                             //
-                            // Priority 1: "Super admin" allow-list (CAN_SEE_DELTE_ALL_BUTTON).
-                            //   These emails ALWAYS get instructor, regardless of affiliation.
+                            // Role comes from CWL affiliation only.
+                            // Platform-wide admin access is stored separately in MongoDB and
+                            // applied after login as an extra permission, not from env config.
                             //
-                            // Priority 2: Pure instructor affiliation.
-                            //   A user gets 'instructor' ONLY if they have faculty/staff
-                            //   affiliations AND do NOT also have a 'student' affiliation.
-                            //   This prevents dual-role users (student + staff) from being
-                            //   incorrectly promoted to instructor.
-                            //
-                            // Default: Everyone else is 'student'.
+                            // A user gets 'instructor' ONLY if they have faculty affiliation
+                            // and do NOT also have a student affiliation. Everyone else
+                            // defaults to 'student'.
 
                             let role = 'student'; // Default role
 
                             // Normalize the affiliation attribute — it can arrive as a string or array
                             const affiliationList = Array.isArray(affiliation) ? affiliation : [affiliation];
 
-                            // Load the allow-list from the environment variable.
-                            // CAN_SEE_DELTE_ALL_BUTTON holds comma-separated emails of super-admins.
-                            const allowedEmailsRaw = process.env.CAN_SEE_DELTE_ALL_BUTTON || '';
-                            const allowedEmails = allowedEmailsRaw
-                                .split(',')
-                                .map(e => e.trim().toLowerCase())
-                                .filter(e => e.length > 0);
-
                             const normalizedEmail = (email || '').trim().toLowerCase();
 
-                            if (allowedEmails.includes(normalizedEmail)) {
-                                // This email is on the super-admin allow-list — always instructor
-                                role = 'instructor';
-                                console.log(`[UBC SHIB] Email ${normalizedEmail} is on the allow-list → instructor`);
-                            } else {
-                                // Check UBC affiliations.
-                                // ONLY users with the 'faculty' affiliation — and NOTHING else
-                                // that would indicate a dual student/staff role — get instructor.
-                                // 'staff', 'member', 'employee', etc. are NOT sufficient on their own.
-                                // If a user has BOTH 'faculty' and 'student', they are treated as student.
-                                const hasFacultyAffiliation = affiliationList.includes('faculty');
-                                const hasStudentAffiliation = affiliationList.includes('student');
+                            // Check UBC affiliations.
+                            // ONLY users with the 'faculty' affiliation — and nothing that
+                            // indicates a dual student/staff role — get instructor.
+                            // 'staff', 'member', 'employee', etc. are not sufficient on their own.
+                            // If a user has BOTH 'faculty' and 'student', they are treated as student.
+                            const hasFacultyAffiliation = affiliationList.includes('faculty');
+                            const hasStudentAffiliation = affiliationList.includes('student');
 
-                                if (hasFacultyAffiliation && !hasStudentAffiliation) {
-                                    // Pure faculty — no student role mixed in
-                                    role = 'instructor';
-                                } else {
-                                    // Everyone else defaults to student:
-                                    //   - dual-role users (faculty + student)
-                                    //   - staff-only, member-only, employee-only
-                                    //   - any unrecognised affiliation
-                                    role = 'student';
-                                }
+                            if (hasFacultyAffiliation && !hasStudentAffiliation) {
+                                role = 'instructor';
+                            } else {
+                                role = 'student';
                             }
 
                             console.log(`[UBC SHIB] Affiliation: ${JSON.stringify(affiliationList)}, Email: ${normalizedEmail}, Assigned Role: ${role}`);

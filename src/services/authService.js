@@ -5,6 +5,7 @@
  */
 
 const User = require('../models/User');
+const { applyAccessState, getEffectiveRole, hasSystemAdminAccess } = require('./authorization');
 
 /**
  * Authentication Service Class
@@ -172,10 +173,11 @@ class AuthService {
      * @returns {boolean} True if user has required role
      */
     hasRole(user, requiredRole) {
-        if (!user || !user.role) {
+        if (!user) {
             return false;
         }
-        return user.role === requiredRole;
+
+        return getEffectiveRole(user) === requiredRole;
     }
 
     /**
@@ -246,19 +248,27 @@ class AuthService {
      * @returns {Object} Session-safe user object
      */
     createSessionUser(user) {
-        if (!user) {
+        const resolvedUser = applyAccessState(user);
+
+        if (!resolvedUser) {
             return null;
         }
 
         return {
-            userId: user.userId,
-            username: user.username,
-            email: user.email,
-            role: user.role,
-            displayName: user.displayName,
-            authProvider: user.authProvider,
-            preferences: user.preferences
+            userId: resolvedUser.userId,
+            username: resolvedUser.username,
+            email: resolvedUser.email,
+            role: resolvedUser.role,
+            baseRole: resolvedUser.baseRole,
+            displayName: resolvedUser.displayName,
+            authProvider: resolvedUser.authProvider,
+            preferences: resolvedUser.preferences,
+            permissions: resolvedUser.permissions
         };
+    }
+
+    isSystemAdmin(user) {
+        return hasSystemAdminAccess(user);
     }
 
     /**

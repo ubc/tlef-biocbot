@@ -96,6 +96,42 @@
                     </div>
                 </section>
 
+                <section class="settings-section" id="system-admin-section" style="display: none;">
+                    <h2>System Admin Access</h2>
+                    <p class="section-description">System admins can manage platform-wide settings, delete all data, and grant admin access to other users.</p>
+                    <div class="settings-content">
+                        <div class="setting-item vertical">
+                            <div class="setting-info">
+                                <h3>Grant Admin Access</h3>
+                                <p>Enter the email for an existing user. They need to have logged in at least once before you can grant access here.</p>
+                            </div>
+                            <div class="setting-controls full-width-control">
+                                <div class="system-admin-grant-row">
+                                    <input
+                                        type="email"
+                                        id="system-admin-email-input"
+                                        class="number-input system-admin-email-input"
+                                        placeholder="name@ubc.ca"
+                                    >
+                                    <button id="grant-system-admin-btn" class="primary-button">Grant Admin Access</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="setting-item vertical">
+                            <div class="setting-info">
+                                <h3>Current System Admins</h3>
+                                <p>Only system admins can see this list or change admin access.</p>
+                            </div>
+                            <div class="setting-controls full-width-control">
+                                <div id="system-admin-list" class="system-admin-list">
+                                    <div class="system-admin-empty">Loading system admins...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Student Session Settings -->
                 <section class="settings-section">
                     <h2>Student Session Settings</h2>
@@ -175,7 +211,7 @@
                     </div>
                 </section>
 
-                <!-- Question Generation Settings (privileged users only) -->
+                <!-- Question Generation Settings (system admins only) -->
                 <section class="settings-section" id="question-generation-section" style="display: none;">
                     <h2>Question Generation Settings</h2>
                     <p class="section-description">Customize the prompts used for AI question generation. Use placeholders: <code>{{learningObjectives}}</code>, <code>{{courseMaterial}}</code>, <code>{{unitName}}</code>, <code>{{questionType}}</code></p>
@@ -225,7 +261,7 @@
                     </div>
                 </section>
 
-                <!-- Mental Health Detection Settings (CAN_SEE_DELETE_ALL only) -->
+                <!-- Mental Health Detection Settings (system admins only) -->
                 <section class="settings-section" id="mental-health-detection-section" style="display: none;">
                     <h2>Mental Health Detection Settings</h2>
                     <p class="section-description">Configure the AI prompt used to silently detect mental health concerns in student conversations. The detection runs in parallel and does not affect the student's chat experience. Flags appear on the Flagged Content page.</p>

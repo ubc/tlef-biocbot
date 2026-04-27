@@ -20,7 +20,7 @@ function createAuthMiddleware(db) {
      * @param {Object} res - Express response object
      * @param {Function} next - Express next function
      */
-    function requireAuth(req, res, next) {
+    async function requireAuth(req, res, next) {
         console.log('🔐 [AUTH] Checking authentication for:', req.path);
         console.log('🔐 [AUTH] Passport user:', !!req.user);
         console.log('🔐 [AUTH] Session exists:', !!req.session);
@@ -37,17 +37,39 @@ function createAuthMiddleware(db) {
         // Fallback: Check if user is in session (backward compatibility)
         if (req.session && req.session.userId) {
             console.log('🔐 [AUTH] Authentication successful via session (fallback)');
-            
-            // Set user information for routes that need it
-            req.user = {
-                userId: req.session.userId,
-                role: req.session.userRole,
-                displayName: req.session.userDisplayName
-            };
-            
-            // User is authenticated, continue
-            next();
-            return;
+
+            try {
+                const user = await authService.getUserById(req.session.userId);
+
+                if (!user) {
+                    req.session.destroy(() => {});
+
+                    if (req.path.startsWith('/api/')) {
+                        return res.status(401).json({
+                            success: false,
+                            error: 'User not found',
+                            redirect: '/login'
+                        });
+                    }
+
+                    return res.redirect('/login');
+                }
+
+                req.user = user;
+                next();
+                return;
+            } catch (error) {
+                console.error('Error hydrating session user:', error);
+
+                if (req.path.startsWith('/api/')) {
+                    return res.status(500).json({
+                        success: false,
+                        error: 'Authentication error'
+                    });
+                }
+
+                return res.redirect('/login');
+            }
         }
         
         // No authentication found

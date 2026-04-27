@@ -9,7 +9,7 @@ const CourseModel = require('../models/Course');
 const UserModel = require('../models/User');
 const DocumentModel = require('../models/Document');
 const QdrantService = require('../services/qdrantService');
-const configService = require('../services/config');
+const { hasSystemAdminAccess } = require('../services/authorization');
 
 // Middleware to parse JSON bodies
 router.use(express.json());
@@ -122,18 +122,25 @@ async function userCanBypassCourseCodes(db, user) {
         return false;
     }
 
-    let userEmail = user.email;
-
-    if (!userEmail && user.userId && db) {
-        const hydratedUser = await UserModel.getUserById(db, user.userId);
-        userEmail = hydratedUser && hydratedUser.email ? hydratedUser.email : null;
+    if (hasSystemAdminAccess(user)) {
+        return true;
     }
 
-    if (!userEmail) {
+    let hydratedUser = user;
+
+    if (!hydratedUser.email && hydratedUser.userId && db) {
+        hydratedUser = await UserModel.getUserById(db, hydratedUser.userId);
+    }
+
+    if (!hydratedUser) {
         return false;
     }
 
-    return configService.getAllowedDeleteButtonEmails().includes(userEmail);
+    if (hasSystemAdminAccess(hydratedUser)) {
+        return true;
+    }
+
+    return false;
 }
 
 function generateCourseId(courseName = '') {

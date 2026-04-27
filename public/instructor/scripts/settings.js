@@ -19,11 +19,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const transferModalLoadingText = document.getElementById('transfer-modal-loading-text');
     const transferModalCancelBtn = document.getElementById('transfer-modal-cancel');
     const transferModalConfirmBtn = document.getElementById('transfer-modal-confirm');
+    const systemAdminList = document.getElementById('system-admin-list');
+    const systemAdminEmailInput = document.getElementById('system-admin-email-input');
+    const grantSystemAdminBtn = document.getElementById('grant-system-admin-btn');
     let lifecycleCourseData = null;
     let pendingTransferPayload = null;
     let isTransferInProgress = false;
     
-    // Check if user can see the delete all button
+    // Check if user has system admin access
     await waitForAuth();
     const canManageDB = await checkDeleteAllPermission();
     
@@ -52,6 +55,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (canManageDB) {
                 await loadAdminSettings();
                 await loadQuestionPrompts();
+                await loadSystemAdmins();
             }
 
             consumeDeferredFlashMessage();
@@ -75,6 +79,92 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (error) {
             console.error('Error loading admin settings:', error);
         }
+    }
+
+    async function loadSystemAdmins() {
+        if (!systemAdminList) {
+            return;
+        }
+
+        systemAdminList.innerHTML = '<div class="system-admin-empty">Loading system admins...</div>';
+
+        try {
+            const response = await fetch('/api/settings/system-admins', {
+                credentials: 'include'
+            });
+            const result = await response.json();
+
+            if (!result.success || !Array.isArray(result.admins)) {
+                throw new Error(result.error || 'Failed to load system admins');
+            }
+
+            renderSystemAdmins(result.admins);
+        } catch (error) {
+            console.error('Error loading system admins:', error);
+            systemAdminList.innerHTML = '<div class="system-admin-empty">Failed to load system admins.</div>';
+        }
+    }
+
+    function formatSystemAdminTimestamp(value) {
+        if (!value) {
+            return 'Never';
+        }
+
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return 'Never';
+        }
+
+        return date.toLocaleString();
+    }
+
+    function renderSystemAdmins(admins) {
+        if (!systemAdminList) {
+            return;
+        }
+
+        if (!admins.length) {
+            systemAdminList.innerHTML = '<div class="system-admin-empty">No system admins found.</div>';
+            return;
+        }
+
+        const currentUser = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
+        const currentUserEmail = currentUser && currentUser.email ? String(currentUser.email).toLowerCase() : '';
+
+        systemAdminList.innerHTML = admins.map(admin => {
+            const adminEmail = admin.email || '';
+            const isCurrentUser = adminEmail.toLowerCase() === currentUserEmail;
+            const displayName = admin.displayName || adminEmail;
+            const lastLogin = formatSystemAdminTimestamp(admin.lastLogin);
+
+            return `
+                <div class="system-admin-row${isCurrentUser ? ' is-self' : ''}">
+                    <div class="system-admin-details">
+                        <div class="system-admin-name-row">
+                            <strong>${escapeHtml(displayName)}</strong>
+                            ${isCurrentUser ? '<span class="system-admin-badge">You</span>' : ''}
+                        </div>
+                        <div class="system-admin-email">${escapeHtml(adminEmail)}</div>
+                        <div class="system-admin-meta">Last login: ${escapeHtml(lastLogin)}</div>
+                    </div>
+                    <button
+                        class="secondary-button system-admin-revoke-btn"
+                        data-email="${escapeHtml(adminEmail)}"
+                    >
+                        Revoke
+                    </button>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function escapeHtml(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     async function loadGlobalConfig() {
@@ -112,7 +202,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     /**
-     * Load question generation prompts for privileged users only
+     * Load question generation prompts for system admins only
      * These are course-specific prompts used for AI question generation
      */
     async function loadQuestionPrompts() {
@@ -814,7 +904,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     body: JSON.stringify({ courseId, enabled: anonymizeStudents === true })
                 });
 
-                // Save question generation prompts if section is visible (privileged users only)
+                // Save question generation prompts if section is visible (system admins only)
                 const questionGenSection = document.getElementById('question-generation-section');
                 if (questionGenSection && questionGenSection.style.display !== 'none') {
                     const systemPrompt = document.getElementById('question-system-prompt')?.value;
@@ -1006,7 +1096,94 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // Handle reset question prompts button click (privileged users only)
+    if (grantSystemAdminBtn) {
+        grantSystemAdminBtn.addEventListener('click', async () => {
+            const email = systemAdminEmailInput ? systemAdminEmailInput.value.trim() : '';
+            if (!email) {
+                showNotification('Enter an email address first.', 'error');
+                return;
+            }
+
+            grantSystemAdminBtn.disabled = true;
+            grantSystemAdminBtn.textContent = 'Granting...';
+
+            try {
+                const response = await fetch('/api/settings/system-admins', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ email })
+                });
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    showNotification(result.error || 'Failed to grant system admin access.', 'error');
+                    return;
+                }
+
+                if (systemAdminEmailInput) {
+                    systemAdminEmailInput.value = '';
+                }
+
+                await loadSystemAdmins();
+                showNotification(`System admin access granted to ${email}.`, 'success');
+            } catch (error) {
+                console.error('Error granting system admin access:', error);
+                showNotification('Failed to grant system admin access.', 'error');
+            } finally {
+                grantSystemAdminBtn.disabled = false;
+                grantSystemAdminBtn.textContent = 'Grant Admin Access';
+            }
+        });
+    }
+
+    if (systemAdminList) {
+        systemAdminList.addEventListener('click', async event => {
+            const revokeButton = event.target.closest('.system-admin-revoke-btn');
+            if (!revokeButton) {
+                return;
+            }
+
+            const email = revokeButton.dataset.email;
+            if (!email) {
+                return;
+            }
+
+            if (!confirm(`Revoke system admin access for ${email}?`)) {
+                return;
+            }
+
+            revokeButton.disabled = true;
+            revokeButton.textContent = 'Revoking...';
+
+            try {
+                const response = await fetch('/api/settings/system-admins/revoke', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ email })
+                });
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    showNotification(result.error || 'Failed to revoke system admin access.', 'error');
+                    await loadSystemAdmins();
+                    return;
+                }
+
+                await loadSystemAdmins();
+                showNotification(`System admin access revoked for ${email}.`, 'success');
+            } catch (error) {
+                console.error('Error revoking system admin access:', error);
+                showNotification('Failed to revoke system admin access.', 'error');
+                await loadSystemAdmins();
+            }
+        });
+    }
+
+    // Handle reset question prompts button click (system admins only)
     const resetQuestionPromptsBtn = document.getElementById('reset-question-prompts');
     if (resetQuestionPromptsBtn) {
         resetQuestionPromptsBtn.addEventListener('click', async () => {
@@ -1055,8 +1232,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     /**
-     * Check if the current user has permission to see the delete all button
-     * Hides the entire Database Management section if user doesn't have permission
+     * Check if the current user has system admin access
+     * Hides the entire privileged section set if the user does not
      * Returns true if user has permission
      */
     async function checkDeleteAllPermission() {
@@ -1072,6 +1249,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const loginRestrictionSection = document.getElementById('login-restriction-section');
             const questionGenerationSection = document.getElementById('question-generation-section');
             const mhDetectionSection = document.getElementById('mental-health-detection-section');
+            const adminSection = document.getElementById('system-admin-section');
 
             if (result.success && result.canDeleteAll) {
                 // User has permission, ensure the sections are visible
@@ -1079,6 +1257,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (loginRestrictionSection) loginRestrictionSection.style.display = '';
                 if (questionGenerationSection) questionGenerationSection.style.display = '';
                 if (mhDetectionSection) mhDetectionSection.style.display = '';
+                if (adminSection) adminSection.style.display = '';
                 return true;
             } else {
                 // User doesn't have permission, hide the sections
@@ -1086,6 +1265,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (loginRestrictionSection) loginRestrictionSection.style.display = 'none';
                 if (questionGenerationSection) questionGenerationSection.style.display = 'none';
                 if (mhDetectionSection) mhDetectionSection.style.display = 'none';
+                if (adminSection) adminSection.style.display = 'none';
                 return false;
             }
         } catch (error) {
@@ -1095,10 +1275,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             const loginRestrictionSection = document.getElementById('login-restriction-section');
             const questionGenerationSection = document.getElementById('question-generation-section');
             const mhDetectionSection = document.getElementById('mental-health-detection-section');
+            const adminSection = document.getElementById('system-admin-section');
             if (databaseSection) databaseSection.style.display = 'none';
             if (loginRestrictionSection) loginRestrictionSection.style.display = 'none';
             if (questionGenerationSection) questionGenerationSection.style.display = 'none';
             if (mhDetectionSection) mhDetectionSection.style.display = 'none';
+            if (adminSection) adminSection.style.display = 'none';
             return false;
         }
     }
