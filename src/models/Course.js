@@ -1647,7 +1647,7 @@ async function getAnonymizeStudents(db, courseId, instructorId) {
     }
     const enabled = course.anonymizeStudents && course.anonymizeStudents[instructorId]
         ? course.anonymizeStudents[instructorId].enabled === true
-        : false;
+        : true;
     return { success: true, enabled };
 }
 
