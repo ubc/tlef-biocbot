@@ -6,13 +6,13 @@
 let taCourses = [];
 let taPermissions = {};
 
-function isCourseDeactive(course = {}) {
+function isCourseInactive(course = {}) {
     return (course.status || 'active') === 'inactive';
 }
 
 function getCourseDisplayName(course = {}) {
     const courseName = course.courseName || course.courseId || 'Untitled Course';
-    return isCourseDeactive(course) ? `${courseName} (deactive)` : courseName;
+    return isCourseInactive(course) ? `${courseName} (Inactive)` : courseName;
 }
 
 document.addEventListener('DOMContentLoaded', async function() {
@@ -163,7 +163,7 @@ function updateCourseAssignments() {
     }
     
     container.innerHTML = taCourses.map(course => {
-        const isInactive = isCourseDeactive(course);
+        const isInactive = isCourseInactive(course);
 
         return `
         <div class="course-assignment">
@@ -171,7 +171,7 @@ function updateCourseAssignments() {
                 <h4>${getCourseDisplayName(course)}</h4>
                 <p>Course ID: ${course.courseId}</p>
             </div>
-            <div class="course-status ${isInactive ? 'inactive' : 'active'}">${isInactive ? 'Deactive' : 'Active'}</div>
+            <div class="course-status ${isInactive ? 'inactive' : 'active'}">${isInactive ? 'Inactive' : 'Active'}</div>
         </div>
     `;
     }).join('');

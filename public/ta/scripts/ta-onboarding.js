@@ -11,13 +11,13 @@ let taOnboardingState = {
     isSubmitting: false
 };
 
-function isCourseDeactive(course = {}) {
+function isCourseInactive(course = {}) {
     return (course.status || 'active') === 'inactive';
 }
 
 function getCourseDisplayName(course = {}) {
     const courseName = course.courseName || course.courseId || 'Untitled Course';
-    return isCourseDeactive(course) ? `${courseName} (deactive)` : courseName;
+    return isCourseInactive(course) ? `${courseName} (Inactive)` : courseName;
 }
 
 function dedupeCourses(courses = []) {
@@ -49,11 +49,11 @@ function populateAvailableCourses(selectElement, courses, placeholderText) {
     selectElement.innerHTML = `<option value="">${placeholderText}</option>`;
 
     const uniqueCourses = dedupeCourses(courses);
-    const activeCourses = uniqueCourses.filter(course => !isCourseDeactive(course));
-    const inactiveCourses = uniqueCourses.filter(isCourseDeactive);
+    const activeCourses = uniqueCourses.filter(course => !isCourseInactive(course));
+    const inactiveCourses = uniqueCourses.filter(isCourseInactive);
 
     appendCourseGroup(selectElement, 'Active Courses', activeCourses);
-    appendCourseGroup(selectElement, 'Deactive Courses', inactiveCourses);
+    appendCourseGroup(selectElement, 'Inactive Courses', inactiveCourses);
 }
 
 document.addEventListener('DOMContentLoaded', async function() {

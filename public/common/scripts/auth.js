@@ -128,8 +128,12 @@ function updateUserDisplay() {
     // Update user avatar with first letter of display name
     const avatarElement = document.querySelector('.user-avatar');
     if (avatarElement) {
-        const firstLetter = (currentUser.displayName || currentUser.username).charAt(0).toUpperCase();
-        avatarElement.textContent = firstLetter;
+        avatarElement.textContent = getCurrentUserInitial();
+    }
+
+    const roleElement = document.querySelector('.user-role');
+    if (roleElement) {
+        roleElement.textContent = getCurrentUserRoleLabel();
     }
 
     // Update settings link based on role
@@ -204,6 +208,47 @@ async function logout() {
  */
 function getCurrentUser() {
     return currentUser;
+}
+
+/**
+ * Check if current user has system administrator access
+ * @returns {boolean} True if user is a system admin
+ */
+function isSystemAdmin() {
+    return !!(currentUser && currentUser.permissions && currentUser.permissions.systemAdmin === true);
+}
+
+/**
+ * Get user's display initial
+ * @returns {string} Uppercase initial for the current user
+ */
+function getCurrentUserInitial() {
+    if (!currentUser) return 'U';
+
+    const displayValue = currentUser.displayName || currentUser.username || currentUser.email || currentUser.userId || 'User';
+    return displayValue.charAt(0).toUpperCase();
+}
+
+/**
+ * Get user's role label for display
+ * @returns {string} Display-ready role label
+ */
+function getCurrentUserRoleLabel() {
+    if (!currentUser) return 'User';
+
+    if (currentUser.role === 'instructor') {
+        return isSystemAdmin() ? 'Instructor (Admin)' : 'Instructor';
+    }
+
+    if (currentUser.role === 'ta') {
+        return 'Teaching Assistant';
+    }
+
+    if (currentUser.role === 'student') {
+        return 'Student';
+    }
+
+    return currentUser.role || 'User';
 }
 
 /**
