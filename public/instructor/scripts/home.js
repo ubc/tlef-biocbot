@@ -754,6 +754,112 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function normalizeTopicLabel(topic) {
+    if (typeof topic === 'string') {
+        return topic.replace(/\s+/g, ' ').trim();
+    }
+
+    if (topic && typeof topic === 'object') {
+        return normalizeTopicLabel(topic.topic);
+    }
+
+    return '';
+}
+
+function normalizeTopicSource(source, fallback = 'manual') {
+    return source === 'scraped' || source === 'manual' ? source : fallback;
+}
+
+function normalizeTopicUnitId(unitId) {
+    return typeof unitId === 'string' && unitId.trim() ? unitId.trim() : null;
+}
+
+function normalizeApprovedTopicDetails(topics = [], defaults = {}) {
+    const seen = new Set();
+    const output = [];
+
+    (Array.isArray(topics) ? topics : []).forEach((topicEntry) => {
+        const topic = normalizeTopicLabel(topicEntry);
+        if (!topic) return;
+
+        const key = topic.toLowerCase();
+        if (seen.has(key)) return;
+
+        const rawObject = topicEntry && typeof topicEntry === 'object' ? topicEntry : {};
+        seen.add(key);
+        output.push({
+            topic,
+            unitId: normalizeTopicUnitId(rawObject.unitId ?? defaults.unitId),
+            source: normalizeTopicSource(rawObject.source, defaults.source || 'manual'),
+            createdAt: rawObject.createdAt || defaults.createdAt || new Date().toISOString()
+        });
+    });
+
+    return output;
+}
+
+function getApprovedTopicLabels(topics = []) {
+    return normalizeApprovedTopicDetails(topics).map((topic) => topic.topic);
+}
+
+function setApprovedTopicGlobals(courseId, topics = []) {
+    if (!courseId) return;
+
+    const details = normalizeApprovedTopicDetails(topics);
+    const labels = details.map((topic) => topic.topic);
+
+    window.courseApprovedTopicDetailsByCourse = window.courseApprovedTopicDetailsByCourse || {};
+    window.courseApprovedTopicDetailsByCourse[courseId] = details;
+    window.courseApprovedTopicDetails = details;
+
+    window.courseApprovedTopicsByCourse = window.courseApprovedTopicsByCourse || {};
+    window.courseApprovedTopicsByCourse[courseId] = labels;
+    window.courseApprovedTopics = labels;
+}
+
+async function fetchApprovedTopicDetails(courseId) {
+    const response = await authenticatedFetch(`/api/courses/${courseId}/approved-topics`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const result = await response.json();
+    const topics = Array.isArray(result?.data?.topics)
+        ? result.data.topics
+        : result?.data?.topicLabels || [];
+
+    setApprovedTopicGlobals(courseId, topics);
+    return window.courseApprovedTopicDetails || [];
+}
+
+function getCurrentCourseUnits() {
+    const courseData = window.selectedCourseData || window.currentCourseData || {};
+    return Array.isArray(courseData.lectures) ? courseData.lectures : [];
+}
+
+function renderUnitOptions(selectedUnitId = '', includeUnassigned = true) {
+    const units = getCurrentCourseUnits();
+    const selected = normalizeTopicUnitId(selectedUnitId) || '';
+    const options = [];
+
+    if (includeUnassigned) {
+        options.push(`<option value=""${selected ? '' : ' selected'}>Unassigned</option>`);
+    }
+
+    units.forEach((unit) => {
+        if (!unit || !unit.name) return;
+        const unitName = String(unit.name);
+        options.push(`<option value="${escapeHtml(unitName)}"${unitName === selected ? ' selected' : ''}>${escapeHtml(unitName)}</option>`);
+    });
+
+    return options.join('');
+}
+
+function findApprovedTopicByLabel(topicLabel) {
+    const normalized = normalizeTopicLabel(topicLabel).toLowerCase();
+    return (window.courseApprovedTopicDetails || []).find(
+        (topic) => topic.topic.toLowerCase() === normalized
+    ) || null;
+}
+
 // ===========================
 // LIVE STRUGGLE TABLE & SOCKET.IO
 // ===========================
@@ -1626,6 +1732,9 @@ async function setSelectedCourse(courseId, courseName, courseData = null) {
 
         resolvedCourseData = result.data;
     }
+
+    window.selectedCourseData = resolvedCourseData;
+    window.currentCourseData = resolvedCourseData;
     
     // Update UI
     const courseNameDisplay = document.getElementById('course-name-display');
@@ -1993,13 +2102,20 @@ async function loadPersistenceTopics() {
         const courseId = getSelectedCourseId();
         if (!courseId) return;
 
-        const response = await authenticatedFetch(`/api/struggle-activity/persistence/${courseId}`);
+        const [response, approvedTopics] = await Promise.all([
+            authenticatedFetch(`/api/struggle-activity/persistence/${courseId}`),
+            fetchApprovedTopicDetails(courseId).catch((error) => {
+                console.warn('Could not load approved topic details for persistence cards:', error);
+                return window.courseApprovedTopicDetails || [];
+            })
+        ]);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         
         const result = await response.json();
         const topics = result.data || [];
 
-        renderPersistenceTopics(topics);
+        window.persistenceTopics = topics;
+        renderPersistenceTopics(topics, courseId, approvedTopics);
 
     } catch (error) {
         console.error('Error loading persistence topics:', error);
@@ -2015,11 +2131,7 @@ async function loadApprovedGlobalTopics() {
         const courseId = getSelectedCourseId();
         if (!courseId) return;
 
-        const response = await authenticatedFetch(`/api/courses/${courseId}/approved-topics`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        const result = await response.json();
-        const topics = Array.isArray(result?.data?.topics) ? result.data.topics : [];
+        const topics = await fetchApprovedTopicDetails(courseId);
 
         renderApprovedGlobalTopics(topics, courseId);
     } catch (error) {
@@ -2030,7 +2142,7 @@ async function loadApprovedGlobalTopics() {
 
 /**
  * Render approved global topics list with inline editing capabilities
- * @param {Array<string>} topics - Approved topic labels
+ * @param {Array<string|Object>} topics - Approved topic entries
  * @param {string} courseId - Current course ID
  */
 function renderApprovedGlobalTopics(topics, courseId) {
@@ -2040,25 +2152,23 @@ function renderApprovedGlobalTopics(topics, courseId) {
 
     section.style.display = 'block';
 
-    const cleanTopics = Array.isArray(topics)
-        ? [...new Set(topics.map(t => String(t || '').trim()).filter(Boolean).map(t => t.toLowerCase()))]
-            .map(normalized => {
-                const original = topics.find(t => String(t || '').trim().toLowerCase() === normalized);
-                return String(original || normalized).trim();
-            })
-        : [];
-
-    window.courseApprovedTopicsByCourse = window.courseApprovedTopicsByCourse || {};
-    window.courseApprovedTopicsByCourse[courseId] = cleanTopics;
-    window.courseApprovedTopics = cleanTopics;
+    const cleanTopics = normalizeApprovedTopicDetails(topics);
+    setApprovedTopicGlobals(courseId, cleanTopics);
 
     // Build editable chips
-    const chips = cleanTopics.map((topic, index) => `
-        <span class="approved-topic-chip" data-index="${index}" data-topic="${escapeHtml(topic)}">
-            <span class="topic-chip-label" ondblclick="startEditTopic(this)">${escapeHtml(topic)}</span>
+    const chips = cleanTopics.map((topicEntry, index) => {
+        const unitBadge = topicEntry.unitId
+            ? `<span class="topic-unit-badge mapped">${escapeHtml(topicEntry.unitId)}</span>`
+            : '<span class="topic-unit-badge unassigned">Unassigned</span>';
+
+        return `
+        <span class="approved-topic-chip" data-index="${index}" data-topic="${escapeHtml(topicEntry.topic)}">
+            <span class="topic-chip-label" ondblclick="startEditTopic(this)">${escapeHtml(topicEntry.topic)}</span>
+            ${unitBadge}
             <button class="topic-chip-remove" onclick="removeApprovedTopic(${index})" title="Remove topic">&times;</button>
         </span>
-    `).join('');
+    `;
+    }).join('');
 
     const emptyMessage = cleanTopics.length === 0
         ? '<p class="no-data-message" style="text-align: center; color: #666; font-style: italic; padding: 10px;">No approved global topics set yet. Add one below.</p>'
@@ -2077,6 +2187,9 @@ function renderApprovedGlobalTopics(topics, courseId) {
                 placeholder="Type a new topic and press Enter..."
                 onkeydown="handleNewTopicKeydown(event)"
             />
+            <select id="new-topic-unit-select" class="approved-topic-unit-select" title="Assign this topic to a unit">
+                ${renderUnitOptions('', true)}
+            </select>
             <button class="approved-topic-add-btn" onclick="addApprovedTopic()" title="Add topic">+ Add</button>
         </div>
         <div class="approved-topics-footer">
@@ -2099,7 +2212,7 @@ async function saveApprovedTopics(courseId) {
     courseId = courseId || getSelectedCourseId();
     if (!courseId) return false;
 
-    const topics = window.courseApprovedTopics || [];
+    const topics = window.courseApprovedTopicDetails || window.courseApprovedTopics || [];
 
     try {
         const response = await authenticatedFetch(`/api/courses/${courseId}/approved-topics`, {
@@ -2111,6 +2224,11 @@ async function saveApprovedTopics(courseId) {
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
             throw new Error(errorData.message || `HTTP ${response.status}`);
+        }
+
+        const result = await response.json().catch(() => ({}));
+        if (result?.data?.topics) {
+            setApprovedTopicGlobals(courseId, result.data.topics);
         }
 
         return true;
@@ -2134,18 +2252,26 @@ async function addApprovedTopic() {
         return;
     }
 
-    const topics = window.courseApprovedTopics || [];
+    const topics = window.courseApprovedTopicDetails || [];
 
     // Check for duplicates (case-insensitive)
-    if (topics.some(t => t.toLowerCase() === value.toLowerCase())) {
+    if (topics.some(t => t.topic.toLowerCase() === value.toLowerCase())) {
         showErrorMessage('This topic already exists.');
         input.focus();
         input.select();
         return;
     }
 
-    topics.push(value);
-    window.courseApprovedTopics = topics;
+    const unitSelect = document.getElementById('new-topic-unit-select');
+    const newTopic = {
+        topic: value,
+        unitId: normalizeTopicUnitId(unitSelect?.value),
+        source: 'manual',
+        createdAt: new Date().toISOString()
+    };
+
+    topics.push(newTopic);
+    setApprovedTopicGlobals(getSelectedCourseId(), topics);
 
     const courseId = getSelectedCourseId();
 
@@ -2158,7 +2284,7 @@ async function addApprovedTopic() {
     if (!saved) {
         // Revert on failure
         topics.pop();
-        window.courseApprovedTopics = topics;
+        setApprovedTopicGlobals(courseId, topics);
         renderApprovedGlobalTopics(topics, courseId);
     } else {
         // Focus the input for rapid entry
@@ -2172,28 +2298,29 @@ async function addApprovedTopic() {
  * @param {number} index - Index in the approved topics array
  */
 async function removeApprovedTopic(index) {
-    const topics = window.courseApprovedTopics || [];
+    const topics = window.courseApprovedTopicDetails || [];
     if (index < 0 || index >= topics.length) return;
 
     const removedTopic = topics[index];
+    const removedLabel = removedTopic.topic;
 
-    if (!confirm(`Remove the topic "${removedTopic}"?`)) return;
+    if (!confirm(`Remove the topic "${removedLabel}"?`)) return;
 
     topics.splice(index, 1);
-    window.courseApprovedTopics = topics;
+    setApprovedTopicGlobals(getSelectedCourseId(), topics);
 
     const courseId = getSelectedCourseId();
 
     // Optimistically re-render
     renderApprovedGlobalTopics(topics, courseId);
-    showSuccessMessage(`Removed topic "${removedTopic}"`);
+    showSuccessMessage(`Removed topic "${removedLabel}"`);
 
     // Persist to server
     const saved = await saveApprovedTopics(courseId);
     if (!saved) {
         // Revert on failure
         topics.splice(index, 0, removedTopic);
-        window.courseApprovedTopics = topics;
+        setApprovedTopicGlobals(courseId, topics);
         renderApprovedGlobalTopics(topics, courseId);
     }
 }
@@ -2208,8 +2335,9 @@ function startEditTopic(labelEl) {
     if (!chip || chip.classList.contains('editing')) return;
 
     const index = parseInt(chip.dataset.index, 10);
-    const currentValue = (window.courseApprovedTopics || [])[index];
-    if (currentValue === undefined) return;
+    const currentTopic = (window.courseApprovedTopicDetails || [])[index];
+    const currentValue = currentTopic?.topic;
+    if (!currentValue) return;
 
     chip.classList.add('editing');
 
@@ -2255,8 +2383,9 @@ async function commitEditTopic(chip, index, newValue) {
     if (!chip.classList.contains('editing')) return;
     chip.classList.remove('editing');
 
-    const topics = window.courseApprovedTopics || [];
-    const oldValue = topics[index];
+    const topics = window.courseApprovedTopicDetails || [];
+    const oldTopic = topics[index];
+    const oldValue = oldTopic?.topic;
 
     // If empty or unchanged, just restore
     if (!newValue || newValue === oldValue) {
@@ -2265,15 +2394,18 @@ async function commitEditTopic(chip, index, newValue) {
     }
 
     // Check for duplicates
-    if (topics.some((t, i) => i !== index && t.toLowerCase() === newValue.toLowerCase())) {
+    if (topics.some((t, i) => i !== index && t.topic.toLowerCase() === newValue.toLowerCase())) {
         showErrorMessage('A topic with that name already exists.');
         cancelEditTopic(chip, oldValue);
         return;
     }
 
     // Apply change
-    topics[index] = newValue;
-    window.courseApprovedTopics = topics;
+    topics[index] = {
+        ...oldTopic,
+        topic: newValue
+    };
+    setApprovedTopicGlobals(getSelectedCourseId(), topics);
 
     const courseId = getSelectedCourseId();
     renderApprovedGlobalTopics(topics, courseId);
@@ -2282,8 +2414,8 @@ async function commitEditTopic(chip, index, newValue) {
     // Persist
     const saved = await saveApprovedTopics(courseId);
     if (!saved) {
-        topics[index] = oldValue;
-        window.courseApprovedTopics = topics;
+        topics[index] = oldTopic;
+        setApprovedTopicGlobals(courseId, topics);
         renderApprovedGlobalTopics(topics, courseId);
     }
 }
@@ -2320,7 +2452,7 @@ function handleNewTopicKeydown(event) {
  * Render persistence topics list
  * @param {Array} topics - Array of persistence topic objects
  */
-function renderPersistenceTopics(topics) {
+function renderPersistenceTopics(topics, courseId = getSelectedCourseId(), approvedTopics = window.courseApprovedTopicDetails || []) {
     const container = document.getElementById('persistence-topics-content');
     const section = document.getElementById('persistence-topics-section');
     
@@ -2333,6 +2465,7 @@ function renderPersistenceTopics(topics) {
     }
 
     section.style.display = 'block';
+    setApprovedTopicGlobals(courseId, approvedTopics);
     
     // Sort by count (descending)
     const sortedTopics = [...topics].sort((a, b) => b.studentCount - a.studentCount);
@@ -2342,6 +2475,10 @@ function renderPersistenceTopics(topics) {
     sortedTopics.forEach(topicData => {
         const displayTopic = topicData.topic.charAt(0).toUpperCase() + topicData.topic.slice(1);
         const count = topicData.studentCount;
+        const approvedTopic = findApprovedTopicByLabel(topicData.topic);
+        const unitBadge = approvedTopic?.unitId
+            ? `<span class="topic-unit-badge mapped">${escapeHtml(approvedTopic.unitId)}</span>`
+            : '<span class="topic-unit-badge unassigned">Unassigned</span>';
         
         // Determine severity color
         let severityColor = '#28a745'; // Green (low)
@@ -2349,10 +2486,11 @@ function renderPersistenceTopics(topics) {
         if (count >= 10) severityColor = '#dc3545'; // Red (high)
         
         html += `
-            <div class="persistence-topic-card" style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-top: 4px solid ${severityColor}; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;">
+            <div class="persistence-topic-card clickable-topic-card" data-topic="${escapeHtml(topicData.topic)}" role="button" tabindex="0" title="Assign this topic to a unit" style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-top: 4px solid ${severityColor}; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;">
                 <div style="font-size: 2.5em; font-weight: bold; color: #333; margin-bottom: 5px;">${count}</div>
                 <div style="font-size: 0.9em; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;">Students</div>
                 <h3 style="margin: 0; font-size: 1.1em; color: #333; word-break: break-word;">${displayTopic}</h3>
+                ${unitBadge}
             </div>
         `;
     });
@@ -2360,6 +2498,130 @@ function renderPersistenceTopics(topics) {
     html += '</div>';
     
     container.innerHTML = html;
+
+    container.querySelectorAll('.clickable-topic-card').forEach((card) => {
+        const openAssignment = () => openTopicUnitAssignmentModal(card.dataset.topic);
+        card.addEventListener('click', openAssignment);
+        card.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openAssignment();
+            }
+        });
+    });
+}
+
+function ensureTopicUnitAssignmentModal() {
+    let modal = document.getElementById('topic-unit-assignment-modal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'topic-unit-assignment-modal';
+    modal.className = 'topic-unit-modal';
+    modal.innerHTML = `
+        <div class="topic-unit-modal-card">
+            <div class="topic-unit-modal-header">
+                <h3>Assign Topic to Unit</h3>
+                <button type="button" class="topic-unit-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="topic-unit-modal-body">
+                <p class="topic-unit-modal-topic" id="topic-unit-modal-topic"></p>
+                <label for="topic-unit-select">Unit</label>
+                <select id="topic-unit-select" class="topic-unit-select"></select>
+                <p class="topic-unit-modal-hint">This uses the stable unit name, such as Unit 1, not the renamed display title.</p>
+            </div>
+            <div class="topic-unit-modal-actions">
+                <button type="button" class="approved-topic-add-btn secondary" id="topic-unit-cancel-btn">Cancel</button>
+                <button type="button" class="approved-topic-add-btn" id="topic-unit-save-btn">Save</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const closeModal = () => {
+        modal.classList.remove('show');
+        modal.dataset.topic = '';
+    };
+
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) closeModal();
+    });
+    modal.querySelector('.topic-unit-modal-close')?.addEventListener('click', closeModal);
+    modal.querySelector('#topic-unit-cancel-btn')?.addEventListener('click', closeModal);
+    modal.querySelector('#topic-unit-save-btn')?.addEventListener('click', saveTopicUnitAssignment);
+
+    return modal;
+}
+
+async function openTopicUnitAssignmentModal(topicLabel) {
+    const courseId = getSelectedCourseId();
+    if (!courseId) {
+        showErrorMessage('No course selected.');
+        return;
+    }
+
+    if (!window.courseApprovedTopicDetails) {
+        await fetchApprovedTopicDetails(courseId);
+    }
+
+    const approvedTopic = findApprovedTopicByLabel(topicLabel);
+    if (!approvedTopic) {
+        showErrorMessage('This cumulative topic is not in the approved topic list yet.');
+        return;
+    }
+
+    const modal = ensureTopicUnitAssignmentModal();
+    modal.dataset.topic = approvedTopic.topic;
+    modal.querySelector('#topic-unit-modal-topic').textContent = approvedTopic.topic;
+    modal.querySelector('#topic-unit-select').innerHTML = renderUnitOptions(approvedTopic.unitId || '', true);
+    modal.classList.add('show');
+}
+
+async function saveTopicUnitAssignment() {
+    const modal = ensureTopicUnitAssignmentModal();
+    const courseId = getSelectedCourseId();
+    const topic = modal.dataset.topic;
+    const unitId = normalizeTopicUnitId(modal.querySelector('#topic-unit-select')?.value);
+    const saveButton = modal.querySelector('#topic-unit-save-btn');
+
+    if (!courseId || !topic) return;
+
+    const originalText = saveButton?.textContent || 'Save';
+    if (saveButton) {
+        saveButton.disabled = true;
+        saveButton.textContent = 'Saving...';
+    }
+
+    try {
+        const response = await authenticatedFetch(`/api/courses/${courseId}/approved-topics/unit`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ topic, unitId })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `HTTP ${response.status}`);
+        }
+
+        const result = await response.json();
+        setApprovedTopicGlobals(courseId, result?.data?.topics || []);
+        renderApprovedGlobalTopics(window.courseApprovedTopicDetails || [], courseId);
+        renderPersistenceTopics(window.persistenceTopics || [], courseId, window.courseApprovedTopicDetails || []);
+
+        modal.classList.remove('show');
+        showSuccessMessage(unitId
+            ? `Assigned "${topic}" to ${unitId}.`
+            : `Marked "${topic}" as unassigned.`);
+    } catch (error) {
+        console.error('Error assigning topic to unit:', error);
+        showErrorMessage(`Failed to assign topic: ${error.message}`);
+    } finally {
+        if (saveButton) {
+            saveButton.disabled = false;
+            saveButton.textContent = originalText;
+        }
+    }
 }
 
 /**

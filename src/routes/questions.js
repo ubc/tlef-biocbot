@@ -1064,7 +1064,8 @@ router.post('/generate-ai', async (req, res) => {
             learningObjectives,
             regenerate,
             feedback,
-            previousQuestion
+            previousQuestion,
+            struggleTopic
         } = req.body;
         
         // Validate required fields
@@ -1144,6 +1145,24 @@ router.post('/generate-ai', async (req, res) => {
                 message: `Unit ${lectureName} not found in course`
             });
         }
+
+        const normalizedStruggleTopic = typeof struggleTopic === 'string'
+            ? struggleTopic.replace(/\s+/g, ' ').trim()
+            : '';
+
+        if (normalizedStruggleTopic) {
+            const approvedTopics = CourseModel.normalizeTopicList(course.approvedStruggleTopics || []);
+            const isApprovedTopic = approvedTopics.some(
+                topic => topic.toLowerCase() === normalizedStruggleTopic.toLowerCase()
+            );
+
+            if (!isApprovedTopic) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Selected struggle topic is not approved for this course'
+                });
+            }
+        }
         
         // Format unit name for prompts - use displayName if available
         const unitNum = lectureName.match(/\d+/)?.[0] || '';
@@ -1196,6 +1215,10 @@ router.post('/generate-ai', async (req, res) => {
                     content: null
                 }
             });
+        }
+
+        if (normalizedStruggleTopic) {
+            combinedContent = `Question focus: Generate one assessment question that targets the struggle topic "${normalizedStruggleTopic}" using the ${lectureName} course materials below.\n\n${combinedContent}`;
         }
         
         // Handle content length intelligently
@@ -1345,6 +1368,7 @@ router.post('/generate-ai', async (req, res) => {
                     questionType: questionType,
                     unitName: lectureName,
                     courseId: courseId,
+                    struggleTopic: normalizedStruggleTopic || '',
                     selectedLearningObjective,
                     wasRegenerated: Boolean(regenerate),
                     aiGenerated: true,

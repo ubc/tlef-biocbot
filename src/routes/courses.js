@@ -816,6 +816,7 @@ router.get('/:courseId', async (req, res) => {
             studentCourseCode: course.courseCode,
             instructorCourseCode: course.instructorCourseCode,
             approvedStruggleTopics: CourseModel.normalizeTopicList(course.approvedStruggleTopics || []),
+            approvedStruggleTopicDetails: CourseModel.normalizeTopicObjectList(course.approvedStruggleTopics || []),
             weeks: course.courseStructure?.weeks || 0,
             lecturesPerWeek: course.courseStructure?.lecturesPerWeek || 0,
             isAdditiveRetrieval: !!course.isAdditiveRetrieval,
@@ -901,12 +902,13 @@ router.get('/:courseId/approved-topics', async (req, res) => {
             });
         }
 
-        const topics = await CourseModel.getApprovedStruggleTopics(db, courseId);
+        const topics = await CourseModel.getApprovedStruggleTopicObjects(db, courseId);
         return res.json({
             success: true,
             data: {
                 courseId,
-                topics
+                topics,
+                topicLabels: CourseModel.normalizeTopicList(topics)
             }
         });
     } catch (error) {
@@ -933,7 +935,7 @@ router.put('/:courseId/approved-topics', async (req, res) => {
         }
 
         if (!Array.isArray(topics)) {
-            return res.status(400).json({ success: false, message: 'topics must be an array of strings' });
+            return res.status(400).json({ success: false, message: 'topics must be an array' });
         }
 
         const db = req.app.locals.db;
@@ -966,7 +968,8 @@ router.put('/:courseId/approved-topics', async (req, res) => {
             message: 'Approved struggle topics updated',
             data: {
                 courseId,
-                topics: result.topics
+                topics: result.topics,
+                topicLabels: result.topicLabels
             }
         });
     } catch (error) {
@@ -974,6 +977,74 @@ router.put('/:courseId/approved-topics', async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Internal server error while updating approved topics'
+        });
+    }
+});
+
+/**
+ * PATCH /api/courses/:courseId/approved-topics/unit
+ * Assign or reassign one approved struggle topic to a stable unit name.
+ */
+router.patch('/:courseId/approved-topics/unit', async (req, res) => {
+    try {
+        const { courseId } = req.params;
+        const { topic, unitId } = req.body;
+        const user = req.user;
+
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const course = await CourseModel.getCourseById(db, courseId);
+        if (!course) {
+            return res.status(404).json({ success: false, message: 'Course not found' });
+        }
+
+        if (!hasInstructorOrTAAccess(course, user.userId)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only instructors/TAs with course access can update approved topics'
+            });
+        }
+
+        const result = await CourseModel.updateApprovedStruggleTopicUnit(
+            db,
+            courseId,
+            topic,
+            unitId || null,
+            user.userId
+        );
+
+        if (!result.success) {
+            const status = result.error === 'Course not found' || result.error === 'Approved topic not found'
+                ? 404
+                : 400;
+            return res.status(status).json({
+                success: false,
+                message: result.error || 'Failed to update topic unit'
+            });
+        }
+
+        return res.json({
+            success: true,
+            message: 'Topic unit updated',
+            data: {
+                courseId,
+                topic: result.topic,
+                topics: result.topics,
+                topicLabels: result.topicLabels
+            }
+        });
+    } catch (error) {
+        console.error('Error updating approved topic unit:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error while updating topic unit'
         });
     }
 });
@@ -1124,6 +1195,7 @@ async function getCourseForStudent(req, res, courseId) {
             id: course.courseId,
             name: course.courseName,
             approvedStruggleTopics: CourseModel.normalizeTopicList(course.approvedStruggleTopics || []),
+            approvedStruggleTopicDetails: CourseModel.normalizeTopicObjectList(course.approvedStruggleTopics || []),
             weeks: course.courseStructure?.weeks || 0,
             lecturesPerWeek: course.courseStructure?.lecturesPerWeek || 0,
             isAdditiveRetrieval: !!course.isAdditiveRetrieval,
@@ -1408,7 +1480,7 @@ router.post('/:courseId/transfer', async (req, res) => {
             courseDescription: sourceCourse.courseDescription || '',
             assessmentCriteria: sourceCourse.assessmentCriteria || '',
             courseMaterials: Array.isArray(sourceCourse.courseMaterials) ? deepClone(sourceCourse.courseMaterials) : [],
-            approvedStruggleTopics: deepClone(CourseModel.normalizeTopicList(sourceCourse.approvedStruggleTopics || [])),
+            approvedStruggleTopics: deepClone(CourseModel.normalizeTopicObjectList(sourceCourse.approvedStruggleTopics || [])),
             courseStructure: sourceCourse.courseStructure
                 ? deepClone(sourceCourse.courseStructure)
                 : {

@@ -2062,6 +2062,50 @@
     box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
 }
 
+.struggle-topic-generate-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+}
+
+.struggle-topic-generate-row select {
+    width: 100%;
+}
+
+.struggle-topic-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.struggle-topic-scope-btn {
+    width: auto;
+    padding: 0.55rem 0.85rem;
+    border: 1px solid #cfd8e3;
+    border-radius: 6px;
+    background: #fff;
+    color: #344054;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.struggle-topic-scope-btn:hover,
+.struggle-topic-scope-btn.active {
+    border-color: #4a6fa5;
+    background: rgba(74, 111, 165, 0.1);
+    color: #284d7a;
+}
+
+.btn-ai.compact {
+    width: auto;
+    margin: 0;
+    padding: 0.6rem 1rem;
+    white-space: nowrap;
+}
+
 .radio-group {
     display: flex;
     gap: 1rem;
