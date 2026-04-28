@@ -4010,8 +4010,12 @@ function resetQuestionForm() {
     const showAllStruggleTopicsToggle = document.getElementById('show-all-struggle-topics-toggle');
     if (showAllStruggleTopicsToggle) {
         showAllStruggleTopicsToggle.dataset.showAll = 'false';
-        showAllStruggleTopicsToggle.textContent = 'Show all topics';
+        showAllStruggleTopicsToggle.textContent = 'Show all unit-linked topics';
         showAllStruggleTopicsToggle.classList.remove('active');
+    }
+    const struggleTopicPanel = document.getElementById('struggle-topic-panel');
+    if (struggleTopicPanel) {
+        struggleTopicPanel.open = false;
     }
     setLearningObjectiveNote('');
     
@@ -4788,7 +4792,7 @@ async function populateStruggleTopicDropdown(week = currentWeek, showAll = false
 
     if (scopeButton) {
         scopeButton.dataset.showAll = showAll ? 'true' : 'false';
-        scopeButton.textContent = showAll ? 'Show unit topics' : 'Show all topics';
+        scopeButton.textContent = showAll ? `Back to ${week || 'unit'} topics` : 'Show all unit-linked topics';
         scopeButton.classList.toggle('active', showAll);
     }
 
@@ -4811,32 +4815,32 @@ async function populateStruggleTopicDropdown(week = currentWeek, showAll = false
                 ...topic,
                 studentCount: cumulativeTopicMap.get(topic.topic.toLowerCase())?.studentCount || 0
             }));
+        const unitLinkedTopics = topics.filter(topic => topic.unitId);
         const filteredTopics = showAll
-            ? topics
-            : topics.filter(topic => topic.unitId === week);
+            ? unitLinkedTopics
+            : unitLinkedTopics.filter(topic => topic.unitId === week);
 
         if (filteredTopics.length === 0) {
-            select.innerHTML = `<option value="">${showAll ? 'No cumulative topics available' : `No cumulative topics assigned to ${week || 'this unit'}`}</option>`;
+            select.innerHTML = `<option value="">${showAll ? 'No unit-linked cumulative topics available' : `No cumulative topics assigned to ${week || 'this unit'}`}</option>`;
             if (note) {
                 note.textContent = showAll
-                    ? 'No cumulative struggle topics have been triggered by the bot yet.'
-                    : 'No cumulative struggle topics are assigned to this unit yet. Toggle all topics to choose from triggered course topics.';
+                    ? 'No triggered struggle topics have been assigned to a unit yet.'
+                    : `Default: showing cumulative topics assigned to ${week || 'this unit'}. Use "Show all unit-linked topics" to choose from other units.`;
             }
             return;
         }
 
         select.innerHTML = '<option value="">Select a struggle topic...</option>' + filteredTopics.map(topic => {
             const suffix = showAll && topic.unitId ? ` (${topic.unitId})` : '';
-            const unassignedSuffix = showAll && !topic.unitId ? ' (unassigned)' : '';
             const countSuffix = topic.studentCount ? ` - ${topic.studentCount} student${topic.studentCount === 1 ? '' : 's'}` : '';
-            return `<option value="${escapeHTML(topic.topic)}">${escapeHTML(topic.topic + suffix + unassignedSuffix + countSuffix)}</option>`;
+            return `<option value="${escapeHTML(topic.topic)}">${escapeHTML(topic.topic + suffix + countSuffix)}</option>`;
         }).join('');
         select.disabled = false;
 
         if (note) {
             note.textContent = showAll
-                ? 'Showing all cumulative topics triggered in this course.'
-                : `Showing cumulative topics assigned to ${week || 'this unit'}.`;
+                ? 'Showing all cumulative struggle topics that are linked to any unit.'
+                : `Default: showing cumulative struggle topics assigned to ${week || 'this unit'}.`;
         }
     } catch (error) {
         console.error('Error loading struggle topics for question generation:', error);

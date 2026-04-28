@@ -117,21 +117,27 @@
                     </div>
 
                     <div class="form-section" id="struggle-topic-generation-section">
-                        <label for="struggle-topic-select">Generate from Struggle Topic</label>
-                        <div class="struggle-topic-generate-row">
-                            <select id="struggle-topic-select">
-                                <option value="">Loading topics...</option>
-                            </select>
-                            <div class="struggle-topic-actions">
-                                <button type="button" class="struggle-topic-scope-btn" id="show-all-struggle-topics-toggle" data-show-all="false" onclick="toggleStruggleTopicScope()">
-                                    Show all topics
-                                </button>
-                                <button type="button" class="btn-ai compact" id="topic-generate-btn" onclick="generateAIQuestionFromStruggleTopic()">
-                                    Generate from Topic
-                                </button>
+                        <details class="struggle-topic-panel" id="struggle-topic-panel">
+                            <summary>
+                                <span>Optional: generate from a struggle topic</span>
+                                <small>Uses topics assigned to this unit by default</small>
+                            </summary>
+                            <div class="struggle-topic-generate-row">
+                                <label for="struggle-topic-select">Struggle Topic</label>
+                                <select id="struggle-topic-select">
+                                    <option value="">Loading topics...</option>
+                                </select>
+                                <div class="struggle-topic-actions">
+                                    <button type="button" class="struggle-topic-scope-btn" id="show-all-struggle-topics-toggle" data-show-all="false" onclick="toggleStruggleTopicScope()">
+                                        Show all unit-linked topics
+                                    </button>
+                                    <button type="button" class="btn-ai compact" id="topic-generate-btn" onclick="generateAIQuestionFromStruggleTopic()">
+                                        Generate from Topic
+                                    </button>
+                                </div>
+                                <p class="struggle-topic-note" id="struggle-topic-note">Default: showing cumulative topics assigned to this unit.</p>
                             </div>
-                        </div>
-                        <p class="learning-objective-note" id="struggle-topic-note">Shows cumulative topics assigned to this unit by default.</p>
+                        </details>
                     </div>
                     
                     <!-- Question Text -->
