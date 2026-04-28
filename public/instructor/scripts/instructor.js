@@ -1705,7 +1705,9 @@ async function updateSidebarForTA() {
         // Update user info
         const userAvatar = document.querySelector('.user-avatar');
         if (userAvatar) {
-            userAvatar.textContent = 'T';
+            userAvatar.textContent = typeof getCurrentUserInitial === 'function'
+                ? getCurrentUserInitial()
+                : 'T';
         }
         
         const userRole = document.querySelector('.user-role');
@@ -1724,7 +1726,9 @@ async function updateSidebarForTA() {
         // Explicitly set role for regular Instructors
         const userRole = document.querySelector('.user-role');
         if (userRole) {
-            userRole.textContent = 'Instructor';
+            userRole.textContent = typeof getCurrentUserRoleLabel === 'function'
+                ? getCurrentUserRoleLabel()
+                : 'Instructor';
         }
     }
 }

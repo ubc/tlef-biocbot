@@ -6,13 +6,13 @@
 let taCourses = [];
 let taPermissions = {}; // Store TA permissions for each course
 
-function isCourseDeactive(course = {}) {
+function isCourseInactive(course = {}) {
     return (course.status || 'active') === 'inactive';
 }
 
 function getCourseDisplayName(course = {}) {
     const courseName = course.courseName || course.courseId || 'Untitled Course';
-    return isCourseDeactive(course) ? `${courseName} (deactive)` : courseName;
+    return isCourseInactive(course) ? `${courseName} (Inactive)` : courseName;
 }
 
 document.addEventListener('DOMContentLoaded', async function() {
@@ -318,8 +318,8 @@ function displayTACourses() {
         const coursePermissions = taPermissions[course.courseId] || {};
         const canAccessCourses = coursePermissions.canAccessCourses !== false; // Default to true
         const canAccessFlags = coursePermissions.canAccessFlags !== false; // Default to true
-        const isInactive = isCourseDeactive(course);
-        const statusLabel = isInactive ? 'Deactive' : 'Active';
+        const isInactive = isCourseInactive(course);
+        const statusLabel = isInactive ? 'Inactive' : 'Active';
         
         return `
         <div class="course-card">

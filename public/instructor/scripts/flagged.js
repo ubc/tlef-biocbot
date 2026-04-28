@@ -269,7 +269,11 @@ async function setupSidebarForUserRole() {
         const userAvatar = document.getElementById('user-avatar');
         const userRole = document.getElementById('user-role');
         
-        if (userAvatar) userAvatar.textContent = 'T';
+        if (userAvatar) {
+            userAvatar.textContent = typeof getCurrentUserInitial === 'function'
+                ? getCurrentUserInitial()
+                : 'T';
+        }
         if (userRole) userRole.textContent = 'Teaching Assistant';
         
         // Setup TA navigation handlers
@@ -295,8 +299,16 @@ async function setupSidebarForUserRole() {
         const userAvatar = document.getElementById('user-avatar');
         const userRole = document.getElementById('user-role');
         
-        if (userAvatar) userAvatar.textContent = 'I';
-        if (userRole) userRole.textContent = 'Instructor';
+        if (userAvatar) {
+            userAvatar.textContent = typeof getCurrentUserInitial === 'function'
+                ? getCurrentUserInitial()
+                : 'I';
+        }
+        if (userRole) {
+            userRole.textContent = typeof getCurrentUserRoleLabel === 'function'
+                ? getCurrentUserRoleLabel()
+                : 'Instructor';
+        }
         
         console.log('✅ [SIDEBAR] Instructor sidebar configured');
     }
