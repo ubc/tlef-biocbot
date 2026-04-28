@@ -380,7 +380,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (!response.ok) return;
 
             const result = await response.json();
-            currentApprovedTopics = Array.isArray(result?.data?.topics) ? result.data.topics : [];
+            const topicEntries = Array.isArray(result?.data?.topics) ? result.data.topics : [];
+            currentApprovedTopics = Array.isArray(result?.data?.topicLabels)
+                ? result.data.topicLabels
+                : topicEntries.map(topic => {
+                    if (typeof topic === 'string') return topic;
+                    if (topic && typeof topic === 'object') return topic.topic;
+                    return '';
+                }).filter(Boolean);
 
             window.courseApprovedTopicsByCourse = window.courseApprovedTopicsByCourse || {};
             window.courseApprovedTopicsByCourse[courseId] = currentApprovedTopics;

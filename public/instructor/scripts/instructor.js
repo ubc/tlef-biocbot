@@ -379,8 +379,15 @@ let currentContentType = null;
 let topicReviewResolve = null;
 
 function normalizeTopicLabel(topic) {
-    if (typeof topic !== 'string') return '';
-    return topic.replace(/\s+/g, ' ').trim();
+    if (typeof topic === 'string') {
+        return topic.replace(/\s+/g, ' ').trim();
+    }
+
+    if (topic && typeof topic === 'object') {
+        return normalizeTopicLabel(topic.topic);
+    }
+
+    return '';
 }
 
 function dedupeTopics(topics = []) {
@@ -399,9 +406,72 @@ function dedupeTopics(topics = []) {
     return output;
 }
 
+function normalizeTopicSource(source, fallback = 'manual') {
+    return source === 'scraped' || source === 'manual' ? source : fallback;
+}
+
+function normalizeTopicUnitId(unitId, fallback = null) {
+    if (typeof unitId === 'string' && unitId.trim()) {
+        return unitId.trim();
+    }
+
+    return fallback || null;
+}
+
+function normalizeTopicEntry(topicEntry, defaults = {}) {
+    const topic = normalizeTopicLabel(topicEntry);
+    if (!topic) return null;
+
+    const rawObject = topicEntry && typeof topicEntry === 'object' ? topicEntry : {};
+    return {
+        topic,
+        unitId: normalizeTopicUnitId(rawObject.unitId, normalizeTopicUnitId(defaults.unitId)),
+        source: normalizeTopicSource(rawObject.source, defaults.source || 'manual'),
+        createdAt: rawObject.createdAt || defaults.createdAt || new Date().toISOString()
+    };
+}
+
+function dedupeTopicEntries(topics = [], defaults = {}) {
+    const seen = new Set();
+    const output = [];
+
+    (Array.isArray(topics) ? topics : []).forEach((topicEntry) => {
+        const normalized = normalizeTopicEntry(topicEntry, defaults);
+        if (!normalized) return;
+
+        const key = normalized.topic.toLowerCase();
+        if (seen.has(key)) return;
+
+        seen.add(key);
+        output.push(normalized);
+    });
+
+    return output;
+}
+
+function getTopicUnitOptions(selectedUnitId = currentWeek) {
+    const units = Array.isArray(window.currentCourseData?.lectures)
+        ? window.currentCourseData.lectures
+        : [];
+    const selected = normalizeTopicUnitId(selectedUnitId, currentWeek) || '';
+    const unitNames = units.map(unit => unit?.name).filter(Boolean);
+
+    if (selected && !unitNames.includes(selected)) {
+        unitNames.unshift(selected);
+    }
+
+    return unitNames.map(unitName => (
+        `<option value="${escapeHTML(unitName)}"${unitName === selected ? ' selected' : ''}>${escapeHTML(unitName)}</option>`
+    )).join('');
+}
+
 function setCourseTopicsGlobal(courseId, topics) {
     if (!courseId) return;
-    const cleanTopics = dedupeTopics(topics);
+    const cleanTopicDetails = dedupeTopicEntries(topics);
+    const cleanTopics = cleanTopicDetails.map((topic) => topic.topic);
+    window.courseApprovedTopicDetailsByCourse = window.courseApprovedTopicDetailsByCourse || {};
+    window.courseApprovedTopicDetailsByCourse[courseId] = cleanTopicDetails;
+    window.courseApprovedTopicDetails = cleanTopicDetails;
     window.courseApprovedTopicsByCourse = window.courseApprovedTopicsByCourse || {};
     window.courseApprovedTopicsByCourse[courseId] = cleanTopics;
     window.courseApprovedTopics = cleanTopics;
@@ -414,9 +484,9 @@ async function fetchCourseApprovedTopics(courseId) {
     }
 
     const result = await response.json();
-    const topics = dedupeTopics(result?.data?.topics || []);
+    const topics = result?.data?.topics || result?.data?.topicLabels || [];
     setCourseTopicsGlobal(courseId, topics);
-    return topics;
+    return window.courseApprovedTopicDetails || [];
 }
 
 async function extractTopicsForUploadedDocument(courseId, documentId) {
@@ -433,14 +503,14 @@ async function extractTopicsForUploadedDocument(courseId, documentId) {
     }
 
     const result = await response.json();
-    return dedupeTopics(result?.data?.topics || []);
+    return dedupeTopics(result?.data?.topicLabels || result?.data?.topics || []);
 }
 
 async function saveCourseApprovedTopics(courseId, topics) {
     const response = await fetch(`/api/courses/${courseId}/approved-topics`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topics: dedupeTopics(topics) })
+        body: JSON.stringify({ topics: dedupeTopicEntries(topics) })
     });
 
     if (!response.ok) {
@@ -448,9 +518,9 @@ async function saveCourseApprovedTopics(courseId, topics) {
     }
 
     const result = await response.json();
-    const savedTopics = dedupeTopics(result?.data?.topics || []);
+    const savedTopics = result?.data?.topics || result?.data?.topicLabels || [];
     setCourseTopicsGlobal(courseId, savedTopics);
-    return savedTopics;
+    return window.courseApprovedTopicDetails || [];
 }
 
 function ensureTopicReviewModal() {
@@ -503,9 +573,16 @@ function ensureTopicReviewModal() {
             }
             .topic-review-add-row {
                 display: grid;
-                grid-template-columns: 1fr auto;
+                grid-template-columns: 1fr auto auto;
                 gap: 8px;
                 margin-top: 6px;
+            }
+            .topic-review-unit-select {
+                padding: 10px;
+                border: 1px solid #d0d7de;
+                border-radius: 6px;
+                font-size: 14px;
+                background: #fff;
             }
             .topic-review-empty {
                 padding: 10px;
@@ -534,6 +611,7 @@ function ensureTopicReviewModal() {
                 <div class="topic-review-list" id="topic-review-list"></div>
                 <div class="topic-review-add-row">
                     <input id="topic-review-new-input" class="topic-review-input" type="text" placeholder="Add a topic (e.g., Enzyme Kinetics)" />
+                    <select id="topic-review-new-unit-select" class="topic-review-unit-select" title="Topic unit">${getTopicUnitOptions(currentWeek)}</select>
                     <button class="btn-secondary" id="topic-review-add-btn">Add Topic</button>
                 </div>
             </div>
@@ -566,7 +644,11 @@ function ensureTopicReviewModal() {
         const input = modal.querySelector('#topic-review-new-input');
         const value = normalizeTopicLabel(input.value);
         if (!value) return;
-        addTopicReviewRow(value);
+        addTopicReviewRow(value, {
+            unitId: modal.querySelector('#topic-review-new-unit-select')?.value || currentWeek,
+            source: 'manual',
+            createdAt: new Date().toISOString()
+        });
         input.value = '';
         input.focus();
     });
@@ -578,7 +660,7 @@ function ensureTopicReviewModal() {
     return modal;
 }
 
-function addTopicReviewRow(topic) {
+function addTopicReviewRow(topic, metadata = {}) {
     const modal = ensureTopicReviewModal();
     const list = modal.querySelector('#topic-review-list');
 
@@ -588,10 +670,13 @@ function addTopicReviewRow(topic) {
 
     const row = document.createElement('div');
     row.className = 'topic-review-item';
+    row.dataset.unitId = normalizeTopicUnitId(metadata.unitId, currentWeek) || '';
+    row.dataset.source = normalizeTopicSource(metadata.source, 'manual');
+    row.dataset.createdAt = metadata.createdAt || new Date().toISOString();
     const input = document.createElement('input');
     input.className = 'topic-review-input';
     input.type = 'text';
-    input.value = topic;
+    input.value = normalizeTopicLabel(topic);
 
     const removeButton = document.createElement('button');
     removeButton.className = 'topic-review-remove';
@@ -613,11 +698,16 @@ function addTopicReviewRow(topic) {
 
 function collectTopicReviewRows() {
     const modal = ensureTopicReviewModal();
-    const rows = Array.from(modal.querySelectorAll('.topic-review-item .topic-review-input'));
-    return dedupeTopics(rows.map((input) => input.value));
+    const rows = Array.from(modal.querySelectorAll('.topic-review-item'));
+    return dedupeTopicEntries(rows.map((row) => ({
+        topic: row.querySelector('.topic-review-input')?.value || '',
+        unitId: row.dataset.unitId || currentWeek || null,
+        source: row.dataset.source || 'manual',
+        createdAt: row.dataset.createdAt || new Date().toISOString()
+    })));
 }
 
-function populateTopicReviewRows(topics) {
+function populateTopicReviewRows(topics, metadata = {}) {
     const modal = ensureTopicReviewModal();
     const list = modal.querySelector('#topic-review-list');
     list.innerHTML = '';
@@ -628,25 +718,31 @@ function populateTopicReviewRows(topics) {
         return;
     }
 
-    cleanTopics.forEach((topic) => addTopicReviewRow(topic));
+    cleanTopics.forEach((topic) => addTopicReviewRow(topic, metadata));
 }
 
-function openTopicReviewModal(courseId, sourceName, existingTopics, suggestedTopics) {
+function openTopicReviewModal(courseId, sourceName, existingTopics, suggestedTopics, unitId = currentWeek) {
     const modal = ensureTopicReviewModal();
 
     // Only show NEW topics that don't already exist in the course list
-    const existingSet = new Set((existingTopics || []).map(t => t.toLowerCase().trim()));
+    const existingSet = new Set((existingTopics || []).map(t => normalizeTopicLabel(t).toLowerCase()).filter(Boolean));
     const newOnlyTopics = dedupeTopics(
-        (suggestedTopics || []).filter(t => !existingSet.has(t.toLowerCase().trim()))
+        (suggestedTopics || []).filter(t => !existingSet.has(normalizeTopicLabel(t).toLowerCase()))
     );
 
     const contextText = sourceName
-        ? `New topics detected from: ${sourceName}`
+        ? `New topics detected from: ${sourceName}${unitId ? ` (${unitId})` : ''}`
         : 'New topics detected from the uploaded content.';
 
     modal.querySelector('#topic-review-context').textContent = contextText;
     modal.querySelector('#topic-review-new-input').value = '';
-    populateTopicReviewRows(newOnlyTopics);
+    const unitSelect = modal.querySelector('#topic-review-new-unit-select');
+    if (unitSelect) unitSelect.innerHTML = getTopicUnitOptions(unitId);
+    populateTopicReviewRows(newOnlyTopics, {
+        unitId,
+        source: 'scraped',
+        createdAt: new Date().toISOString()
+    });
 
     // Show a read-only count of existing topics so the instructor has context
     let existingNote = modal.querySelector('#topic-review-existing-note');
@@ -691,14 +787,14 @@ async function runTopicReviewAfterUpload(courseId, documentId, sourceName) {
     }
 
     // Modal only shows NEW topics from this upload (existing are hidden)
-    const reviewedNewTopics = await openTopicReviewModal(courseId, sourceName, existingTopics, suggestedTopics);
+    const reviewedNewTopics = await openTopicReviewModal(courseId, sourceName, existingTopics, suggestedTopics, currentWeek);
     if (!reviewedNewTopics) {
         showNotification('Topic review skipped. Existing course topics were unchanged.', 'info');
         return;
     }
 
     // Merge: keep all existing topics + append the reviewed new ones
-    const mergedTopics = dedupeTopics([...existingTopics, ...reviewedNewTopics]);
+    const mergedTopics = dedupeTopicEntries([...existingTopics, ...reviewedNewTopics]);
 
     const savedTopics = await saveCourseApprovedTopics(courseId, mergedTopics);
     const addedCount = savedTopics.length - existingTopics.length;
@@ -869,13 +965,14 @@ function ensureTopicReviewStyles() {
         .topic-review-item { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
         .topic-review-input { width: 100%; padding: 10px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
         .topic-review-remove { border: 1px solid #d0d7de; background: #fff; color: #a61b1b; border-radius: 6px; padding: 8px 10px; cursor: pointer; font-size: 12px; }
-        .topic-review-add-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 6px; }
+        .topic-review-add-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-top: 6px; }
+        .topic-review-unit-select { padding: 10px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; background: #fff; }
         .topic-review-empty { padding: 10px; border: 1px dashed #c7ced6; border-radius: 6px; color: #666; font-size: 13px; text-align: center; }
     `;
     document.head.appendChild(style);
 }
 
-function addInlineTopicRow(topic) {
+function addInlineTopicRow(topic, metadata = {}) {
     const list = document.getElementById('upload-topic-review-list');
     if (!list) return;
 
@@ -884,10 +981,13 @@ function addInlineTopicRow(topic) {
 
     const row = document.createElement('div');
     row.className = 'topic-review-item';
+    row.dataset.unitId = normalizeTopicUnitId(metadata.unitId, currentWeek) || '';
+    row.dataset.source = normalizeTopicSource(metadata.source, 'manual');
+    row.dataset.createdAt = metadata.createdAt || new Date().toISOString();
     const input = document.createElement('input');
     input.className = 'topic-review-input';
     input.type = 'text';
-    input.value = topic;
+    input.value = normalizeTopicLabel(topic);
 
     const removeButton = document.createElement('button');
     removeButton.className = 'topic-review-remove';
@@ -908,17 +1008,22 @@ function addInlineTopicRow(topic) {
 }
 
 function collectInlineTopicRows() {
-    const rows = Array.from(document.querySelectorAll('#upload-topic-review-list .topic-review-item .topic-review-input'));
-    return dedupeTopics(rows.map((input) => input.value));
+    const rows = Array.from(document.querySelectorAll('#upload-topic-review-list .topic-review-item'));
+    return dedupeTopicEntries(rows.map((row) => ({
+        topic: row.querySelector('.topic-review-input')?.value || '',
+        unitId: row.dataset.unitId || currentWeek || null,
+        source: row.dataset.source || 'manual',
+        createdAt: row.dataset.createdAt || new Date().toISOString()
+    })));
 }
 
 function showInlineTopicReview(courseId, sourceName, existingTopics, suggestedTopics) {
     ensureTopicReviewStyles();
 
     // Filter to only new topics
-    const existingSet = new Set((existingTopics || []).map(t => t.toLowerCase().trim()));
+    const existingSet = new Set((existingTopics || []).map(t => normalizeTopicLabel(t).toLowerCase()).filter(Boolean));
     const newOnlyTopics = dedupeTopics(
-        (suggestedTopics || []).filter(t => !existingSet.has(t.toLowerCase().trim()))
+        (suggestedTopics || []).filter(t => !existingSet.has(normalizeTopicLabel(t).toLowerCase()))
     );
 
     // Store data for when Save is clicked
@@ -940,7 +1045,7 @@ function showInlineTopicReview(courseId, sourceName, existingTopics, suggestedTo
     const contextEl = document.getElementById('upload-topic-review-context');
     if (contextEl) {
         contextEl.textContent = sourceName
-            ? `New topics detected from: ${sourceName}`
+            ? `New topics detected from: ${sourceName}${currentWeek ? ` (${currentWeek})` : ''}`
             : 'New topics detected from the uploaded content.';
     }
 
@@ -963,13 +1068,19 @@ function showInlineTopicReview(courseId, sourceName, existingTopics, suggestedTo
         if (cleanTopics.length === 0) {
             list.innerHTML = '<div class="topic-review-empty">No new topics detected from this upload. You can add topics manually below.</div>';
         } else {
-            cleanTopics.forEach(topic => addInlineTopicRow(topic));
+            cleanTopics.forEach(topic => addInlineTopicRow(topic, {
+                unitId: currentWeek,
+                source: 'scraped',
+                createdAt: new Date().toISOString()
+            }));
         }
     }
 
     // Reset the new-topic input
     const newInput = document.getElementById('upload-topic-new-input');
     if (newInput) newInput.value = '';
+    const unitSelect = document.getElementById('upload-topic-unit-select');
+    if (unitSelect) unitSelect.innerHTML = getTopicUnitOptions(currentWeek);
 
     // Switch footer buttons: hide Upload, show Save Topics
     const uploadBtn = document.getElementById('upload-btn');
@@ -987,7 +1098,11 @@ function showInlineTopicReview(courseId, sourceName, existingTopics, suggestedTo
             const input = document.getElementById('upload-topic-new-input');
             const value = normalizeTopicLabel(input.value);
             if (!value) return;
-            addInlineTopicRow(value);
+            addInlineTopicRow(value, {
+                unitId: document.getElementById('upload-topic-unit-select')?.value || currentWeek,
+                source: 'manual',
+                createdAt: new Date().toISOString()
+            });
             input.value = '';
             input.focus();
         });
@@ -1011,7 +1126,7 @@ async function handleSaveTopicsFromModal() {
     const reviewedNewTopics = collectInlineTopicRows();
 
     // Merge existing + reviewed new topics
-    const mergedTopics = dedupeTopics([...(existingTopics || []), ...reviewedNewTopics]);
+    const mergedTopics = dedupeTopicEntries([...(existingTopics || []), ...reviewedNewTopics]);
 
     try {
         const savedTopics = await saveCourseApprovedTopics(courseId, mergedTopics);
@@ -3861,6 +3976,7 @@ function openQuestionModal(week) {
         // Reset form
         resetQuestionForm();
         populateQuestionLearningObjectiveDropdown(week);
+        populateStruggleTopicDropdown(week, false);
     }
 }
 
@@ -3885,6 +4001,21 @@ function resetQuestionForm() {
     if (learningObjectiveSelect) {
         learningObjectiveSelect.innerHTML = '<option value="">Leave unassigned</option>';
         learningObjectiveSelect.value = '';
+    }
+    const struggleTopicSelect = document.getElementById('struggle-topic-select');
+    if (struggleTopicSelect) {
+        struggleTopicSelect.innerHTML = '<option value="">Select a struggle topic...</option>';
+        struggleTopicSelect.value = '';
+    }
+    const showAllStruggleTopicsToggle = document.getElementById('show-all-struggle-topics-toggle');
+    if (showAllStruggleTopicsToggle) {
+        showAllStruggleTopicsToggle.dataset.showAll = 'false';
+        showAllStruggleTopicsToggle.textContent = 'Show all unit-linked topics';
+        showAllStruggleTopicsToggle.classList.remove('active');
+    }
+    const struggleTopicPanel = document.getElementById('struggle-topic-panel');
+    if (struggleTopicPanel) {
+        struggleTopicPanel.open = false;
     }
     setLearningObjectiveNote('');
     
@@ -4621,6 +4752,202 @@ function checkAIGenerationInModal() {
     aiButton.title = 'Generate AI question based on uploaded course materials.';
 }
 
+async function getApprovedStruggleTopicDetailsForEditor() {
+    const courseId = await getCurrentCourseId();
+    if (!courseId) return [];
+
+    const cachedTopics = window.courseApprovedTopicDetailsByCourse?.[courseId];
+    if (Array.isArray(cachedTopics)) {
+        return cachedTopics;
+    }
+
+    return fetchCourseApprovedTopics(courseId);
+}
+
+async function getCumulativeStruggleTopicsForEditor() {
+    const courseId = await getCurrentCourseId();
+    if (!courseId) return [];
+
+    if (Array.isArray(window.cumulativeStruggleTopicsByCourse?.[courseId])) {
+        return window.cumulativeStruggleTopicsByCourse[courseId];
+    }
+
+    const response = await fetch(`/api/struggle-activity/persistence/${courseId}`);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch cumulative topics: ${response.status}`);
+    }
+
+    const result = await response.json();
+    const topics = Array.isArray(result?.data) ? result.data : [];
+    window.cumulativeStruggleTopicsByCourse = window.cumulativeStruggleTopicsByCourse || {};
+    window.cumulativeStruggleTopicsByCourse[courseId] = topics;
+    return topics;
+}
+
+async function populateStruggleTopicDropdown(week = currentWeek, showAll = false) {
+    const select = document.getElementById('struggle-topic-select');
+    const note = document.getElementById('struggle-topic-note');
+    const scopeButton = document.getElementById('show-all-struggle-topics-toggle');
+    if (!select) return;
+
+    if (scopeButton) {
+        scopeButton.dataset.showAll = showAll ? 'true' : 'false';
+        scopeButton.textContent = showAll ? `Back to ${week || 'unit'} topics` : 'Show all unit-linked topics';
+        scopeButton.classList.toggle('active', showAll);
+    }
+
+    select.innerHTML = '<option value="">Loading topics...</option>';
+    select.disabled = true;
+
+    try {
+        const [approvedTopics, cumulativeTopics] = await Promise.all([
+            getApprovedStruggleTopicDetailsForEditor(),
+            getCumulativeStruggleTopicsForEditor()
+        ]);
+        const cumulativeTopicMap = new Map(
+            cumulativeTopics
+                .map(topic => [normalizeTopicLabel(topic.topic).toLowerCase(), topic])
+                .filter(([label]) => label)
+        );
+        const topics = approvedTopics
+            .filter(topic => cumulativeTopicMap.has(topic.topic.toLowerCase()))
+            .map(topic => ({
+                ...topic,
+                studentCount: cumulativeTopicMap.get(topic.topic.toLowerCase())?.studentCount || 0
+            }));
+        const unitLinkedTopics = topics.filter(topic => topic.unitId);
+        const filteredTopics = showAll
+            ? unitLinkedTopics
+            : unitLinkedTopics.filter(topic => topic.unitId === week);
+
+        if (filteredTopics.length === 0) {
+            select.innerHTML = `<option value="">${showAll ? 'No unit-linked cumulative topics available' : `No cumulative topics assigned to ${week || 'this unit'}`}</option>`;
+            if (note) {
+                note.textContent = showAll
+                    ? 'No triggered struggle topics have been assigned to a unit yet.'
+                    : `Default: showing cumulative topics assigned to ${week || 'this unit'}. Use "Show all unit-linked topics" to choose from other units.`;
+            }
+            return;
+        }
+
+        select.innerHTML = '<option value="">Select a struggle topic...</option>' + filteredTopics.map(topic => {
+            const suffix = showAll && topic.unitId ? ` (${topic.unitId})` : '';
+            const countSuffix = topic.studentCount ? ` - ${topic.studentCount} student${topic.studentCount === 1 ? '' : 's'}` : '';
+            return `<option value="${escapeHTML(topic.topic)}">${escapeHTML(topic.topic + suffix + countSuffix)}</option>`;
+        }).join('');
+        select.disabled = false;
+
+        if (note) {
+            note.textContent = showAll
+                ? 'Showing all cumulative struggle topics that are linked to any unit.'
+                : `Default: showing cumulative struggle topics assigned to ${week || 'this unit'}.`;
+        }
+    } catch (error) {
+        console.error('Error loading struggle topics for question generation:', error);
+        select.innerHTML = '<option value="">Could not load topics</option>';
+        if (note) note.textContent = 'Could not load approved struggle topics.';
+    }
+}
+
+function toggleStruggleTopicScope() {
+    const scopeButton = document.getElementById('show-all-struggle-topics-toggle');
+    const showAll = scopeButton?.dataset.showAll !== 'true';
+    populateStruggleTopicDropdown(currentWeek, showAll);
+}
+
+function getCurrentWeekLearningObjectives() {
+    const weekAccordionItem = document.querySelector(`.accordion-item[data-unit-name="${currentWeek}"]`);
+    const objectives = [];
+
+    if (weekAccordionItem) {
+        const objectivesList = weekAccordionItem.querySelector('.objectives-list');
+        if (objectivesList) {
+            objectivesList.querySelectorAll('.objective-text').forEach(obj => {
+                const text = obj.textContent.trim();
+                if (text) objectives.push(text);
+            });
+        }
+    }
+
+    return objectives;
+}
+
+async function generateAIQuestionFromStruggleTopic() {
+    const questionType = document.getElementById('question-type').value;
+    const topicSelect = document.getElementById('struggle-topic-select');
+    const struggleTopic = topicSelect?.value?.trim() || '';
+
+    if (!questionType) {
+        showNotification('Please select a question type first.', 'error');
+        return;
+    }
+
+    if (!struggleTopic) {
+        showNotification('Please select a struggle topic first.', 'error');
+        return;
+    }
+
+    if (!checkCourseMaterialsAvailable(currentWeek)) {
+        showNotification('Please upload course materials for this unit before generating from a struggle topic.', 'error');
+        return;
+    }
+
+    const button = document.getElementById('topic-generate-btn');
+    const originalText = button?.innerHTML || 'Generate from Topic';
+
+    if (button) {
+        button.innerHTML = '<span class="ai-icon">⏳</span> Generating...';
+        button.disabled = true;
+    }
+
+    try {
+        const courseId = await getCurrentCourseId();
+        const instructorId = getCurrentInstructorId();
+        const objectives = getCurrentWeekLearningObjectives();
+
+        const response = await fetch(API_BASE_URL + '/api/questions/generate-ai', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                courseId,
+                lectureName: currentWeek,
+                instructorId,
+                questionType,
+                struggleTopic,
+                learningObjectives: objectives.length > 0 ? objectives : undefined
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+            throw new Error(errorData.message || `Failed to generate question: ${response.status}`);
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to generate question');
+        }
+
+        const aiContent = result.data;
+        lastGeneratedContent = aiContent;
+        aiGenerationCount = 1;
+        currentQuestionType = questionType;
+
+        populateFormWithAIContent(aiContent);
+        showNotification(`Generated a ${getQuestionTypeLabel(questionType).toLowerCase()} question from "${struggleTopic}". Review it before saving.`, 'success');
+    } catch (error) {
+        console.error('Error generating question from struggle topic:', error);
+        showNotification(`Error generating from struggle topic: ${error.message}`, 'error');
+    } finally {
+        if (button) {
+            button.innerHTML = originalText;
+            button.disabled = false;
+        }
+    }
+}
+
 /**
  * Generate AI content for the current question in the modal
  */
@@ -5006,6 +5333,7 @@ async function loadOnboardingData() {
         
         const result = await response.json();
         const onboardingData = result.data;
+        window.currentCourseData = onboardingData;
         
         // Generate units dynamically based on course structure
         if (onboardingData.courseStructure && onboardingData.courseStructure.totalUnits > 0) {
@@ -5092,6 +5420,7 @@ async function loadSpecificCourse(courseId) {
         
         const result = await response.json();
         const courseData = result.data;
+        window.currentCourseData = courseData;
         
         // Update the course title in the header
         const courseTitleElement = document.getElementById('course-title');

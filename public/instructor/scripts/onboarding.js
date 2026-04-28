@@ -24,8 +24,15 @@ let topicReviewResolve = null;
 let canBypassOnboardingInstructorCourseCodes = false;
 
 function normalizeTopicLabel(topic) {
-    if (typeof topic !== 'string') return '';
-    return topic.replace(/\s+/g, ' ').trim();
+    if (typeof topic === 'string') {
+        return topic.replace(/\s+/g, ' ').trim();
+    }
+
+    if (topic && typeof topic === 'object') {
+        return normalizeTopicLabel(topic.topic);
+    }
+
+    return '';
 }
 
 function dedupeTopics(topics = []) {
@@ -44,9 +51,78 @@ function dedupeTopics(topics = []) {
     return output;
 }
 
+function normalizeTopicSource(source, fallback = 'manual') {
+    return source === 'scraped' || source === 'manual' ? source : fallback;
+}
+
+function normalizeTopicUnitId(unitId, fallback = null) {
+    if (typeof unitId === 'string' && unitId.trim()) {
+        return unitId.trim();
+    }
+
+    return fallback || null;
+}
+
+function normalizeTopicEntry(topicEntry, defaults = {}) {
+    const topic = normalizeTopicLabel(topicEntry);
+    if (!topic) return null;
+
+    const rawObject = topicEntry && typeof topicEntry === 'object' ? topicEntry : {};
+    return {
+        topic,
+        unitId: normalizeTopicUnitId(rawObject.unitId, normalizeTopicUnitId(defaults.unitId)),
+        source: normalizeTopicSource(rawObject.source, defaults.source || 'manual'),
+        createdAt: rawObject.createdAt || defaults.createdAt || new Date().toISOString()
+    };
+}
+
+function dedupeTopicEntries(topics = [], defaults = {}) {
+    const seen = new Set();
+    const output = [];
+
+    (Array.isArray(topics) ? topics : []).forEach((topicEntry) => {
+        const normalized = normalizeTopicEntry(topicEntry, defaults);
+        if (!normalized) return;
+
+        const key = normalized.topic.toLowerCase();
+        if (seen.has(key)) return;
+
+        seen.add(key);
+        output.push(normalized);
+    });
+
+    return output;
+}
+
+function escapeHTML(str) {
+    const div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
+}
+
+function getTopicUnitOptions(selectedUnitId = currentWeek) {
+    const units = Array.isArray(window.currentCourseData?.lectures)
+        ? window.currentCourseData.lectures
+        : [];
+    const selected = normalizeTopicUnitId(selectedUnitId, currentWeek) || '';
+    const unitNames = units.map(unit => unit?.name).filter(Boolean);
+
+    if (selected && !unitNames.includes(selected)) {
+        unitNames.unshift(selected);
+    }
+
+    return unitNames.map(unitName => (
+        `<option value="${escapeHTML(unitName)}"${unitName === selected ? ' selected' : ''}>${escapeHTML(unitName)}</option>`
+    )).join('');
+}
+
 function setCourseTopicsGlobal(courseId, topics) {
     if (!courseId) return;
-    const cleanTopics = dedupeTopics(topics);
+    const cleanTopicDetails = dedupeTopicEntries(topics);
+    const cleanTopics = cleanTopicDetails.map(topic => topic.topic);
+    window.courseApprovedTopicDetailsByCourse = window.courseApprovedTopicDetailsByCourse || {};
+    window.courseApprovedTopicDetailsByCourse[courseId] = cleanTopicDetails;
+    window.courseApprovedTopicDetails = cleanTopicDetails;
     window.courseApprovedTopicsByCourse = window.courseApprovedTopicsByCourse || {};
     window.courseApprovedTopicsByCourse[courseId] = cleanTopics;
     window.courseApprovedTopics = cleanTopics;
@@ -59,9 +135,9 @@ async function fetchCourseApprovedTopics(courseId) {
     }
 
     const result = await response.json();
-    const topics = dedupeTopics(result?.data?.topics || []);
+    const topics = result?.data?.topics || result?.data?.topicLabels || [];
     setCourseTopicsGlobal(courseId, topics);
-    return topics;
+    return window.courseApprovedTopicDetails || [];
 }
 
 async function extractTopicsForUploadedDocument(courseId, documentId) {
@@ -78,14 +154,14 @@ async function extractTopicsForUploadedDocument(courseId, documentId) {
     }
 
     const result = await response.json();
-    return dedupeTopics(result?.data?.topics || []);
+    return dedupeTopics(result?.data?.topicLabels || result?.data?.topics || []);
 }
 
 async function saveCourseApprovedTopics(courseId, topics) {
     const response = await fetch(`/api/courses/${courseId}/approved-topics`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topics: dedupeTopics(topics) })
+        body: JSON.stringify({ topics: dedupeTopicEntries(topics) })
     });
 
     if (!response.ok) {
@@ -93,9 +169,9 @@ async function saveCourseApprovedTopics(courseId, topics) {
     }
 
     const result = await response.json();
-    const savedTopics = dedupeTopics(result?.data?.topics || []);
+    const savedTopics = result?.data?.topics || result?.data?.topicLabels || [];
     setCourseTopicsGlobal(courseId, savedTopics);
-    return savedTopics;
+    return window.courseApprovedTopicDetails || [];
 }
 
 function ensureTopicReviewModal() {
@@ -148,9 +224,16 @@ function ensureTopicReviewModal() {
             }
             .topic-review-add-row {
                 display: grid;
-                grid-template-columns: 1fr auto;
+                grid-template-columns: 1fr auto auto;
                 gap: 8px;
                 margin-top: 6px;
+            }
+            .topic-review-unit-select {
+                padding: 10px;
+                border: 1px solid #d0d7de;
+                border-radius: 6px;
+                font-size: 14px;
+                background: #fff;
             }
             .topic-review-empty {
                 padding: 10px;
@@ -179,6 +262,7 @@ function ensureTopicReviewModal() {
                 <div class="topic-review-list" id="topic-review-list"></div>
                 <div class="topic-review-add-row">
                     <input id="topic-review-new-input" class="topic-review-input" type="text" placeholder="Add a topic (e.g., Enzyme Kinetics)" />
+                    <select id="topic-review-new-unit-select" class="topic-review-unit-select" title="Topic unit">${getTopicUnitOptions(currentWeek)}</select>
                     <button class="btn-secondary" id="topic-review-add-btn">Add Topic</button>
                 </div>
             </div>
@@ -211,7 +295,11 @@ function ensureTopicReviewModal() {
         const input = modal.querySelector('#topic-review-new-input');
         const value = normalizeTopicLabel(input.value);
         if (!value) return;
-        addTopicReviewRow(value);
+        addTopicReviewRow(value, {
+            unitId: modal.querySelector('#topic-review-new-unit-select')?.value || currentWeek,
+            source: 'manual',
+            createdAt: new Date().toISOString()
+        });
         input.value = '';
         input.focus();
     });
@@ -223,7 +311,7 @@ function ensureTopicReviewModal() {
     return modal;
 }
 
-function addTopicReviewRow(topic) {
+function addTopicReviewRow(topic, metadata = {}) {
     const modal = ensureTopicReviewModal();
     const list = modal.querySelector('#topic-review-list');
 
@@ -232,10 +320,13 @@ function addTopicReviewRow(topic) {
 
     const row = document.createElement('div');
     row.className = 'topic-review-item';
+    row.dataset.unitId = normalizeTopicUnitId(metadata.unitId, currentWeek) || '';
+    row.dataset.source = normalizeTopicSource(metadata.source, 'manual');
+    row.dataset.createdAt = metadata.createdAt || new Date().toISOString();
     const input = document.createElement('input');
     input.className = 'topic-review-input';
     input.type = 'text';
-    input.value = topic;
+    input.value = normalizeTopicLabel(topic);
 
     const removeButton = document.createElement('button');
     removeButton.className = 'topic-review-remove';
@@ -257,11 +348,16 @@ function addTopicReviewRow(topic) {
 
 function collectTopicReviewRows() {
     const modal = ensureTopicReviewModal();
-    const rows = Array.from(modal.querySelectorAll('.topic-review-item .topic-review-input'));
-    return dedupeTopics(rows.map((input) => input.value));
+    const rows = Array.from(modal.querySelectorAll('.topic-review-item'));
+    return dedupeTopicEntries(rows.map((row) => ({
+        topic: row.querySelector('.topic-review-input')?.value || '',
+        unitId: row.dataset.unitId || currentWeek || null,
+        source: row.dataset.source || 'manual',
+        createdAt: row.dataset.createdAt || new Date().toISOString()
+    })));
 }
 
-function populateTopicReviewRows(topics) {
+function populateTopicReviewRows(topics, metadata = {}) {
     const modal = ensureTopicReviewModal();
     const list = modal.querySelector('#topic-review-list');
     list.innerHTML = '';
@@ -272,18 +368,26 @@ function populateTopicReviewRows(topics) {
         return;
     }
 
-    cleanTopics.forEach((topic) => addTopicReviewRow(topic));
+    topics.forEach((topic) => addTopicReviewRow(topic, metadata));
 }
 
-function openTopicReviewModal(courseId, sourceName, existingTopics, suggestedTopics) {
+function openTopicReviewModal(courseId, sourceName, existingTopics, suggestedTopics, unitId = currentWeek) {
     const modal = ensureTopicReviewModal();
-    const mergedTopics = dedupeTopics([...(existingTopics || []), ...(suggestedTopics || [])]);
+    const suggestedTopicObjects = (suggestedTopics || []).map(topic => ({
+        topic,
+        unitId,
+        source: 'scraped',
+        createdAt: new Date().toISOString()
+    }));
+    const mergedTopics = dedupeTopicEntries([...(existingTopics || []), ...suggestedTopicObjects]);
     const contextText = sourceName
-        ? `Detected concepts after processing: ${sourceName}`
+        ? `Detected concepts after processing: ${sourceName}${unitId ? ` (${unitId})` : ''}`
         : 'Detected concepts from the uploaded content.';
 
     modal.querySelector('#topic-review-context').textContent = contextText;
     modal.querySelector('#topic-review-new-input').value = '';
+    const unitSelect = modal.querySelector('#topic-review-new-unit-select');
+    if (unitSelect) unitSelect.innerHTML = getTopicUnitOptions(unitId);
     populateTopicReviewRows(mergedTopics);
 
     modal.style.display = '';
@@ -309,13 +413,14 @@ function ensureTopicReviewStyles() {
         .topic-review-item { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
         .topic-review-input { width: 100%; padding: 10px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
         .topic-review-remove { border: 1px solid #d0d7de; background: #fff; color: #a61b1b; border-radius: 6px; padding: 8px 10px; cursor: pointer; font-size: 12px; }
-        .topic-review-add-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 6px; }
+        .topic-review-add-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-top: 6px; }
+        .topic-review-unit-select { padding: 10px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; background: #fff; }
         .topic-review-empty { padding: 10px; border: 1px dashed #c7ced6; border-radius: 6px; color: #666; font-size: 13px; text-align: center; }
     `;
     document.head.appendChild(style);
 }
 
-function addInlineTopicRow(topic) {
+function addInlineTopicRow(topic, metadata = {}) {
     const list = document.getElementById('upload-topic-review-list');
     if (!list) return;
 
@@ -324,10 +429,13 @@ function addInlineTopicRow(topic) {
 
     const row = document.createElement('div');
     row.className = 'topic-review-item';
+    row.dataset.unitId = normalizeTopicUnitId(metadata.unitId, currentWeek) || '';
+    row.dataset.source = normalizeTopicSource(metadata.source, 'manual');
+    row.dataset.createdAt = metadata.createdAt || new Date().toISOString();
     const input = document.createElement('input');
     input.className = 'topic-review-input';
     input.type = 'text';
-    input.value = topic;
+    input.value = normalizeTopicLabel(topic);
 
     const removeButton = document.createElement('button');
     removeButton.className = 'topic-review-remove';
@@ -348,15 +456,26 @@ function addInlineTopicRow(topic) {
 }
 
 function collectInlineTopicRows() {
-    const rows = Array.from(document.querySelectorAll('#upload-topic-review-list .topic-review-item .topic-review-input'));
-    return dedupeTopics(rows.map((input) => input.value));
+    const rows = Array.from(document.querySelectorAll('#upload-topic-review-list .topic-review-item'));
+    return dedupeTopicEntries(rows.map((row) => ({
+        topic: row.querySelector('.topic-review-input')?.value || '',
+        unitId: row.dataset.unitId || currentWeek || null,
+        source: row.dataset.source || 'manual',
+        createdAt: row.dataset.createdAt || new Date().toISOString()
+    })));
 }
 
 function showInlineTopicReview(courseId, sourceName, existingTopics, suggestedTopics) {
     ensureTopicReviewStyles();
 
     // Merge all topics for onboarding (existing + suggested)
-    const mergedTopics = dedupeTopics([...(existingTopics || []), ...(suggestedTopics || [])]);
+    const suggestedTopicObjects = (suggestedTopics || []).map(topic => ({
+        topic,
+        unitId: currentWeek,
+        source: 'scraped',
+        createdAt: new Date().toISOString()
+    }));
+    const mergedTopics = dedupeTopicEntries([...(existingTopics || []), ...suggestedTopicObjects]);
 
     // Store data for when Save is clicked
     pendingTopicReviewData = { courseId };
@@ -377,7 +496,7 @@ function showInlineTopicReview(courseId, sourceName, existingTopics, suggestedTo
     const contextEl = document.getElementById('upload-topic-review-context');
     if (contextEl) {
         contextEl.textContent = sourceName
-            ? `Detected concepts after processing: ${sourceName}`
+            ? `Detected concepts after processing: ${sourceName}${currentWeek ? ` (${currentWeek})` : ''}`
             : 'Detected concepts from the uploaded content.';
     }
 
@@ -385,7 +504,7 @@ function showInlineTopicReview(courseId, sourceName, existingTopics, suggestedTo
     const list = document.getElementById('upload-topic-review-list');
     if (list) {
         list.innerHTML = '';
-        const cleanTopics = dedupeTopics(mergedTopics);
+        const cleanTopics = dedupeTopicEntries(mergedTopics);
         if (cleanTopics.length === 0) {
             list.innerHTML = '<div class="topic-review-empty">No topics detected yet. Add topics manually for this course.</div>';
         } else {
@@ -396,6 +515,8 @@ function showInlineTopicReview(courseId, sourceName, existingTopics, suggestedTo
     // Reset the new-topic input
     const newInput = document.getElementById('upload-topic-new-input');
     if (newInput) newInput.value = '';
+    const unitSelect = document.getElementById('upload-topic-unit-select');
+    if (unitSelect) unitSelect.innerHTML = getTopicUnitOptions(currentWeek);
 
     // Switch footer buttons: hide Upload, show Save Topics
     const uploadBtn = document.getElementById('upload-btn');
@@ -412,7 +533,11 @@ function showInlineTopicReview(courseId, sourceName, existingTopics, suggestedTo
             const input = document.getElementById('upload-topic-new-input');
             const value = normalizeTopicLabel(input.value);
             if (!value) return;
-            addInlineTopicRow(value);
+            addInlineTopicRow(value, {
+                unitId: document.getElementById('upload-topic-unit-select')?.value || currentWeek,
+                source: 'manual',
+                createdAt: new Date().toISOString()
+            });
             input.value = '';
             input.focus();
         });

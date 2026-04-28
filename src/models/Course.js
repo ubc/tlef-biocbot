@@ -104,9 +104,73 @@ function normalizeTopicLabel(topic) {
     return topic.replace(/\s+/g, ' ').trim();
 }
 
+function getTopicLabel(topic) {
+    if (typeof topic === 'string') {
+        return normalizeTopicLabel(topic);
+    }
+
+    if (topic && typeof topic === 'object') {
+        return normalizeTopicLabel(topic.topic);
+    }
+
+    return '';
+}
+
+function normalizeTopicSource(source, fallback = 'manual') {
+    return source === 'scraped' || source === 'manual' ? source : fallback;
+}
+
+function normalizeTopicUnitId(unitId, fallback = null) {
+    if (typeof unitId === 'string') {
+        const normalized = unitId.trim();
+        return normalized || null;
+    }
+
+    return fallback || null;
+}
+
+function normalizeTopicCreatedAt(createdAt, fallback = null) {
+    const candidate = createdAt ? new Date(createdAt) : null;
+    if (candidate && !Number.isNaN(candidate.getTime())) {
+        return candidate;
+    }
+
+    return fallback || new Date();
+}
+
+/**
+ * Normalize a topic object for storage. Legacy strings are represented as
+ * unmapped manual topics when converted in memory.
+ * @param {string|Object} rawTopic - Raw topic entry
+ * @param {Object} existingTopic - Matching existing topic object, if any
+ * @param {Object} defaults - Default metadata for new topics
+ * @returns {Object|null} Normalized topic object
+ */
+function normalizeTopicObject(rawTopic, existingTopic = null, defaults = {}) {
+    const topic = getTopicLabel(rawTopic);
+    if (!topic) return null;
+
+    const rawObject = rawTopic && typeof rawTopic === 'object' ? rawTopic : {};
+    const existingObject = existingTopic && typeof existingTopic === 'object' ? existingTopic : {};
+    const isStringTopic = typeof rawTopic === 'string';
+
+    return {
+        topic,
+        unitId: isStringTopic
+            ? normalizeTopicUnitId(existingObject.unitId, normalizeTopicUnitId(defaults.unitId, null))
+            : normalizeTopicUnitId(rawObject.unitId, normalizeTopicUnitId(existingObject.unitId, normalizeTopicUnitId(defaults.unitId, null))),
+        source: isStringTopic
+            ? normalizeTopicSource(existingObject.source, normalizeTopicSource(defaults.source, 'manual'))
+            : normalizeTopicSource(rawObject.source, normalizeTopicSource(existingObject.source, normalizeTopicSource(defaults.source, 'manual'))),
+        createdAt: isStringTopic
+            ? normalizeTopicCreatedAt(existingObject.createdAt, normalizeTopicCreatedAt(defaults.createdAt, null))
+            : normalizeTopicCreatedAt(rawObject.createdAt, normalizeTopicCreatedAt(existingObject.createdAt, normalizeTopicCreatedAt(defaults.createdAt, null)))
+    };
+}
+
 /**
  * Normalize + deduplicate topic list (case-insensitive)
- * @param {Array<string>} topics - Raw topic list
+ * @param {Array<string|Object>} topics - Raw topic list
  * @returns {Array<string>} Cleaned topic list
  */
 function normalizeTopicList(topics = []) {
@@ -115,11 +179,50 @@ function normalizeTopicList(topics = []) {
     const output = [];
 
     for (const rawTopic of topics) {
-        const normalized = normalizeTopicLabel(rawTopic);
+        const normalized = getTopicLabel(rawTopic);
         if (!normalized) continue;
 
         const key = normalized.toLowerCase();
         if (seen.has(key)) continue;
+
+        seen.add(key);
+        output.push(normalized);
+    }
+
+    return output;
+}
+
+/**
+ * Normalize + deduplicate topic objects (case-insensitive)
+ * @param {Array<string|Object>} topics - Raw topic entries
+ * @param {Object} defaults - Metadata defaults for new/legacy entries
+ * @param {Array<string|Object>} existingTopics - Existing entries used to preserve metadata
+ * @returns {Array<Object>} Cleaned topic object list
+ */
+function normalizeTopicObjectList(topics = [], defaults = {}, existingTopics = []) {
+    if (!Array.isArray(topics)) return [];
+
+    const existingByLabel = new Map();
+    if (Array.isArray(existingTopics)) {
+        for (const existing of existingTopics) {
+            const existingObject = normalizeTopicObject(existing);
+            if (!existingObject) continue;
+            existingByLabel.set(existingObject.topic.toLowerCase(), existingObject);
+        }
+    }
+
+    const seen = new Set();
+    const output = [];
+
+    for (const rawTopic of topics) {
+        const label = getTopicLabel(rawTopic);
+        if (!label) continue;
+
+        const key = label.toLowerCase();
+        if (seen.has(key)) continue;
+
+        const normalized = normalizeTopicObject(rawTopic, existingByLabel.get(key), defaults);
+        if (!normalized) continue;
 
         seen.add(key);
         output.push(normalized);
@@ -1526,23 +1629,82 @@ async function getApprovedStruggleTopics(db, courseId) {
 }
 
 /**
+ * Get approved struggle topic objects for a course
+ * @param {Object} db - MongoDB database instance
+ * @param {string} courseId - Course identifier
+ * @returns {Promise<Array<Object>>} Approved topic object list
+ */
+async function getApprovedStruggleTopicObjects(db, courseId) {
+    const collection = getCoursesCollection(db);
+    const course = await collection.findOne(
+        { courseId },
+        { projection: { approvedStruggleTopics: 1 } }
+    );
+
+    if (!course || !Array.isArray(course.approvedStruggleTopics)) {
+        return [];
+    }
+
+    return normalizeTopicObjectList(course.approvedStruggleTopics);
+}
+
+/**
  * Replace approved struggle topics for a course
  * @param {Object} db - MongoDB database instance
  * @param {string} courseId - Course identifier
- * @param {Array<string>} topics - Topic list
+ * @param {Array<string|Object>} topics - Topic list
  * @param {string} updatedById - User making update
+ * @param {Object} defaults - Defaults for new/legacy topic metadata
  * @returns {Promise<Object>} Update result
  */
-async function setApprovedStruggleTopics(db, courseId, topics, updatedById) {
+async function setApprovedStruggleTopics(db, courseId, topics, updatedById, defaults = {}) {
     const collection = getCoursesCollection(db);
-    const normalizedTopics = normalizeTopicList(topics);
+    const existingCourse = await collection.findOne(
+        { courseId },
+        { projection: { approvedStruggleTopics: 1 } }
+    );
+
+    if (!existingCourse) {
+        return {
+            success: false,
+            modifiedCount: 0,
+            topics: [],
+            topicLabels: [],
+            error: 'Course not found'
+        };
+    }
+
+    const normalizedTopics = normalizeTopicObjectList(
+        topics,
+        {
+            source: defaults.source || 'manual',
+            unitId: defaults.unitId || null,
+            createdAt: defaults.createdAt || new Date()
+        },
+        existingCourse.approvedStruggleTopics || []
+    );
+    const existingRawByLabel = new Map();
+    for (const existingTopic of existingCourse.approvedStruggleTopics || []) {
+        const label = getTopicLabel(existingTopic);
+        if (label) {
+            existingRawByLabel.set(label.toLowerCase(), existingTopic);
+        }
+    }
+    const storageTopics = normalizedTopics.map((topicEntry) => {
+        const existingRawTopic = existingRawByLabel.get(topicEntry.topic.toLowerCase());
+        const shouldPreserveLegacyString = typeof existingRawTopic === 'string' &&
+            !topicEntry.unitId &&
+            topicEntry.source === 'manual';
+
+        return shouldPreserveLegacyString ? topicEntry.topic : topicEntry;
+    });
     const now = new Date();
 
     const result = await collection.updateOne(
         { courseId },
         {
             $set: {
-                approvedStruggleTopics: normalizedTopics,
+                approvedStruggleTopics: storageTopics,
                 updatedAt: now,
                 lastUpdatedById: updatedById
             }
@@ -1552,7 +1714,84 @@ async function setApprovedStruggleTopics(db, courseId, topics, updatedById) {
     return {
         success: result.matchedCount > 0,
         modifiedCount: result.modifiedCount,
+        topics: normalizeTopicObjectList(storageTopics),
+        topicLabels: normalizeTopicList(storageTopics),
+        error: result.matchedCount > 0 ? null : 'Course not found'
+    };
+}
+
+/**
+ * Update the unit mapping for a single approved struggle topic.
+ * Legacy string entries are converted to topic objects on write.
+ * @param {Object} db - MongoDB database instance
+ * @param {string} courseId - Course identifier
+ * @param {string} topicLabel - Topic label to update
+ * @param {string|null} unitId - Stable unit name, or null for unassigned
+ * @param {string} updatedById - User making update
+ * @returns {Promise<Object>} Update result
+ */
+async function updateApprovedStruggleTopicUnit(db, courseId, topicLabel, unitId, updatedById) {
+    const collection = getCoursesCollection(db);
+    const course = await collection.findOne(
+        { courseId },
+        { projection: { approvedStruggleTopics: 1, lectures: 1 } }
+    );
+
+    if (!course) {
+        return { success: false, error: 'Course not found' };
+    }
+
+    const normalizedLabel = normalizeTopicLabel(topicLabel);
+    if (!normalizedLabel) {
+        return { success: false, error: 'Topic is required' };
+    }
+
+    const normalizedUnitId = normalizeTopicUnitId(unitId, null);
+    if (normalizedUnitId) {
+        const validUnit = Array.isArray(course.lectures)
+            ? course.lectures.some((lecture) => lecture && lecture.name === normalizedUnitId)
+            : false;
+
+        if (!validUnit) {
+            return { success: false, error: 'Unit not found in this course' };
+        }
+    }
+
+    const existingTopics = Array.isArray(course.approvedStruggleTopics)
+        ? course.approvedStruggleTopics
+        : [];
+    const normalizedTopics = normalizeTopicObjectList(existingTopics);
+    const topicIndex = normalizedTopics.findIndex(
+        (entry) => entry.topic.toLowerCase() === normalizedLabel.toLowerCase()
+    );
+
+    if (topicIndex === -1) {
+        return { success: false, error: 'Approved topic not found' };
+    }
+
+    normalizedTopics[topicIndex] = {
+        ...normalizedTopics[topicIndex],
+        unitId: normalizedUnitId,
+        source: normalizeTopicSource(normalizedTopics[topicIndex].source, 'manual')
+    };
+
+    const result = await collection.updateOne(
+        { courseId },
+        {
+            $set: {
+                approvedStruggleTopics: normalizedTopics,
+                updatedAt: new Date(),
+                lastUpdatedById: updatedById
+            }
+        }
+    );
+
+    return {
+        success: result.matchedCount > 0,
+        modifiedCount: result.modifiedCount,
+        topic: normalizedTopics[topicIndex],
         topics: normalizedTopics,
+        topicLabels: normalizeTopicList(normalizedTopics),
         error: result.matchedCount > 0 ? null : 'Course not found'
     };
 }
@@ -1714,8 +1953,11 @@ module.exports = {
     joinCourseAsInstructor,
     updateUnitDisplayName,
     getApprovedStruggleTopics,
+    getApprovedStruggleTopicObjects,
     setApprovedStruggleTopics,
+    updateApprovedStruggleTopicUnit,
     normalizeTopicList,
+    normalizeTopicObjectList,
     getQuizSettings,
     updateQuizSettings,
     getAnonymizeStudents,

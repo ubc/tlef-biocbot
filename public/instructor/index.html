@@ -115,6 +115,30 @@
                             <option value="short-answer">Short Answer</option>
                         </select>
                     </div>
+
+                    <div class="form-section" id="struggle-topic-generation-section">
+                        <details class="struggle-topic-panel" id="struggle-topic-panel">
+                            <summary>
+                                <span>Optional: generate from a struggle topic</span>
+                                <small>Uses topics assigned to this unit by default</small>
+                            </summary>
+                            <div class="struggle-topic-generate-row">
+                                <label for="struggle-topic-select">Struggle Topic</label>
+                                <select id="struggle-topic-select">
+                                    <option value="">Loading topics...</option>
+                                </select>
+                                <div class="struggle-topic-actions">
+                                    <button type="button" class="struggle-topic-scope-btn" id="show-all-struggle-topics-toggle" data-show-all="false" onclick="toggleStruggleTopicScope()">
+                                        Show all unit-linked topics
+                                    </button>
+                                    <button type="button" class="btn-ai compact" id="topic-generate-btn" onclick="generateAIQuestionFromStruggleTopic()">
+                                        Generate from Topic
+                                    </button>
+                                </div>
+                                <p class="struggle-topic-note" id="struggle-topic-note">Default: showing cumulative topics assigned to this unit.</p>
+                            </div>
+                        </details>
+                    </div>
                     
                     <!-- Question Text -->
                     <div class="form-section">
@@ -374,6 +398,7 @@
                     <div class="topic-review-list" id="upload-topic-review-list"></div>
                     <div class="topic-review-add-row">
                         <input id="upload-topic-new-input" class="topic-review-input" type="text" placeholder="Add a topic (e.g., Enzyme Kinetics)" />
+                        <select id="upload-topic-unit-select" class="topic-review-unit-select" title="Topic unit"></select>
                         <button class="btn-secondary" id="upload-topic-add-btn">Add Topic</button>
                     </div>
                 </div>
