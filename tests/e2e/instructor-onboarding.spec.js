@@ -6,11 +6,14 @@ const { test, expect, request } = require('@playwright/test');
 const { TEST_USERS, loadCredentials } = require('./helpers/users');
 
 const user = TEST_USERS.instructor_fresh;
+const ownerUser = TEST_USERS.instructor;
 
 const LECTURE_FIXTURE = path.join(__dirname, 'fixtures', 'sample-lecture.txt');
 const PRACTICE_FIXTURE = path.join(__dirname, 'fixtures', 'sample-practice-quiz.txt');
 const COURSE_NAME = 'BIOC E2E - Onboarding Test';
 const LEARNING_OBJECTIVE = 'Identify the four main classes of biomolecules.';
+const JOINABLE_COURSE_ID_PREFIX = 'e2e-joinable-onboarding';
+const SEEDED_COURSE_ID_PREFIX = 'e2e-seeded-onboarding';
 const QUESTIONS = {
     trueFalse: {
         type: 'true-false',
@@ -33,7 +36,8 @@ const QUESTIONS = {
 let password;
 
 test.beforeAll(() => {
-    password = loadCredentials().instructor_fresh;
+    const credentials = loadCredentials();
+    password = credentials.instructor_fresh;
     if (!password) {
         throw new Error(
             'No credentials.instructor_fresh found. Global-setup should have generated it.'
@@ -41,20 +45,86 @@ test.beforeAll(() => {
     }
 });
 
-async function hardDeleteCoursesFor(username) {
+async function withDb(callback) {
     if (!process.env.MONGO_URI) {
-        throw new Error('MONGO_URI not set; cannot clean up courses for onboarding test.');
+        throw new Error('MONGO_URI not set; cannot access MongoDB for onboarding test.');
     }
     const client = new MongoClient(process.env.MONGO_URI);
     await client.connect();
     try {
-        const db = client.db();
-        const userDoc = await db.collection('users').findOne({ username });
-        if (!userDoc) return;
-        await db.collection('courses').deleteMany({ instructorId: userDoc.userId });
+        return await callback(client.db());
     } finally {
         await client.close();
     }
+}
+
+async function getTestUserDoc(db, username) {
+    const userDoc = await db.collection('users').findOne({ username });
+    if (!userDoc) {
+        throw new Error(`Test user "${username}" was not found in MongoDB.`);
+    }
+    return userDoc;
+}
+
+async function hardDeleteCoursesFor(username) {
+    await withDb(async (db) => {
+        const userDoc = await db.collection('users').findOne({ username });
+        if (!userDoc) return;
+        await db.collection('courses').deleteMany({ instructorId: userDoc.userId });
+    });
+}
+
+async function cleanupSeededCourses() {
+    await withDb(async (db) => {
+        await db.collection('courses').deleteMany({
+            courseId: {
+                $regex: `^(${JOINABLE_COURSE_ID_PREFIX}|${SEEDED_COURSE_ID_PREFIX})-`,
+            },
+        });
+    });
+}
+
+async function seedCourseFor(username, overrides = {}) {
+    return await withDb(async (db) => {
+        const userDoc = await getTestUserDoc(db, username);
+        const now = new Date();
+        const courseId = overrides.courseId || `${SEEDED_COURSE_ID_PREFIX}-${Date.now()}`;
+        const course = {
+            courseId,
+            courseName: overrides.courseName || `E2E Seeded Onboarding ${Date.now()}`,
+            courseCode: overrides.courseCode || 'STU123',
+            instructorCourseCode: overrides.instructorCourseCode || 'INST123',
+            instructorId: userDoc.userId,
+            instructors: overrides.instructors || [userDoc.userId],
+            tas: [],
+            courseDescription: '',
+            assessmentCriteria: '',
+            courseMaterials: [],
+            approvedStruggleTopics: overrides.approvedStruggleTopics || [],
+            courseStructure: overrides.courseStructure || {
+                weeks: 1,
+                lecturesPerWeek: 1,
+                totalUnits: 1,
+            },
+            isOnboardingComplete: overrides.isOnboardingComplete || false,
+            status: overrides.status || 'active',
+            lectures: overrides.lectures || [{
+                name: 'Unit 1',
+                isPublished: false,
+                learningObjectives: overrides.learningObjectives || [],
+                passThreshold: 2,
+                createdAt: now,
+                updatedAt: now,
+                documents: overrides.documents || [],
+                assessmentQuestions: overrides.assessmentQuestions || [],
+            }],
+            createdAt: now,
+            updatedAt: now,
+        };
+
+        await db.collection('courses').insertOne(course);
+        return course;
+    });
 }
 
 async function loginViaUI(page) {
@@ -67,6 +137,100 @@ async function loginViaUI(page) {
     });
 }
 
+async function loginViaApi(apiCtx) {
+    const loginRes = await apiCtx.post('/api/auth/login', {
+        data: { username: user.username, password },
+    });
+    expect(loginRes.ok()).toBeTruthy();
+}
+
+async function apiContextFromPage(page) {
+    const apiCtx = await request.newContext({ baseURL: page.url().split('/instructor')[0] });
+    await loginViaApi(apiCtx);
+    return apiCtx;
+}
+
+async function gotoOnboardingStart(page) {
+    await loginViaUI(page);
+    await page.goto('/instructor/onboarding');
+    await expect(page.locator('#step-1.onboarding-step.active')).toBeVisible();
+}
+
+async function startCustomCourse(page, courseName = COURSE_NAME) {
+    await gotoOnboardingStart(page);
+    await page.locator('#step-1 button.btn-primary', { hasText: 'Get Started' }).click();
+    await expect(page.locator('#step-2.onboarding-step.active')).toBeVisible();
+    await expect(page.locator('#course-select option[value="custom"]')).toHaveCount(1);
+    await page.locator('#course-select').selectOption('custom');
+    await page.locator('#custom-course-name').fill(courseName);
+    await page.locator('#weeks-count').fill('1');
+    await page.locator('#lectures-per-week').fill('1');
+    await page.locator('#continue-btn').click();
+    await expect(page.locator('#step-3.onboarding-step.active')).toBeVisible();
+    await expect(page.locator('#substep-objectives.guided-substep.active')).toBeVisible();
+}
+
+async function addLearningObjective(page) {
+    await page.locator('#objective-input').fill(LEARNING_OBJECTIVE);
+    await page.locator('.add-objective-btn').click();
+    await expect(page.locator('#objectives-list .objective-display-item')).toHaveCount(1);
+}
+
+async function uploadRequiredMaterial(page, buttonIndex, statusLocator, fixturePath) {
+    await page.locator('.material-item.required button.upload-btn').nth(buttonIndex).click();
+    await expect(page.locator('#upload-modal')).toBeVisible();
+    await page.locator('#file-input').setInputFiles(fixturePath);
+    await page.locator('#upload-btn').click();
+
+    // AI processing -> topic review section appears
+    await expect(page.locator('#topic-review-section')).toBeVisible({ timeout: 120_000 });
+    await page.locator('#save-topics-btn').click();
+
+    await expect(page.locator('#upload-modal')).toBeHidden({ timeout: 10_000 });
+    await expect(statusLocator).not.toHaveText(/Not Uploaded/i);
+}
+
+async function addQuestion(page, spec) {
+    await page.locator('.add-question-btn').click();
+    await expect(page.locator('#question-modal')).toBeVisible();
+
+    await page.locator('#question-type').selectOption(spec.type);
+    await page.locator('#question-text').fill(spec.text);
+
+    if (spec.type === 'true-false') {
+        await page.locator(`input[name="tf-answer"][value="${spec.answer}"]`).check();
+    } else if (spec.type === 'multiple-choice') {
+        for (const [letter, value] of Object.entries(spec.options)) {
+            await page.locator(`.mcq-input[data-option="${letter}"]`).fill(value);
+        }
+        await page.locator(`input[name="mcq-correct"][value="${spec.correct}"]`).check();
+    } else if (spec.type === 'short-answer') {
+        await page.locator('#sa-answer').fill(spec.expected);
+    }
+
+    await page.locator('#question-modal button.btn-primary', { hasText: 'Save Question' }).click();
+    await expect(page.locator('#question-modal')).toBeHidden({ timeout: 10_000 });
+}
+
+/**
+ * @param {import('@playwright/test').Locator} locator
+ */
+async function expectFormControlInvalid(locator) {
+    const isValid = await locator.evaluate((field) => {
+        if (
+            field instanceof HTMLInputElement ||
+            field instanceof HTMLSelectElement ||
+            field instanceof HTMLTextAreaElement
+        ) {
+            return field.checkValidity();
+        }
+
+        throw new Error('Expected an input, select, or textarea with checkValidity().');
+    });
+
+    expect(isValid).toBe(false);
+}
+
 function findSavedQuestion(questions, questionText) {
     const question = questions.find(savedQuestion => savedQuestion.question === questionText);
     expect(question, `Expected saved question: "${questionText}"`).toBeTruthy();
@@ -77,7 +241,228 @@ test.describe('instructor onboarding', () => {
     test.describe.configure({ mode: 'serial' });
 
     test.beforeEach(async () => {
+        await cleanupSeededCourses();
         await hardDeleteCoursesFor(user.username);
+    });
+
+    test.afterEach(async () => {
+        await cleanupSeededCourses();
+    });
+
+    test('enforces required onboarding validation gates', async ({ page }) => {
+        test.setTimeout(90_000);
+
+        await gotoOnboardingStart(page);
+        await page.locator('#step-1 button.btn-primary', { hasText: 'Get Started' }).click();
+        await expect(page.locator('#step-2.onboarding-step.active')).toBeVisible();
+
+        // Product requirement: course setup must not advance without selecting a course.
+        await page.locator('#continue-btn').click();
+        await expect(page.locator('#step-2.onboarding-step.active')).toBeVisible();
+        await expect(page.locator('#course-select')).toBeFocused();
+        await expectFormControlInvalid(page.locator('#course-select'));
+
+        // Product requirement: custom courses must have a course name and valid structure.
+        await expect(page.locator('#course-select option[value="custom"]')).toHaveCount(1);
+        await page.locator('#course-select').selectOption('custom');
+        await page.locator('#weeks-count').fill('1');
+        await page.locator('#lectures-per-week').fill('1');
+        await page.locator('#continue-btn').click();
+        await expect(page.locator('#step-2.onboarding-step.active')).toBeVisible();
+        await expect(page.locator('#custom-course-name').locator('..').locator('.error-message')).toHaveText('Please enter a course name');
+
+        await page.locator('#custom-course-name').fill(COURSE_NAME);
+        await page.locator('#weeks-count').fill('0');
+        await page.locator('#lectures-per-week').fill('6');
+        await page.locator('#continue-btn').click();
+        await expect(page.locator('#step-2.onboarding-step.active')).toBeVisible();
+        await expectFormControlInvalid(page.locator('#weeks-count'));
+        await expectFormControlInvalid(page.locator('#lectures-per-week'));
+
+        await page.locator('#weeks-count').fill('1');
+        await page.locator('#lectures-per-week').fill('1');
+        await page.locator('#continue-btn').click();
+        await expect(page.locator('#step-3.onboarding-step.active')).toBeVisible();
+        await expect(page.locator('#substep-objectives.guided-substep.active')).toBeVisible();
+
+        // Product requirement: Unit 1 setup must not continue to materials without a learning objective.
+        await page.locator('#substep-objectives button.btn-primary', { hasText: 'Continue to Course Materials' }).click();
+        await expect(page.locator('#substep-objectives.guided-substep.active')).toBeVisible();
+        await expect(page.getByText('Please add at least one learning objective before continuing.')).toBeVisible();
+
+        await addLearningObjective(page);
+        await page.locator('#substep-objectives button.btn-primary', { hasText: 'Continue to Course Materials' }).click();
+        await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
+
+        // Product requirement: Unit 1 setup must not continue to questions until both required uploads exist.
+        await page.locator('#substep-materials button.btn-primary', { hasText: 'Continue to Probing Questions' }).click();
+        await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
+        await expect(page.getByText('Please upload required materials (Lecture Notes and Practice Questions) before continuing.')).toBeVisible();
+
+        // Product requirement: question modal must reject incomplete question answers.
+        await page.locator('.progress-card[data-substep="questions"]').click();
+        await expect(page.locator('#substep-questions.guided-substep.active')).toBeVisible();
+        await page.locator('.add-question-btn').click();
+        await expect(page.locator('#question-modal')).toBeVisible();
+        await page.locator('#question-type').selectOption('multiple-choice');
+        await page.locator('#question-text').fill(QUESTIONS.multipleChoice.text);
+        await page.locator('.mcq-input[data-option="A"]').fill('Carbohydrates');
+        await page.locator('#question-modal button.btn-primary', { hasText: 'Save Question' }).click();
+        await expect(page.locator('#question-modal')).toBeVisible();
+        await expect(page.getByText('Please provide at least 2 answer options.')).toBeVisible();
+    });
+
+    test('resumes an incomplete course instead of creating a duplicate', async ({ page }) => {
+        test.setTimeout(60_000);
+
+        await startCustomCourse(page, `${COURSE_NAME} Resume`);
+        const apiCtx = await apiContextFromPage(page);
+        try {
+            const coursesRes = await apiCtx.get('/api/courses');
+            expect(coursesRes.ok()).toBeTruthy();
+            const { data: coursesAfterCreate } = await coursesRes.json();
+            expect(coursesAfterCreate).toHaveLength(1);
+            expect(coursesAfterCreate[0].name).toBe(`${COURSE_NAME} Resume`);
+
+            await page.goto('/instructor/home');
+            await page.goto('/instructor/onboarding');
+
+            // Product requirement: returning to onboarding with an incomplete course resumes that course.
+            await expect(page.locator('#step-3.onboarding-step.active')).toBeVisible();
+            await expect(page.locator('#substep-objectives.guided-substep.active')).toBeVisible();
+
+            const coursesAfterResumeRes = await apiCtx.get('/api/courses');
+            expect(coursesAfterResumeRes.ok()).toBeTruthy();
+            const { data: coursesAfterResume } = await coursesAfterResumeRes.json();
+            expect(coursesAfterResume).toHaveLength(1);
+            expect(coursesAfterResume[0].id).toBe(coursesAfterCreate[0].id);
+        } finally {
+            await apiCtx.dispose();
+        }
+    });
+
+    test('redirects completed instructors away from onboarding', async ({ page }) => {
+        test.setTimeout(30_000);
+
+        const completedCourse = await seedCourseFor(user.username, {
+            courseId: `${SEEDED_COURSE_ID_PREFIX}-complete-${Date.now()}`,
+            courseName: `${COURSE_NAME} Completed Redirect`,
+            isOnboardingComplete: true,
+            learningObjectives: [LEARNING_OBJECTIVE],
+        });
+
+        await loginViaUI(page);
+        await page.goto('/instructor/onboarding');
+
+        // Product requirement: instructors with completed onboarding cannot restart onboarding as a fresh flow.
+        await page.waitForURL(url =>
+            url.pathname === '/instructor/documents' &&
+            url.searchParams.get('courseId') === completedCourse.courseId,
+        { timeout: 10_000 });
+    });
+
+    test('persists reviewed topic removals and manual additions', async ({ page }) => {
+        test.setTimeout(120_000);
+
+        const removedTopic = 'E2E Remove Me';
+        const keptTopic = 'E2E Keep Me';
+        const manualTopic = 'E2E Manual Topic';
+
+        await page.route('**/api/courses/*/extract-topics', async route => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    success: true,
+                    data: {
+                        courseId: 'mocked-course-id',
+                        topics: [removedTopic, keptTopic],
+                    },
+                }),
+            });
+        });
+
+        await startCustomCourse(page, `${COURSE_NAME} Topics`);
+        await addLearningObjective(page);
+        await page.locator('#substep-objectives button.btn-primary', { hasText: 'Continue to Course Materials' }).click();
+        await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
+
+        await page.locator('.material-item.required button.upload-btn').first().click();
+        await expect(page.locator('#upload-modal')).toBeVisible();
+        await page.locator('#file-input').setInputFiles(LECTURE_FIXTURE);
+        await page.locator('#upload-btn').click();
+        await expect(page.locator('#topic-review-section')).toBeVisible({ timeout: 120_000 });
+        await expect(page.locator('#upload-topic-review-list .topic-review-item')).toHaveCount(2);
+
+        // Product requirement: removing a detected topic keeps it out of the saved approved-topic list.
+        await expect(page.locator('#upload-topic-review-list .topic-review-input').first()).toHaveValue(removedTopic);
+        await page.locator('#upload-topic-review-list .topic-review-remove').first().click();
+        await expect(page.locator('#upload-topic-review-list .topic-review-input').first()).toHaveValue(keptTopic);
+
+        // Product requirement: manually added topics are persisted when Save Topics is clicked.
+        await page.locator('#upload-topic-new-input').fill(manualTopic);
+        await page.locator('#upload-topic-add-btn').click();
+        await page.locator('#save-topics-btn').click();
+        await expect(page.locator('#upload-modal')).toBeHidden({ timeout: 10_000 });
+
+        const apiCtx = await apiContextFromPage(page);
+        try {
+            const coursesRes = await apiCtx.get('/api/courses');
+            const { data: courses } = await coursesRes.json();
+            expect(courses).toHaveLength(1);
+
+            const approvedTopicsRes = await apiCtx.get(`/api/courses/${courses[0].id}/approved-topics`);
+            expect(approvedTopicsRes.ok()).toBeTruthy();
+            const approvedTopics = await approvedTopicsRes.json();
+            expect(approvedTopics.success).toBeTruthy();
+            expect(approvedTopics.data.topicLabels).toContain(keptTopic);
+            expect(approvedTopics.data.topicLabels).toContain(manualTopic);
+            expect(approvedTopics.data.topicLabels).not.toContain(removedTopic);
+        } finally {
+            await apiCtx.dispose();
+        }
+    });
+
+    test('joins an existing course only with a valid instructor code', async ({ page }) => {
+        test.setTimeout(90_000);
+
+        const instructorCourseCode = 'JOIN42';
+        const joinableCourse = await seedCourseFor(ownerUser.username, {
+            courseId: `${JOINABLE_COURSE_ID_PREFIX}-${Date.now()}`,
+            courseName: `${COURSE_NAME} Joinable`,
+            instructorCourseCode,
+            isOnboardingComplete: true,
+            learningObjectives: [LEARNING_OBJECTIVE],
+        });
+
+        await gotoOnboardingStart(page);
+        await page.locator('#step-1 button.btn-primary', { hasText: 'Get Started' }).click();
+        await expect(page.locator('#step-2.onboarding-step.active')).toBeVisible();
+        await expect(page.locator(`#course-select option[value="${joinableCourse.courseId}"]`)).toHaveCount(1);
+        await page.locator('#course-select').selectOption(joinableCourse.courseId);
+        await expect(page.locator('#join-course-btn')).toBeVisible();
+        await expect(page.locator('#instructor-course-code-group')).toBeVisible();
+
+        // Product requirement: invalid instructor course codes are rejected and keep the instructor on onboarding.
+        await page.locator('#instructor-course-code').fill('WRONG1');
+        await page.locator('#join-course-btn').click();
+        await expect(page.locator('#instructor-course-code-error')).toContainText(/invalid instructor course code/i);
+        await expect(page.locator('#step-2.onboarding-step.active')).toBeVisible();
+
+        // Product requirement: a valid instructor course code grants instructor access and redirects to the joined course.
+        await page.locator('#instructor-course-code').fill(instructorCourseCode);
+        await page.locator('#join-course-btn').click();
+        await page.waitForURL(url =>
+            url.pathname === '/instructor/documents' &&
+            url.searchParams.get('courseId') === joinableCourse.courseId,
+        { timeout: 10_000 });
+
+        await withDb(async (db) => {
+            const freshInstructor = await getTestUserDoc(db, user.username);
+            const joinedCourse = await db.collection('courses').findOne({ courseId: joinableCourse.courseId });
+            expect(joinedCourse.instructors).toContain(freshInstructor.userId);
+            expect(joinedCourse.isOnboardingComplete).toBe(true);
+        });
     });
 
     test('completes the full onboarding flow end-to-end', async ({ page }) => {
@@ -115,53 +500,17 @@ test.describe('instructor onboarding', () => {
         // (the finalize step validates that both required materials have been uploaded)
         await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
 
-        async function uploadRequiredMaterial(buttonIndex, statusLocator, fixturePath) {
-            await page.locator('.material-item.required button.upload-btn').nth(buttonIndex).click();
-            await expect(page.locator('#upload-modal')).toBeVisible();
-            await page.locator('#file-input').setInputFiles(fixturePath);
-            await page.locator('#upload-btn').click();
-
-            // AI processing → topic review section appears
-            await expect(page.locator('#topic-review-section')).toBeVisible({ timeout: 120_000 });
-            await page.locator('#save-topics-btn').click();
-
-            await expect(page.locator('#upload-modal')).toBeHidden({ timeout: 10_000 });
-            await expect(statusLocator).not.toHaveText(/Not Uploaded/i);
-        }
-
-        await uploadRequiredMaterial(0, page.locator('#lecture-status'), LECTURE_FIXTURE);
-        await uploadRequiredMaterial(1, page.locator('#practice-status'), PRACTICE_FIXTURE);
+        await uploadRequiredMaterial(page, 0, page.locator('#lecture-status'), LECTURE_FIXTURE);
+        await uploadRequiredMaterial(page, 1, page.locator('#practice-status'), PRACTICE_FIXTURE);
 
         await page.locator('#substep-materials button.btn-primary', { hasText: 'Continue to Probing Questions' }).click();
 
         // 3c — Assessment Questions: one of each supported type
         await expect(page.locator('#substep-questions.guided-substep.active')).toBeVisible();
 
-        async function addQuestion(spec) {
-            await page.locator('.add-question-btn').click();
-            await expect(page.locator('#question-modal')).toBeVisible();
-
-            await page.locator('#question-type').selectOption(spec.type);
-            await page.locator('#question-text').fill(spec.text);
-
-            if (spec.type === 'true-false') {
-                await page.locator(`input[name="tf-answer"][value="${spec.answer}"]`).check();
-            } else if (spec.type === 'multiple-choice') {
-                for (const [letter, value] of Object.entries(spec.options)) {
-                    await page.locator(`.mcq-input[data-option="${letter}"]`).fill(value);
-                }
-                await page.locator(`input[name="mcq-correct"][value="${spec.correct}"]`).check();
-            } else if (spec.type === 'short-answer') {
-                await page.locator('#sa-answer').fill(spec.expected);
-            }
-
-            await page.locator('#question-modal button.btn-primary', { hasText: 'Save Question' }).click();
-            await expect(page.locator('#question-modal')).toBeHidden({ timeout: 10_000 });
-        }
-
-        await addQuestion(QUESTIONS.trueFalse);
-        await addQuestion(QUESTIONS.multipleChoice);
-        await addQuestion(QUESTIONS.shortAnswer);
+        await addQuestion(page, QUESTIONS.trueFalse);
+        await addQuestion(page, QUESTIONS.multipleChoice);
+        await addQuestion(page, QUESTIONS.shortAnswer);
 
         // Finalize — completeUnit1Setup() saves data then redirects to the course
         // upload page after a short notification delay, so we wait for the URL change.
@@ -169,10 +518,7 @@ test.describe('instructor onboarding', () => {
         await page.waitForURL(url => !url.pathname.includes('/onboarding'), { timeout: 30_000 });
 
         // API truth — the instructor now has exactly one course, and it's marked complete
-        const apiCtx = await request.newContext({ baseURL: page.url().split('/instructor')[0] });
-        await apiCtx.post('/api/auth/login', {
-            data: { username: user.username, password },
-        });
+        const apiCtx = await apiContextFromPage(page);
         const coursesRes = await apiCtx.get('/api/courses');
         expect(coursesRes.ok()).toBeTruthy();
         const { data: courses } = await coursesRes.json();
