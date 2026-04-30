@@ -12,10 +12,7 @@ recorded here so it can be triaged into a real issue and fixed in code.
 ## ⚠️ Headline issue: assessment-question schema is inconsistent
 
 The same conceptual data — an assessment question — is persisted in **two
-different shapes** depending on which UI flow created it. Downstream consumers
-(the quiz route, the chat practice-answer route, `student.js`) have already
-accumulated workarounds to defend against this, and one of them (`quiz.js`)
-will throw at runtime if it ever encounters the "structured" shape.
+different shapes** depending on which UI flow created it.
 
 | Field | `onboarding.js` (structured) | `instructor.js` (string-y) |
 |---|---|---|
@@ -24,45 +21,28 @@ will throw at runtime if it ever encounters the "structured" shape.
 | MCQ `correctAnswer` | numeric index `2` | letter `"C"` |
 | SA `correctAnswer` | string | string ✓ |
 
-### What the consumers actually require
+### Decided direction: standardize on the structured shape
 
-- **`src/routes/quiz.js` line 211** —
-  `studentAnswer.toLowerCase() === question.correctAnswer.toLowerCase()`.
-  Assumes `correctAnswer` is a string. Throws `TypeError: ... is not a function`
-  if it's a boolean (TF onboarding) or number (MCQ onboarding).
-- **`src/routes/chat.js` line 1319** — same pattern, same assumption.
-- **`public/student/scripts/student.js` line 2213** — already handles both
-  shapes defensively for TF: `q.correctAnswer === true || q.correctAnswer === 'true'`.
-- **`public/student/scripts/student.js` lines 2216–2221** — already handles
-  both shapes for MCQ: if `correctAnswer` is a string letter, look it up in
-  `Object.keys(q.options)` to derive the index.
-- **`public/student/scripts/student.js` line 2200** — reads MCQ options via
-  `Object.keys(q.options)`. Only works for the **object** shape; won't handle
-  array-shape options from onboarding-saved questions.
+Booleans should be booleans, ordered lists should be arrays, positions should
+be numbers. The string-y shape has been pushing those concepts through string
+radio values, which is exactly why `student.js` accumulated dual-shape branches
+and `quiz.js`/`chat.js` were one bad input away from crashing.
 
-### What students submit
-Both quiz and chat practice flows submit the radio button's `.value`:
-- TF: literal string `"true"` / `"false"`
-- MCQ: the letter `"A"`, `"B"`, `"C"`, or `"D"` (because `student.js` builds the
-  radios from `Object.keys(options)` — see line 2200)
+### Phase plan
 
-So the wire-protocol the server already expects is the **string-y** shape.
-Picking that for storage too is the path of least disruption.
-
-### Recommended fix
-Standardize on the **string-y** shape (matching `instructor.js` and what
-`quiz.js`/`chat.js` already require). Concretely:
-1. Update `onboarding.js` `saveQuestion()` to persist TF `correctAnswer` as a
-   string and MCQ `correctAnswer` as a letter / `options` as an object —
-   matching `instructor.js`.
-2. Once persisted shapes are consistent, simplify `student.js` (drop the
-   dual-shape branches at lines 2213, 2216–2221).
-3. Migrate any existing onboarding-created questions in Mongo to the new
-   shape (one-off script).
-
-The alternative — standardizing on the structured shape — is also defensible,
-but requires changes in **more** places (`quiz.js`, `chat.js`, `instructor.js`,
-plus client-side rebuild) and a wire-protocol change for student submissions.
+- **✅ Phase 1 — DONE.** Defensive `String(...)` coercion in `quiz.js:211` and
+  `chat.js:1319` so the comparison works regardless of which shape is in the DB.
+  Stops the runtime crash. Both shapes compare correctly today.
+- **Phase 2 — fix `instructor.js` `saveQuestion()`** to write the structured
+  shape: TF→boolean, MCQ options→array, MCQ correctAnswer→numeric index.
+  Existing failing tests in `tests/e2e/instructor.spec.js` turn green.
+- **Phase 3a — Mongo migration script** in `scripts/` to convert
+  instructor-created questions already in the DB to the structured shape.
+- **Phase 3b — clean up `student.js`** dual-shape branches at lines 2200, 2213,
+  2216–2221, and update its wire protocol so MCQ submits numeric index instead
+  of letter.
+- **Phase 4 — student-side spec** that exercises `/api/quiz/check-answer`
+  end-to-end and would have caught Finding #4 originally.
 
 ---
 
@@ -71,37 +51,75 @@ plus client-side rebuild) and a wire-protocol change for student submissions.
 ### 1. `instructor.js` saves true/false `correctAnswer` as a string
 
 - **Where:** `public/instructor/scripts/instructor.js` `saveQuestion()` (~line 4207)
-- **Symptom:** Saving a TF question via the instructor course-management page persists `correctAnswer: "true"` (string).
-- **Compare to:** `onboarding.js` `saveQuestion()` (~line 2228), which coerces to boolean.
+- **Symptom:** Persists `correctAnswer: "true"` (string) instead of boolean `true`.
+- **Compare to:** `onboarding.js` (~line 2228), correctly coerces to boolean.
 - **Failing test:** `tests/e2e/instructor.spec.js` › "instructor can add an assessment question to a unit"
-- **Status:** Not necessarily a bug — `quiz.js`/`chat.js` actually require the string form. The fix likely belongs in `onboarding.js`, not here. Update the test assertion once the headline issue above is resolved.
+- **Fix:** Phase 2.
 
-### 2. `instructor.js` saves MCQ `options` as an object (vs array in onboarding)
+### 2. `instructor.js` saves MCQ `options` as an object (not an array)
 
 - **Where:** `public/instructor/scripts/instructor.js` `saveQuestion()` (~line 4217)
-- **Symptom:** MCQ questions persist `options: { A: "...", B: "...", C: "...", D: "..." }`.
+- **Symptom:** Persists `options: { A: "...", B: "...", C: "...", D: "..." }`.
 - **Compare to:** `onboarding.js` (~line 2238) which uses an array.
 - **Failing test:** `tests/e2e/instructor.spec.js` › "instructor can add a multiple-choice question to a unit"
-- **Status:** Same as #1 — `student.js` line 2200 reads options via `Object.keys(q.options)`, so the object form is what the client UI actually expects. The fix likely belongs in `onboarding.js`.
+- **Fix:** Phase 2.
 
-### 3. `instructor.js` saves MCQ `correctAnswer` as a letter (vs numeric index in onboarding)
+### 3. `instructor.js` saves MCQ `correctAnswer` as a letter (not a numeric index)
 
 - **Where:** `public/instructor/scripts/instructor.js` `saveQuestion()` (~line 4240)
-- **Symptom:** MCQ `correctAnswer` is `"C"` instead of `2`.
+- **Symptom:** `correctAnswer: "C"` instead of `2`.
 - **Compare to:** `onboarding.js` (~line 2241), which stores the array index.
 - **Failing test:** `tests/e2e/instructor.spec.js` › "instructor can add a multiple-choice question to a unit"
-- **Status:** Same as #1 / #2 — letter form is what the wire protocol expects.
+- **Fix:** Phase 2 (depends on #2 — options must be an array first).
 
-### 4. `quiz.js` will throw if it encounters a non-string `correctAnswer`
+### 4. ✅ FIXED (Phase 1) — `quiz.js` / `chat.js` could throw on non-string `correctAnswer`
 
-- **Where:** `src/routes/quiz.js` line 211 (`POST /api/quiz/check-answer`)
-- **Symptom:** Calling `.toLowerCase()` on a boolean or number throws `TypeError`. Reproducible right now: if a TF question is created via onboarding and a student takes it via the quiz page, the request 500s.
-- **Same pattern in:** `src/routes/chat.js` line 1319 (`POST /api/chat/check-practice-answer`).
-- **Failing test:** none yet — would need a student-side test that takes a quiz on an onboarding-created question. Worth adding once the headline issue is resolved.
-- **Status:** Latent runtime bug. Even after standardizing the persisted shape, this code should be defensive (`String(question.correctAnswer)`).
+- **Where:** `src/routes/quiz.js` line 211, `src/routes/chat.js` line 1319
+- **Was:** `studentAnswer.toLowerCase() === question.correctAnswer.toLowerCase()` threw `TypeError` when `correctAnswer` was a boolean (TF) or number (MCQ index).
+- **Now:** Both sides coerced via `String(...)`, comparison works for any shape.
+- **Status:** Defensive coercion landed; can stay even after Phase 3 lands as belt-and-suspenders.
 
 ### 5. `student.js` has accumulated dual-shape handling
 
-- **Where:** `public/student/scripts/student.js` lines 2200, 2213, 2216–2221.
-- **Symptom:** Branches that exist only because two ingest paths persist different shapes. Once shapes are unified, these can be deleted.
-- **Status:** Cleanup follow-up to the headline fix.
+- **Where:** `public/student/scripts/student.js` lines 2200, 2213, 2216–2221
+- **Symptom:** Branches that exist only because two ingest paths persist different shapes.
+- **Fix:** Phase 3b — once shapes are unified, delete these branches and the wire-protocol fallback they support.
+
+### 6. `GET /api/courses` returns soft-deleted courses
+
+- **Where:** `src/routes/courses.js` line 537
+- **Symptom:** Query is `collection.find({ instructorId })` with **no status filter**, so soft-deleted courses (set to `status: 'deleted'` by `DELETE /api/courses/:courseId` at line 1708) are returned to the instructor's "My Courses" list. This is why my onboarding test had to hard-delete via Mongo in `beforeEach` instead of using the API — soft-deletes piled up.
+- **Compare to:** Sister routes that DO filter:
+  - `GET /api/courses/available/all` (~line 1921): `status: { $ne: 'deleted' }`
+  - `GET /api/courses/available/joinable` (~line 2011): `status: { $ne: 'deleted' }`
+  - `GET /api/onboarding/instructor/:instructorId` (~line 242): `status: { $ne: 'deleted' }`
+- **Fix:** Add `status: { $ne: 'deleted' }` to the `find()` query at line 537.
+
+### 7. `getCourseById()` doesn't filter soft-deleted, leaving filtering to each caller
+
+- **Where:** `src/models/Course.js` line 1309 — `findOne({ courseId })`, no status check.
+- **Symptom:** Helper that "looks up a course by id" can return a deleted course. Callers either remember to check `course.status !== 'deleted'` (e.g., `quiz.js` does its own filtering) or silently operate on deleted data.
+- **Why it matters:** Footgun. Every new caller has to know to filter; some will forget. Better to make the helper enforce the invariant.
+- **Fix:** Either (a) make `getCourseById` filter soft-deleted by default with an explicit `{ includeDeleted: true }` opt-in, or (b) introduce `getActiveCourseById` and a separate `getCourseByIdIncludingDeleted` so the choice is explicit at the call site.
+
+### 8. In-memory question shape differs between `onboarding.js` and `instructor.js`
+
+- **Where:**
+  - `onboarding.js` line 2243: builds `{ id: Date.now(), type: questionType, question, learningObjective, ... }`
+  - `instructor.js` line 4194: builds `{ questionType, question, learningObjective, ... }` (no `id`, uses `questionType` directly)
+- **Symptom:** Two different in-memory schemas for the same conceptual object. The wire protocol (POST `/api/questions`) and storage (`questionType`, `questionId`) use a third schema, so both client paths have to translate. Drift-prone — if one path's translation breaks, the other might mask it.
+- **Fix:** Pick one in-memory shape (probably matching what the API expects: `questionType`, no separate `id` since the server assigns `questionId`). Consider extracting a shared `buildQuestionPayload(formInputs)` helper used by both pages.
+
+### 9. Quiz `/check-answer` and chat `/check-practice-answer` are parallel implementations with divergent contracts
+
+- **Where:**
+  - `src/routes/quiz.js` line 186 — requires `{ courseId, questionId, lectureName, studentAnswer }`. Looks up the question via `CourseModel.getAssessmentQuestions`.
+  - `src/routes/chat.js` line 1281 — requires `{ practiceId, studentAnswer }`. Looks up the question from an in-memory store keyed by `practiceId`.
+- **Symptom:** Same conceptual operation ("check this student's answer to this question") implemented two ways with different request shapes, different lookup mechanisms, different response payloads, and different error handling. They both have the (now-fixed) string-comparison logic; future bugs fixed in one won't propagate to the other.
+- **Fix:** Extract a shared `evaluateObjectiveAnswer(question, studentAnswer)` utility that both routes call. Keep the two endpoints (they serve different UIs / lookup paths) but the core logic should live in one place.
+
+### 10. Soft-delete invariant is enforced inconsistently across `getCourse*` helpers
+
+- **Where:** Various places in `src/models/Course.js` and route handlers.
+- **Pattern:** Some routes filter `status !== 'deleted'` directly in the route (defensive), some helpers do, some don't. Closely related to #6 and #7.
+- **Fix:** Audit every read path that resolves a `courseId` → course doc; standardize on either always filtering or having one canonical "active courses only" helper.
