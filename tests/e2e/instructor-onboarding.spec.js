@@ -14,6 +14,22 @@ const COURSE_NAME = 'BIOC E2E - Onboarding Test';
 const LEARNING_OBJECTIVE = 'Identify the four main classes of biomolecules.';
 const JOINABLE_COURSE_ID_PREFIX = 'e2e-joinable-onboarding';
 const SEEDED_COURSE_ID_PREFIX = 'e2e-seeded-onboarding';
+const SEEDED_DOCUMENTS = [
+    {
+        documentId: 'e2e-seeded-lecture-document',
+        title: 'Lecture Notes - Unit 1',
+        documentType: 'lecture-notes',
+        status: 'uploaded',
+        uploadedAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
+    },
+    {
+        documentId: 'e2e-seeded-practice-document',
+        title: 'Practice Questions/Tutorial - Unit 1',
+        documentType: 'practice-quiz',
+        status: 'uploaded',
+        uploadedAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
+    },
+];
 const QUESTIONS = {
     trueFalse: {
         type: 'true-false',
@@ -190,6 +206,37 @@ async function uploadRequiredMaterial(page, buttonIndex, statusLocator, fixtureP
     await expect(statusLocator).not.toHaveText(/Not Uploaded/i);
 }
 
+async function mockFastSuccessfulUploads(page) {
+    let uploadCount = 0;
+
+    await page.route('**/api/documents/upload', async route => {
+        uploadCount += 1;
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                success: true,
+                data: {
+                    documentId: `e2e-mocked-upload-${uploadCount}`,
+                },
+            }),
+        });
+    });
+
+    await page.route('**/api/courses/*/extract-topics', async route => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                success: true,
+                data: {
+                    topics: [`E2E Mock Topic ${uploadCount}`],
+                },
+            }),
+        });
+    });
+}
+
 async function addQuestion(page, spec) {
     await page.locator('.add-question-btn').click();
     await expect(page.locator('#question-modal')).toBeVisible();
@@ -341,6 +388,63 @@ test.describe('instructor onboarding', () => {
         }
     });
 
+    test('resumes incomplete onboarding at course materials when objectives already exist', async ({ page }) => {
+        test.setTimeout(45_000);
+
+        const seededCourse = await seedCourseFor(user.username, {
+            courseId: `${SEEDED_COURSE_ID_PREFIX}-resume-materials-${Date.now()}`,
+            courseName: `${COURSE_NAME} Resume Materials`,
+            learningObjectives: [LEARNING_OBJECTIVE],
+        });
+
+        await loginViaUI(page);
+        await page.goto('/instructor/onboarding');
+
+        // Product requirement: an incomplete course with objectives but no documents resumes at materials.
+        await expect(page.locator('#step-3.onboarding-step.active')).toBeVisible();
+        await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
+
+        const apiCtx = await apiContextFromPage(page);
+        try {
+            const coursesAfterResumeRes = await apiCtx.get('/api/courses');
+            expect(coursesAfterResumeRes.ok()).toBeTruthy();
+            const { data: coursesAfterResume } = await coursesAfterResumeRes.json();
+            expect(coursesAfterResume).toHaveLength(1);
+            expect(coursesAfterResume[0].id).toBe(seededCourse.courseId);
+        } finally {
+            await apiCtx.dispose();
+        }
+    });
+
+    test('resumes incomplete onboarding at questions when objectives and documents already exist', async ({ page }) => {
+        test.setTimeout(45_000);
+
+        const seededCourse = await seedCourseFor(user.username, {
+            courseId: `${SEEDED_COURSE_ID_PREFIX}-resume-questions-${Date.now()}`,
+            courseName: `${COURSE_NAME} Resume Questions`,
+            learningObjectives: [LEARNING_OBJECTIVE],
+            documents: SEEDED_DOCUMENTS,
+        });
+
+        await loginViaUI(page);
+        await page.goto('/instructor/onboarding');
+
+        // Product requirement: an incomplete course with objectives and required documents resumes at questions.
+        await expect(page.locator('#step-3.onboarding-step.active')).toBeVisible();
+        await expect(page.locator('#substep-questions.guided-substep.active')).toBeVisible();
+
+        const apiCtx = await apiContextFromPage(page);
+        try {
+            const coursesAfterResumeRes = await apiCtx.get('/api/courses');
+            expect(coursesAfterResumeRes.ok()).toBeTruthy();
+            const { data: coursesAfterResume } = await coursesAfterResumeRes.json();
+            expect(coursesAfterResume).toHaveLength(1);
+            expect(coursesAfterResume[0].id).toBe(seededCourse.courseId);
+        } finally {
+            await apiCtx.dispose();
+        }
+    });
+
     test('redirects completed instructors away from onboarding', async ({ page }) => {
         test.setTimeout(30_000);
 
@@ -359,6 +463,45 @@ test.describe('instructor onboarding', () => {
             url.pathname === '/instructor/documents' &&
             url.searchParams.get('courseId') === completedCourse.courseId,
         { timeout: 10_000 });
+    });
+
+    test('resumes the requested incomplete course from a direct onboarding courseId URL', async ({ page }) => {
+        test.setTimeout(45_000);
+
+        const seededCourse = await seedCourseFor(user.username, {
+            courseId: `${SEEDED_COURSE_ID_PREFIX}-direct-courseid-${Date.now()}`,
+            courseName: `${COURSE_NAME} Direct CourseId`,
+            learningObjectives: [LEARNING_OBJECTIVE],
+        });
+
+        await loginViaUI(page);
+        await page.goto(`/instructor/onboarding?courseId=${seededCourse.courseId}`);
+
+        // Product requirement: direct onboarding links resume the requested accessible incomplete course.
+        await expect(page.locator('#step-3.onboarding-step.active')).toBeVisible();
+        await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
+    });
+
+    test('does not resume or leak another instructor direct onboarding courseId', async ({ page }) => {
+        test.setTimeout(45_000);
+
+        const privateCourse = await seedCourseFor(ownerUser.username, {
+            courseId: `${SEEDED_COURSE_ID_PREFIX}-private-courseid-${Date.now()}`,
+            courseName: `${COURSE_NAME} Private CourseId`,
+            learningObjectives: [LEARNING_OBJECTIVE],
+        });
+
+        await loginViaUI(page);
+        await page.goto(`/instructor/onboarding?courseId=${privateCourse.courseId}`);
+
+        // Product requirement: a direct courseId URL must not resume or expose a course the instructor cannot access.
+        await expect(page.locator('#step-1.onboarding-step.active')).toBeVisible();
+        await expect(page.locator('#step-3.onboarding-step.active')).toHaveCount(0);
+
+        await page.locator('#step-1 button.btn-primary', { hasText: 'Get Started' }).click();
+        await expect(page.locator('#step-2.onboarding-step.active')).toBeVisible();
+        await expect(page.locator(`#course-select option[value="${privateCourse.courseId}"]`)).toHaveCount(0);
+        await expect(page.getByText(privateCourse.courseName)).toHaveCount(0);
     });
 
     test('persists reviewed topic removals and manual additions', async ({ page }) => {
@@ -418,6 +561,94 @@ test.describe('instructor onboarding', () => {
             expect(approvedTopics.data.topicLabels).toContain(keptTopic);
             expect(approvedTopics.data.topicLabels).toContain(manualTopic);
             expect(approvedTopics.data.topicLabels).not.toContain(removedTopic);
+        } finally {
+            await apiCtx.dispose();
+        }
+    });
+
+    test('keeps required upload unset when no upload content is provided', async ({ page }) => {
+        test.setTimeout(60_000);
+
+        await startCustomCourse(page, `${COURSE_NAME} Empty Upload`);
+        await addLearningObjective(page);
+        await page.locator('#substep-objectives button.btn-primary', { hasText: 'Continue to Course Materials' }).click();
+        await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
+
+        await page.locator('.material-item.required button.upload-btn').first().click();
+        await expect(page.locator('#upload-modal')).toBeVisible();
+        await page.locator('#upload-btn').click();
+
+        // Product requirement: an empty upload attempt stays in the modal and does not mark the material uploaded.
+        await expect(page.locator('#upload-modal')).toBeVisible();
+        await expect(page.locator('#lecture-status')).toHaveText(/Not Uploaded/i);
+        await expect(page.getByText('Please provide content via file upload or direct text input')).toBeVisible();
+    });
+
+    test('keeps required upload unset when the upload API fails', async ({ page }) => {
+        test.setTimeout(60_000);
+
+        await page.route('**/api/documents/upload', async route => {
+            await route.fulfill({
+                status: 500,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    success: false,
+                    message: 'E2E forced upload failure',
+                }),
+            });
+        });
+
+        await startCustomCourse(page, `${COURSE_NAME} Upload Failure`);
+        await addLearningObjective(page);
+        await page.locator('#substep-objectives button.btn-primary', { hasText: 'Continue to Course Materials' }).click();
+        await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
+
+        await page.locator('.material-item.required button.upload-btn').first().click();
+        await expect(page.locator('#upload-modal')).toBeVisible();
+        await page.locator('#file-input').setInputFiles(LECTURE_FIXTURE);
+        await page.locator('#upload-btn').click();
+
+        // Product requirement: upload failures restore the form and do not mark the material uploaded.
+        await expect(page.locator('#upload-modal')).toBeVisible();
+        await expect(page.locator('#upload-section')).toBeVisible();
+        await expect(page.locator('#upload-loading-indicator')).toBeHidden();
+        await expect(page.locator('#lecture-status')).toHaveText(/Not Uploaded/i);
+        await expect(page.getByText(/Error uploading content:/)).toBeVisible();
+    });
+
+    test('does not complete onboarding without at least one assessment question', async ({ page }) => {
+        test.setTimeout(90_000);
+
+        await mockFastSuccessfulUploads(page);
+        await startCustomCourse(page, `${COURSE_NAME} No Questions`);
+        await addLearningObjective(page);
+        await page.locator('#substep-objectives button.btn-primary', { hasText: 'Continue to Course Materials' }).click();
+        await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
+
+        await uploadRequiredMaterial(page, 0, page.locator('#lecture-status'), LECTURE_FIXTURE);
+        await uploadRequiredMaterial(page, 1, page.locator('#practice-status'), PRACTICE_FIXTURE);
+        await page.locator('#substep-materials button.btn-primary', { hasText: 'Continue to Probing Questions' }).click();
+        await expect(page.locator('#substep-questions.guided-substep.active')).toBeVisible();
+
+        await page.locator('#substep-questions button.btn-primary', { hasText: 'Complete Unit 1 & Continue' }).click();
+
+        // Product requirement: final completion is blocked until at least one assessment question exists.
+        await expect(page.locator('#substep-questions.guided-substep.active')).toBeVisible();
+        await expect(page).toHaveURL(/\/instructor\/onboarding/);
+        await expect(page.getByText('Please add at least one assessment question before continuing.')).toBeVisible();
+
+        const apiCtx = await apiContextFromPage(page);
+        try {
+            const coursesRes = await apiCtx.get('/api/courses');
+            expect(coursesRes.ok()).toBeTruthy();
+            const { data: courses } = await coursesRes.json();
+            expect(courses).toHaveLength(1);
+
+            const courseDetailRes = await apiCtx.get(`/api/onboarding/${courses[0].id}`);
+            expect(courseDetailRes.ok()).toBeTruthy();
+            const detail = await courseDetailRes.json();
+            expect(detail.success).toBeTruthy();
+            expect(detail.data.isOnboardingComplete).toBe(false);
         } finally {
             await apiCtx.dispose();
         }
