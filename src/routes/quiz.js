@@ -206,7 +206,7 @@ router.post('/check-answer', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Question not found' });
         }
 
-        // MC and TF: direct comparison, no LLM needed.
+        // MC and TF: direct comparison, no LLM needed
         if (question.questionType === 'multiple-choice' || question.questionType === 'true-false') {
             const correct = studentAnswer.toLowerCase() === question.correctAnswer.toLowerCase();
             const feedback = correct
