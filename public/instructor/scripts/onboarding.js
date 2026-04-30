@@ -586,6 +586,8 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     canBypassOnboardingInstructorCourseCodes = await checkCourseCodeBypassPermission();
     applyJoinCourseCodePermission();
+
+    await checkOnboardingStatus();
     
     // Load available courses for course selection
     loadAvailableCourses();
@@ -752,13 +754,17 @@ async function checkOnboardingStatus() {
         }
         
         console.log('🔍 [ONBOARDING] No courses found, showing normal onboarding flow');
-        // If we get here, onboarding is not complete, show normal flow
-        showOnboardingFlow();
+        // If the instructor already started while this async check was running,
+        // preserve their progress instead of snapping the UI back to step 1.
+        if (onboardingState.currentStep === 1) {
+            showOnboardingFlow();
+        }
         
     } catch (error) {
         console.error('❌ [ONBOARDING] Error checking onboarding status:', error);
-        // If there's an error, show normal onboarding flow
-        showOnboardingFlow();
+        if (onboardingState.currentStep === 1) {
+            showOnboardingFlow();
+        }
     }
 }
 
@@ -1715,6 +1721,8 @@ function previousStep() {
  * Show specific step
  */
 function showStep(stepNumber) {
+    onboardingState.currentStep = stepNumber;
+
     // Hide all steps
     const steps = document.querySelectorAll('.onboarding-step');
     steps.forEach(step => step.classList.remove('active'));
@@ -1779,6 +1787,26 @@ function showSubstep(substepName) {
  * Navigate to next substep
  */
 function nextSubstep(substepName) {
+    if (substepName === 'materials') {
+        const objectiveCount = document.querySelectorAll('#objectives-list .objective-display-item').length;
+        if (objectiveCount === 0) {
+            showNotification('Please add at least one learning objective before continuing.', 'error');
+            return;
+        }
+    }
+
+    if (substepName === 'questions') {
+        const lectureStatus = document.getElementById('lecture-status');
+        const practiceStatus = document.getElementById('practice-status');
+        const lectureUploaded = lectureStatus && !/not uploaded/i.test(lectureStatus.textContent || '');
+        const practiceUploaded = practiceStatus && !/not uploaded/i.test(practiceStatus.textContent || '');
+
+        if (!lectureUploaded || !practiceUploaded) {
+            showNotification('Please upload required materials (Lecture Notes and Practice Questions) before continuing.', 'error');
+            return;
+        }
+    }
+
     showSubstep(substepName);
 }
 

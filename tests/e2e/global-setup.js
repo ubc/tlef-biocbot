@@ -10,19 +10,23 @@ const {
 } = require('./helpers/users');
 
 function loadOrGenerateCredentials() {
-    if (fs.existsSync(CREDENTIALS_PATH)) {
-        const existing = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
-        const allRolesPresent = Object.keys(TEST_USERS).every((role) => existing[role]);
-        if (allRolesPresent) return existing;
+    const existing = fs.existsSync(CREDENTIALS_PATH)
+        ? JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'))
+        : {};
+
+    const merged = { ...existing };
+    let changed = false;
+    for (const key of Object.keys(TEST_USERS)) {
+        if (!merged[key]) {
+            merged[key] = `E2e!${crypto.randomBytes(24).toString('hex')}`;
+            changed = true;
+        }
     }
 
-    const generated = {};
-    for (const role of Object.keys(TEST_USERS)) {
-        generated[role] = `E2e!${crypto.randomBytes(24).toString('hex')}`;
+    if (changed) {
+        fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(merged, null, 2), { mode: 0o600 });
     }
-
-    fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(generated, null, 2), { mode: 0o600 });
-    return generated;
+    return merged;
 }
 
 async function ensureUser(api, user, password) {
@@ -55,7 +59,7 @@ async function ensureUser(api, user, password) {
     }
 }
 
-async function saveStorageState(baseURL, user, password) {
+async function saveStorageState(baseURL, key, user, password) {
     const api = await request.newContext({ baseURL });
     const loginRes = await api.post('/api/auth/login', {
         data: { username: user.username, password },
@@ -65,12 +69,12 @@ async function saveStorageState(baseURL, user, password) {
     if (!loginRes.ok()) {
         const body = await loginRes.text();
         throw new Error(
-            `Failed to log in as ${user.role} "${user.username}" while saving ` +
+            `Failed to log in as ${key} "${user.username}" while saving ` +
             `storage state: ${loginRes.status()} ${body}`
         );
     }
 
-    await api.storageState({ path: storageStatePath(user.role) });
+    await api.storageState({ path: storageStatePath(key) });
     await api.dispose();
 }
 
@@ -85,14 +89,14 @@ module.exports = async function globalSetup(config) {
 
     const setupApi = await request.newContext({ baseURL });
     try {
-        for (const [role, user] of Object.entries(TEST_USERS)) {
-            await ensureUser(setupApi, user, credentials[role]);
+        for (const [key, user] of Object.entries(TEST_USERS)) {
+            await ensureUser(setupApi, user, credentials[key]);
         }
     } finally {
         await setupApi.dispose();
     }
 
-    for (const [role, user] of Object.entries(TEST_USERS)) {
-        await saveStorageState(baseURL, user, credentials[role]);
+    for (const [key, user] of Object.entries(TEST_USERS)) {
+        await saveStorageState(baseURL, key, user, credentials[key]);
     }
 };

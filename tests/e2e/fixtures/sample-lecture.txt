@@ -1,0 +1,14 @@
+Unit 1: Introduction to Biochemistry
+
+Biochemistry is the study of chemical processes within and relating to living organisms.
+It bridges biology and chemistry by examining how biological molecules give rise to the
+processes that occur within living cells.
+
+Key topics covered in this unit:
+- The four main classes of biomolecules: carbohydrates, lipids, proteins, and nucleic acids.
+- Water as the universal solvent and its role in biological systems.
+- pH, buffers, and the importance of maintaining physiological conditions.
+- The structure and function of amino acids and peptide bonds.
+
+By the end of this unit, students should be able to identify the major classes of
+biomolecules and explain why water is essential to life.
