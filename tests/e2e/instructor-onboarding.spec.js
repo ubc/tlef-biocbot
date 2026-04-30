@@ -12,6 +12,8 @@ const LECTURE_FIXTURE = path.join(__dirname, 'fixtures', 'sample-lecture.txt');
 const PRACTICE_FIXTURE = path.join(__dirname, 'fixtures', 'sample-practice-quiz.txt');
 const COURSE_NAME = 'BIOC E2E - Onboarding Test';
 const LEARNING_OBJECTIVE = 'Identify the four main classes of biomolecules.';
+const SECOND_LEARNING_OBJECTIVE = 'Explain how peptide bonds form between amino acids.';
+const REMOVED_LEARNING_OBJECTIVE = 'This learning objective should be removed before completion.';
 const JOINABLE_COURSE_ID_PREFIX = 'e2e-joinable-onboarding';
 const SEEDED_COURSE_ID_PREFIX = 'e2e-seeded-onboarding';
 const SEEDED_DOCUMENTS = [
@@ -186,10 +188,15 @@ async function startCustomCourse(page, courseName = COURSE_NAME) {
     await expect(page.locator('#substep-objectives.guided-substep.active')).toBeVisible();
 }
 
-async function addLearningObjective(page) {
-    await page.locator('#objective-input').fill(LEARNING_OBJECTIVE);
+async function addLearningObjectiveText(page, objectiveText) {
+    const existingCount = await page.locator('#objectives-list .objective-display-item').count();
+    await page.locator('#objective-input').fill(objectiveText);
     await page.locator('.add-objective-btn').click();
-    await expect(page.locator('#objectives-list .objective-display-item')).toHaveCount(1);
+    await expect(page.locator('#objectives-list .objective-display-item')).toHaveCount(existingCount + 1);
+}
+
+async function addLearningObjective(page) {
+    await addLearningObjectiveText(page, LEARNING_OBJECTIVE);
 }
 
 async function uploadRequiredMaterial(page, buttonIndex, statusLocator, fixturePath) {
@@ -257,6 +264,23 @@ async function addQuestion(page, spec) {
 
     await page.locator('#question-modal button.btn-primary', { hasText: 'Save Question' }).click();
     await expect(page.locator('#question-modal')).toBeHidden({ timeout: 10_000 });
+}
+
+async function getOnlyCourseDetail(apiCtx) {
+    const coursesRes = await apiCtx.get('/api/courses');
+    expect(coursesRes.ok()).toBeTruthy();
+    const { data: courses } = await coursesRes.json();
+    expect(courses).toHaveLength(1);
+
+    const courseDetailRes = await apiCtx.get(`/api/onboarding/${courses[0].id}`);
+    expect(courseDetailRes.ok()).toBeTruthy();
+    const detail = await courseDetailRes.json();
+    expect(detail.success).toBeTruthy();
+
+    const unit1 = detail.data.lectures.find(lecture => lecture.name === 'Unit 1');
+    expect(unit1, 'Expected Unit 1 to exist on the saved course.').toBeTruthy();
+
+    return { course: detail.data, unit1 };
 }
 
 /**
@@ -649,6 +673,243 @@ test.describe('instructor onboarding', () => {
             const detail = await courseDetailRes.json();
             expect(detail.success).toBeTruthy();
             expect(detail.data.isOnboardingComplete).toBe(false);
+        } finally {
+            await apiCtx.dispose();
+        }
+    });
+
+    test('preserves in-progress onboarding state across refresh and browser back', async ({ page }) => {
+        test.setTimeout(150_000);
+
+        await page.route('**/api/courses/*/extract-topics', async route => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    success: true,
+                    data: {
+                        topics: ['E2E Refresh Persistence Topic'],
+                    },
+                }),
+            });
+        });
+
+        await startCustomCourse(page, `${COURSE_NAME} Refresh Persistence`);
+        await addLearningObjective(page);
+        await page.locator('#substep-objectives button.btn-primary', { hasText: 'Continue to Course Materials' }).click();
+        await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
+
+        await page.reload();
+
+        // Product requirement: refreshing after objectives are entered keeps the objective and resumes at materials.
+        await expect(page.locator('#step-3.onboarding-step.active')).toBeVisible();
+        await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
+        await expect(page.locator('#objectives-list .objective-text')).toHaveText([LEARNING_OBJECTIVE]);
+
+        await uploadRequiredMaterial(page, 0, page.locator('#lecture-status'), LECTURE_FIXTURE);
+        await page.reload();
+
+        // Product requirement: a partial upload survives refresh without pretending both required uploads exist.
+        await expect(page.locator('#step-3.onboarding-step.active')).toBeVisible();
+        await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
+        await expect(page.locator('#lecture-status')).not.toHaveText(/Not Uploaded/i);
+        await expect(page.locator('#practice-status')).toHaveText(/Not Uploaded/i);
+
+        await uploadRequiredMaterial(page, 1, page.locator('#practice-status'), PRACTICE_FIXTURE);
+        await page.locator('#substep-materials button.btn-primary', { hasText: 'Continue to Probing Questions' }).click();
+        await expect(page.locator('#substep-questions.guided-substep.active')).toBeVisible();
+        await addQuestion(page, QUESTIONS.trueFalse);
+        await expect(page.locator('#assessment-questions-onboarding .question-item')).toHaveCount(1);
+        await expect(page.locator('#assessment-questions-onboarding')).toContainText(QUESTIONS.trueFalse.text);
+
+        await page.goto('/instructor/home');
+        await page.goBack();
+
+        // Product requirement: leaving and coming back before completion does not lose created questions.
+        await expect(page.locator('#step-3.onboarding-step.active')).toBeVisible();
+        await expect(page.locator('#substep-questions.guided-substep.active')).toBeVisible();
+        await expect(page.locator('#assessment-questions-onboarding .question-item')).toHaveCount(1);
+        await expect(page.locator('#assessment-questions-onboarding')).toContainText(QUESTIONS.trueFalse.text);
+
+        const apiCtx = await apiContextFromPage(page);
+        try {
+            const coursesRes = await apiCtx.get('/api/courses');
+            expect(coursesRes.ok()).toBeTruthy();
+            const { data: courses } = await coursesRes.json();
+            expect(courses).toHaveLength(1);
+            expect(courses[0].name).toBe(`${COURSE_NAME} Refresh Persistence`);
+        } finally {
+            await apiCtx.dispose();
+        }
+    });
+
+    test('does not persist removed objectives or questions when completing onboarding', async ({ page }) => {
+        test.setTimeout(120_000);
+
+        page.on('dialog', dialog => dialog.accept());
+        await mockFastSuccessfulUploads(page);
+
+        await startCustomCourse(page, `${COURSE_NAME} Removed Data`);
+        await addLearningObjectiveText(page, REMOVED_LEARNING_OBJECTIVE);
+        await addLearningObjectiveText(page, SECOND_LEARNING_OBJECTIVE);
+
+        // Product requirement: objectives removed before final completion are absent from the saved course.
+        await page.locator('#objectives-list .objective-display-item', { hasText: REMOVED_LEARNING_OBJECTIVE })
+            .locator('.remove-objective')
+            .click();
+        await expect(page.locator('#objectives-list')).not.toContainText(REMOVED_LEARNING_OBJECTIVE);
+        await expect(page.locator('#objectives-list')).toContainText(SECOND_LEARNING_OBJECTIVE);
+
+        await page.locator('#substep-objectives button.btn-primary', { hasText: 'Continue to Course Materials' }).click();
+        await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
+        await uploadRequiredMaterial(page, 0, page.locator('#lecture-status'), LECTURE_FIXTURE);
+        await uploadRequiredMaterial(page, 1, page.locator('#practice-status'), PRACTICE_FIXTURE);
+        await page.locator('#substep-materials button.btn-primary', { hasText: 'Continue to Probing Questions' }).click();
+        await expect(page.locator('#substep-questions.guided-substep.active')).toBeVisible();
+
+        await addQuestion(page, QUESTIONS.trueFalse);
+        await addQuestion(page, QUESTIONS.shortAnswer);
+
+        // Product requirement: questions removed before final completion are absent from the saved course.
+        await page.locator('#assessment-questions-onboarding .question-item', { hasText: QUESTIONS.trueFalse.text })
+            .locator('.delete-question-btn')
+            .click();
+        await expect(page.locator('#assessment-questions-onboarding')).not.toContainText(QUESTIONS.trueFalse.text);
+        await expect(page.locator('#assessment-questions-onboarding')).toContainText(QUESTIONS.shortAnswer.text);
+
+        await page.locator('#substep-questions button.btn-primary', { hasText: 'Complete Unit 1 & Continue' }).click();
+        await page.waitForURL(url => !url.pathname.includes('/onboarding'), { timeout: 30_000 });
+
+        const apiCtx = await apiContextFromPage(page);
+        try {
+            const { course, unit1 } = await getOnlyCourseDetail(apiCtx);
+            expect(course.isOnboardingComplete).toBe(true);
+            expect(unit1.learningObjectives).toContain(SECOND_LEARNING_OBJECTIVE);
+            expect(unit1.learningObjectives).not.toContain(REMOVED_LEARNING_OBJECTIVE);
+            expect(unit1.assessmentQuestions.map(question => question.question)).toContain(QUESTIONS.shortAnswer.text);
+            expect(unit1.assessmentQuestions.map(question => question.question)).not.toContain(QUESTIONS.trueFalse.text);
+        } finally {
+            await apiCtx.dispose();
+        }
+    });
+
+    test('keeps the question modal open for invalid assessment questions', async ({ page }) => {
+        test.setTimeout(90_000);
+
+        async function expectInvalidQuestionSubmission(setupForm, expectedMessage) {
+            await page.locator('.add-question-btn').click();
+            await expect(page.locator('#question-modal')).toBeVisible();
+            await setupForm();
+            await page.locator('#question-modal button.btn-primary', { hasText: 'Save Question' }).click();
+
+            // Product requirement: invalid question submissions stay editable and add no question.
+            await expect(page.locator('#question-modal')).toBeVisible();
+            await expect(page.getByText(expectedMessage)).toBeVisible();
+            await expect(page.locator('#assessment-questions-onboarding .question-item')).toHaveCount(0);
+            await page.locator('#question-modal .modal-close').click();
+            await expect(page.locator('#question-modal')).toBeHidden();
+        }
+
+        await startCustomCourse(page, `${COURSE_NAME} Question Validation`);
+        await page.locator('.progress-card[data-substep="questions"]').click();
+        await expect(page.locator('#substep-questions.guided-substep.active')).toBeVisible();
+
+        await expectInvalidQuestionSubmission(async () => {
+            await page.locator('#question-type').selectOption('true-false');
+            await page.locator('input[name="tf-answer"][value="true"]').check();
+        }, 'Please enter a question.');
+
+        await expectInvalidQuestionSubmission(async () => {
+            await page.locator('#question-type').selectOption('multiple-choice');
+            await page.locator('#question-text').fill(QUESTIONS.multipleChoice.text);
+            await page.locator('.mcq-input[data-option="A"]').fill('Carbohydrates');
+            await page.locator('input[name="mcq-correct"][value="A"]').check();
+        }, 'Please provide at least 2 answer options.');
+
+        await expectInvalidQuestionSubmission(async () => {
+            await page.locator('#question-type').selectOption('multiple-choice');
+            await page.locator('#question-text').fill(QUESTIONS.multipleChoice.text);
+            await page.locator('.mcq-input[data-option="A"]').fill('Carbohydrates');
+            await page.locator('.mcq-input[data-option="B"]').fill('Lipids');
+        }, 'Please select the correct answer.');
+
+        await expectInvalidQuestionSubmission(async () => {
+            await page.locator('#question-type').selectOption('true-false');
+            await page.locator('#question-text').fill(QUESTIONS.trueFalse.text);
+        }, 'Please select the correct answer.');
+
+        await expectInvalidQuestionSubmission(async () => {
+            await page.locator('#question-type').selectOption('short-answer');
+            await page.locator('#question-text').fill(QUESTIONS.shortAnswer.text);
+        }, 'Please provide the expected answer or key points.');
+    });
+
+    test('blocks impossible pass thresholds before completing onboarding', async ({ page }) => {
+        test.setTimeout(120_000);
+
+        await mockFastSuccessfulUploads(page);
+        await startCustomCourse(page, `${COURSE_NAME} Threshold Validation`);
+        await addLearningObjective(page);
+        await page.locator('#substep-objectives button.btn-primary', { hasText: 'Continue to Course Materials' }).click();
+        await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
+        await uploadRequiredMaterial(page, 0, page.locator('#lecture-status'), LECTURE_FIXTURE);
+        await uploadRequiredMaterial(page, 1, page.locator('#practice-status'), PRACTICE_FIXTURE);
+        await page.locator('#substep-materials button.btn-primary', { hasText: 'Continue to Probing Questions' }).click();
+        await expect(page.locator('#substep-questions.guided-substep.active')).toBeVisible();
+        await addQuestion(page, QUESTIONS.trueFalse);
+
+        await page.locator('#pass-threshold-onboarding').fill('11');
+        await page.locator('#substep-questions button.btn-primary', { hasText: 'Complete Unit 1 & Continue' }).click();
+
+        // Product requirement: threshold cannot exceed the number of questions and cannot be persisted as complete.
+        await expect(page.locator('#substep-questions.guided-substep.active')).toBeVisible();
+        await expect(page).toHaveURL(/\/instructor\/onboarding/);
+        await expect(page.getByText('Pass threshold cannot exceed the number of assessment questions.')).toBeVisible();
+
+        const apiCtx = await apiContextFromPage(page);
+        try {
+            const { course, unit1 } = await getOnlyCourseDetail(apiCtx);
+            expect(course.isOnboardingComplete).toBe(false);
+            expect(unit1.passThreshold).not.toBe(11);
+        } finally {
+            await apiCtx.dispose();
+        }
+    });
+
+    test('replaces an existing lecture-notes upload instead of attaching duplicates', async ({ page }) => {
+        test.setTimeout(150_000);
+
+        page.on('dialog', dialog => dialog.accept());
+        await page.route('**/api/courses/*/extract-topics', async route => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    success: true,
+                    data: {
+                        topics: ['E2E Replacement Topic'],
+                    },
+                }),
+            });
+        });
+
+        await startCustomCourse(page, `${COURSE_NAME} Upload Replacement`);
+        await addLearningObjective(page);
+        await page.locator('#substep-objectives button.btn-primary', { hasText: 'Continue to Course Materials' }).click();
+        await expect(page.locator('#substep-materials.guided-substep.active')).toBeVisible();
+
+        await uploadRequiredMaterial(page, 0, page.locator('#lecture-status'), LECTURE_FIXTURE);
+        await uploadRequiredMaterial(page, 0, page.locator('#lecture-status'), PRACTICE_FIXTURE);
+
+        const apiCtx = await apiContextFromPage(page);
+        try {
+            const { unit1 } = await getOnlyCourseDetail(apiCtx);
+            const lectureDocuments = unit1.documents.filter(document => document.documentType === 'lecture-notes');
+
+            // Product requirement: replacing lecture notes leaves exactly one current lecture-notes document attached.
+            expect(lectureDocuments).toHaveLength(1);
+            expect(lectureDocuments[0].title).toBe('Lecture Notes - Unit 1');
+            expect(lectureDocuments[0].documentId).toBeTruthy();
         } finally {
             await apiCtx.dispose();
         }
