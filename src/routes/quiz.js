@@ -206,9 +206,14 @@ router.post('/check-answer', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Question not found' });
         }
 
-        // MC and TF: direct comparison, no LLM needed
+        // MC and TF: direct comparison, no LLM needed.
+        // Coerce both sides to strings so the comparison works whether the
+        // stored correctAnswer is a string ("true"/"false"/"C"), a boolean,
+        // or a numeric index — see tests/e2e/FINDINGS.md for the schema
+        // history this defends against.
         if (question.questionType === 'multiple-choice' || question.questionType === 'true-false') {
-            const correct = studentAnswer.toLowerCase() === question.correctAnswer.toLowerCase();
+            const correct = String(studentAnswer).trim().toLowerCase()
+                === String(question.correctAnswer).trim().toLowerCase();
             const feedback = correct
                 ? 'Correct! Well done.'
                 : `Incorrect. The correct answer is ${question.correctAnswer}.`;

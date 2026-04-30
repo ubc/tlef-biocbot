@@ -1315,8 +1315,12 @@ router.post('/check-practice-answer', async (req, res) => {
                 }
             });
         } else {
-            // MCQ or TF — simple string comparison
-            const correct = studentAnswer.trim().toLowerCase() === correctAnswer.trim().toLowerCase();
+            // MCQ or TF — string comparison.
+            // Coerce both sides so the comparison works whether the stored
+            // correctAnswer is a string, boolean, or numeric index — see
+            // tests/e2e/FINDINGS.md.
+            const correct = String(studentAnswer).trim().toLowerCase()
+                === String(correctAnswer).trim().toLowerCase();
             const feedback = correct
                 ? 'Correct! Well done.'
                 : `Incorrect. The correct answer is ${correctAnswer}.`;
