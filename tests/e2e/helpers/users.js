@@ -27,6 +27,13 @@ const TEST_USERS = {
         displayName: 'E2E TA',
         landingPath: '/ta',
     },
+    instructor_fresh: {
+        username: 'e2e_instructor_fresh',
+        email: 'e2e-instructor-fresh@test.local',
+        role: 'instructor',
+        displayName: 'E2E Instructor (Fresh)',
+        landingPath: '/instructor/home',
+    },
 };
 
 function storageStatePath(role) {
