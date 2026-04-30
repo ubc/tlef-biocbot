@@ -10,7 +10,10 @@
     "dev:client": "browser-sync start --proxy 'http://localhost:8085' --files 'public'",
     "diagnose": "node diagnose.js",
     "grant:system-admin": "node scripts/grant-system-admin.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "test:report": "playwright show-report"
   },
   "keywords": [],
   "author": "",
@@ -40,6 +43,7 @@
     "ubc-genai-toolkit-llm": "^0.2.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "browser-sync": "^3.0.4",
     "cross-env": "^7.0.3",
     "nodemon": "^3.1.10",
