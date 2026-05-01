@@ -2733,6 +2733,7 @@ async function completeUnit1Setup() {
     
     if (objectives.length === 0) {
         showNotification('Please add at least one learning objective before continuing.', 'error');
+        onboardingState.isSubmitting = false;
         return;
     }
     
@@ -2742,6 +2743,14 @@ async function completeUnit1Setup() {
     
     if (lectureStatus.textContent === 'Not Uploaded' || practiceStatus.textContent === 'Not Uploaded') {
         showNotification('Please upload required materials (Lecture Notes and Practice Questions) before continuing.', 'error');
+        onboardingState.isSubmitting = false;
+        return;
+    }
+
+    const questions = assessmentQuestions.Onboarding || [];
+    if (questions.length === 0) {
+        showNotification('Please add at least one assessment question before continuing.', 'error');
+        onboardingState.isSubmitting = false;
         return;
     }
     
