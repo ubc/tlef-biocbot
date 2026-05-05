@@ -217,6 +217,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Wait for authentication to be ready
     await waitForAuth();
+
+    if (typeof isSystemAdmin === 'function' && !isSystemAdmin()) {
+        showErrorState('Only admins can access student chat downloads.');
+        setTimeout(() => {
+            window.location.href = '/instructor/home';
+        }, 1500);
+        return;
+    }
     
     // Load the current course (the one the instructor is in)
     await loadCurrentCourse();

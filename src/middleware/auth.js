@@ -4,6 +4,7 @@
  */
 
 const AuthService = require('../services/authService');
+const { hasSystemAdminAccess } = require('../services/authorization');
 
 /**
  * Initialize authentication middleware
@@ -280,6 +281,65 @@ function createAuthMiddleware(db) {
     }
 
     /**
+     * Middleware to require platform system admin access.
+     */
+    async function requireSystemAdmin(req, res, next) {
+        try {
+            let user = req.user;
+
+            if (!user) {
+                if (!req.session || !req.session.userId) {
+                    if (req.path.startsWith('/api/')) {
+                        return res.status(401).json({
+                            success: false,
+                            error: 'Authentication required',
+                            redirect: '/login'
+                        });
+                    }
+                    return res.redirect('/login');
+                }
+
+                user = await authService.getUserById(req.session.userId);
+                if (!user) {
+                    req.session.destroy();
+                    if (req.path.startsWith('/api/')) {
+                        return res.status(401).json({
+                            success: false,
+                            error: 'User not found',
+                            redirect: '/login'
+                        });
+                    }
+                    return res.redirect('/login');
+                }
+
+                req.user = user;
+            }
+
+            if (!hasSystemAdminAccess(user)) {
+                if (req.path.startsWith('/api/')) {
+                    return res.status(403).json({
+                        success: false,
+                        error: 'Access denied. System admin access required.'
+                    });
+                }
+
+                return res.redirect('/instructor/home');
+            }
+
+            next();
+        } catch (error) {
+            console.error('Error in requireSystemAdmin middleware:', error);
+            if (req.path.startsWith('/api/')) {
+                return res.status(500).json({
+                    success: false,
+                    error: 'Authentication error'
+                });
+            }
+            return res.redirect('/login');
+        }
+    }
+
+    /**
      * Middleware to populate user data in request
      * Works with Passport.js (req.user is already populated) and falls back to session
      * @param {Object} req - Express request object
@@ -532,6 +592,7 @@ function createAuthMiddleware(db) {
         requireStudent,
         requireTA,
         requireInstructorOrTA,
+        requireSystemAdmin,
         populateUser,
         redirectIfAuthenticated,
         requireCourseContext,

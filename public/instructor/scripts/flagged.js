@@ -292,7 +292,16 @@ async function setupSidebarForUserRole() {
         
         instructorNavItems.forEach(id => {
             const element = document.getElementById(id);
-            if (element) element.style.display = 'block';
+            if (!element) return;
+
+            if (id === 'instructor-downloads-nav') {
+                element.style.display = typeof isSystemAdmin === 'function' && isSystemAdmin()
+                    ? 'block'
+                    : 'none';
+                return;
+            }
+
+            element.style.display = 'block';
         });
         
         // Update user info for instructor
