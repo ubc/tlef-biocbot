@@ -84,16 +84,16 @@ async function fetchCourseId() {
         
         // Check if user is TA or instructor using the isTA function
         let apiEndpoint;
-        let isTA = false;
+        let isTAUser = false;
         
         if (typeof isTA === 'function' && isTA()) {
             console.log(`🔍 [GET_COURSE_ID] Fetching courses for TA: ${userId}`);
             apiEndpoint = `/api/courses/ta/${userId}`;
-            isTA = true;
+            isTAUser = true;
         } else {
             console.log(`🔍 [GET_COURSE_ID] Fetching courses for instructor: ${userId}`);
             apiEndpoint = `/api/onboarding/instructor/${userId}`;
-            isTA = false;
+            isTAUser = false;
         }
         
         const response = await fetch(apiEndpoint, {
@@ -107,7 +107,7 @@ async function fetchCourseId() {
             console.log(`🔍 [GET_COURSE_ID] API response:`, result);
             
             let courses = [];
-            if (isTA) {
+            if (isTAUser) {
                 courses = result.data || [];
             } else {
                 courses = result.data && result.data.courses ? result.data.courses : [];
@@ -370,9 +370,16 @@ async function checkTAPermissionsAndNavigate(feature, targetPage) {
             return;
         }
         
-        // Check permissions for each course
+        const selectedCourseId = localStorage.getItem('selectedCourseId');
+        const selectedCourse = courses.find(course => course.courseId === selectedCourseId) || courses[0];
+
+        // Check permissions for the currently selected course
         let hasPermission = false;
         for (const course of courses) {
+            if (course.courseId !== selectedCourse.courseId) {
+                continue;
+            }
+
             const permResponse = await authenticatedFetch(`/api/courses/${course.courseId}/ta-permissions/${taId}`);
             
             if (permResponse.ok) {
@@ -388,7 +395,6 @@ async function checkTAPermissionsAndNavigate(feature, targetPage) {
             } else {
                 // Default permissions if not set
                 hasPermission = true;
-                break;
             }
         }
         
@@ -398,9 +404,8 @@ async function checkTAPermissionsAndNavigate(feature, targetPage) {
             return;
         }
         
-        // Navigate to the first assigned course
-        const firstCourse = courses[0];
-        window.location.href = `${targetPage}?courseId=${firstCourse.courseId}`;
+        localStorage.setItem('selectedCourseId', selectedCourse.courseId);
+        window.location.href = `${targetPage}?courseId=${encodeURIComponent(selectedCourse.courseId)}`;
         
     } catch (error) {
         console.error('Error checking TA permissions:', error);
@@ -438,9 +443,10 @@ async function getTACoursesAndNavigate(targetPage) {
             return;
         }
         
-        // Navigate to the first assigned course
-        const firstCourse = courses[0];
-        window.location.href = `${targetPage}?courseId=${firstCourse.courseId}`;
+        const selectedCourseId = localStorage.getItem('selectedCourseId');
+        const selectedCourse = courses.find(course => course.courseId === selectedCourseId) || courses[0];
+        localStorage.setItem('selectedCourseId', selectedCourse.courseId);
+        window.location.href = `${targetPage}?courseId=${encodeURIComponent(selectedCourse.courseId)}`;
         
     } catch (error) {
         console.error('Error loading TA courses:', error);

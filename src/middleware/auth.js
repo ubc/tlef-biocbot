@@ -377,9 +377,25 @@ function createAuthMiddleware(db) {
                 }
 
                 const taId = req.user.userId;
-                const courseId = req.query.courseId;
+                let courseId = req.query.courseId ||
+                    (req.body && req.body.courseId) ||
+                    (req.params && req.params.courseId) ||
+                    req.user.preferences?.courseId;
 
                 if (!courseId) {
+                    const CourseModel = require('../models/Course');
+                    const courses = await CourseModel.getCoursesForUser(db, taId, 'ta');
+
+                    if (courses.length === 1) {
+                        courseId = courses[0].courseId;
+                    }
+                }
+
+                if (!courseId) {
+                    if (!req.path.startsWith('/api/')) {
+                        return res.redirect('/ta');
+                    }
+
                     return res.status(400).json({
                         success: false,
                         message: 'Course ID is required to check TA permissions'
