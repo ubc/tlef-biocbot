@@ -6,25 +6,11 @@
 let instructorCourses = [];
 let currentStudents = [];
 let currentTAs = []; // Store TAs for the current course
+let anonymizeStudentsEnabled = false;
 const dirtyEnrollment = new Map(); // studentId -> boolean (enrolled)
 
 document.addEventListener('DOMContentLoaded', async function() {
     await waitForAuth();
-
-    // Check if anonymize students is enabled - redirect away if so
-    try {
-        const courseId = getCurrentCourseId();
-        if (courseId) {
-            const anonRes = await fetch(`/api/settings/anonymize-students?courseId=${courseId}`);
-            const anonData = await anonRes.json();
-            if (anonData.success && anonData.enabled) {
-                window.location.href = '/instructor/home';
-                return;
-            }
-        }
-    } catch (e) {
-        // On error, continue loading normally
-    }
 
     initializeStudentHub();
     await loadInstructorCourses();
@@ -81,6 +67,8 @@ async function loadInstructorCourses() {
 
 async function loadStudents(courseId) {
     try {
+        await loadAnonymizeStudentsSetting(courseId);
+
         // 1. Fetch Students
         const studentsResponse = await authenticatedFetch(`/api/courses/${courseId}/students`);
         if (!studentsResponse.ok) throw new Error(`HTTP ${studentsResponse.status}`);
@@ -138,6 +126,22 @@ async function loadStudents(courseId) {
     }
 }
 
+async function loadAnonymizeStudentsSetting(courseId) {
+    anonymizeStudentsEnabled = false;
+
+    if (!courseId) {
+        return;
+    }
+
+    try {
+        const anonRes = await fetch(`/api/settings/anonymize-students?courseId=${courseId}`);
+        const anonData = await anonRes.json();
+        anonymizeStudentsEnabled = anonData.success && anonData.enabled === true;
+    } catch (e) {
+        anonymizeStudentsEnabled = false;
+    }
+}
+
 function renderStudents(courseId) {
     const container = document.getElementById('students-container');
     if (!container) return;
@@ -150,6 +154,22 @@ function renderStudents(courseId) {
     container.innerHTML = currentStudents.map(s => {
         const enrolled = dirtyEnrollment.has(s.userId) ? dirtyEnrollment.get(s.userId) : !!s.enrolled;
         const isTA = !!s.isTA;
+        const struggleTopicsSection = anonymizeStudentsEnabled ? '' : `
+                    <div class="struggle-topics-section" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <strong>Struggle Topics</strong>
+                            ${s.struggleState && s.struggleState.topics && s.struggleState.topics.length > 0
+                                ? `<button class="btn-small btn-secondary download-struggle-btn"
+                                     onclick="downloadStruggleReport('${escapeHTML(s.userId)}', '${escapeHTML(s.displayName || s.username)}')">
+                                     Download Report
+                                   </button>`
+                                : ''
+                            }
+                        </div>
+
+                        ${renderStruggleTopics(s.struggleState)}
+                    </div>
+        `;
         
         return `
             <div class="student-card ${isTA ? 'ta-card' : ''}" style="${isTA ? 'border-left: 4px solid #17a2b8;' : ''}">
@@ -163,22 +183,7 @@ function renderStudents(courseId) {
                     <p><strong>Username:</strong> ${escapeHTML(s.username || '—')}</p>
                     <p><strong>Email:</strong> ${escapeHTML(s.email || '—')}</p>
                     <p><strong>Last Login:</strong> ${s.lastLogin ? new Date(s.lastLogin).toLocaleString() : '—'}</p>
-                    
-                    <!-- Struggle Topics Section -->
-                    <div class="struggle-topics-section" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 10px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                            <strong>Struggle Topics</strong>
-                            ${s.struggleState && s.struggleState.topics && s.struggleState.topics.length > 0 
-                                ? `<button class="btn-small btn-secondary download-struggle-btn" 
-                                     onclick="downloadStruggleReport('${escapeHTML(s.userId)}', '${escapeHTML(s.displayName || s.username)}')">
-                                     Download Report
-                                   </button>` 
-                                : ''
-                            }
-                        </div>
-                        
-                        ${renderStruggleTopics(s.struggleState)}
-                    </div>
+                    ${struggleTopicsSection}
                 </div>
                 <div class="student-actions">
                     <label class="enroll-toggle">
@@ -426,5 +431,4 @@ window.downloadStruggleReport = function(studentId, studentName) {
 function capitalize(str) {
     return str.charAt(0).toUpperCase() + str.slice(1);
 }
-
 

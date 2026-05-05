@@ -260,6 +260,10 @@ app.get('/test-qdrant', async (req, res) => {
  * Set up protected routes after authentication middleware is initialized
  */
 function setupProtectedRoutes() {
+    app.get('/instructor/downloads.html', authMiddleware.requireInstructorOrTA, authMiddleware.requireSystemAdmin, (req, res) => {
+        res.sendFile(path.join(__dirname, '../public/instructor/downloads.html'));
+    });
+
     // Protected static files
     app.use('/student', authMiddleware.requireStudent, express.static(path.join(__dirname, '../public/student')));
     app.use('/instructor', authMiddleware.requireInstructorOrTA, express.static(path.join(__dirname, '../public/instructor')));
@@ -371,7 +375,7 @@ function setupProtectedRoutes() {
         res.sendFile(path.join(__dirname, '../public/instructor/flagged.html'));
     });
 
-    app.get('/instructor/downloads', authMiddleware.requireInstructorOrTA, (req, res) => {
+    app.get('/instructor/downloads', authMiddleware.requireInstructorOrTA, authMiddleware.requireSystemAdmin, (req, res) => {
         res.sendFile(path.join(__dirname, '../public/instructor/downloads.html'));
     });
 

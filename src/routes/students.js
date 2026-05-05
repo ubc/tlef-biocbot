@@ -5,9 +5,30 @@
 
 const express = require('express');
 const router = express.Router();
+const { hasSystemAdminAccess } = require('../services/authorization');
 
 // Middleware to parse JSON bodies
 router.use(express.json());
+
+function requireDownloadAdmin(user, res) {
+    if (!user) {
+        res.status(401).json({
+            success: false,
+            message: 'Authentication required'
+        });
+        return false;
+    }
+
+    if (user.role !== 'instructor' || !hasSystemAdminAccess(user)) {
+        res.status(403).json({
+            success: false,
+            message: 'Only system admins can access student chat download data'
+        });
+        return false;
+    }
+
+    return true;
+}
 
 /**
  * Calculate duration from session data (first user message to last bot response)
@@ -86,14 +107,6 @@ router.get('/:courseId', async (req, res) => {
             });
         }
         
-        // Only instructors can access student data
-        if (user.role !== 'instructor') {
-            return res.status(403).json({
-                success: false,
-                message: 'Only instructors can access student data'
-            });
-        }
-        
         // Get database instance from app.locals
         const db = req.app.locals.db;
         if (!db) {
@@ -101,6 +114,10 @@ router.get('/:courseId', async (req, res) => {
                 success: false,
                 message: 'Database connection not available'
             });
+        }
+
+        if (!requireDownloadAdmin(user, res)) {
+            return;
         }
         
         // Verify the instructor has access to this course
@@ -246,7 +263,13 @@ router.get('/:courseId/:studentId/sessions/own', async (req, res) => {
             });
         }
         
-        // Instructors can access any student's sessions
+        if (user.role === 'instructor' && !hasSystemAdminAccess(user)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only system admins can access student chat download data'
+            });
+        }
+
         if (user.role !== 'instructor' && user.role !== 'student') {
             return res.status(403).json({
                 success: false,
@@ -349,14 +372,6 @@ router.get('/:courseId/:studentId/sessions', async (req, res) => {
             });
         }
         
-        // Only instructors can access student data
-        if (user.role !== 'instructor') {
-            return res.status(403).json({
-                success: false,
-                message: 'Only instructors can access student data'
-            });
-        }
-        
         // Get database instance from app.locals
         const db = req.app.locals.db;
         if (!db) {
@@ -364,6 +379,10 @@ router.get('/:courseId/:studentId/sessions', async (req, res) => {
                 success: false,
                 message: 'Database connection not available'
             });
+        }
+
+        if (!requireDownloadAdmin(user, res)) {
+            return;
         }
         
         // Verify the instructor has access to this course
@@ -439,14 +458,6 @@ router.get('/:courseId/:studentId/sessions/:sessionId', async (req, res) => {
             });
         }
         
-        // Only instructors can access student data
-        if (user.role !== 'instructor') {
-            return res.status(403).json({
-                success: false,
-                message: 'Only instructors can access student data'
-            });
-        }
-        
         // Get database instance from app.locals
         const db = req.app.locals.db;
         if (!db) {
@@ -454,6 +465,10 @@ router.get('/:courseId/:studentId/sessions/:sessionId', async (req, res) => {
                 success: false,
                 message: 'Database connection not available'
             });
+        }
+
+        if (!requireDownloadAdmin(user, res)) {
+            return;
         }
         
         // Verify the instructor has access to this course
