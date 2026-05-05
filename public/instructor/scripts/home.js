@@ -120,6 +120,19 @@ async function checkOnboardingStatus() {
             console.log('No instructor ID found');
             return false;
         }
+
+        if (typeof isTA === 'function' && isTA()) {
+            const response = await authenticatedFetch(`/api/courses/ta/${instructorId}`);
+
+            if (!response.ok) {
+                console.error('Failed to fetch TA courses');
+                return false;
+            }
+
+            const result = await response.json();
+            const courses = result.success ? (result.data || []) : [];
+            return courses.length > 0;
+        }
         
         console.log(`Checking onboarding status for instructor: ${instructorId}`);
         
@@ -1417,9 +1430,21 @@ async function initializeCourseSelection() {
     const courseSelectDropdown = document.getElementById('course-select-dropdown');
     const joinCourseSelectDropdown = document.getElementById('join-course-select-dropdown');
     const instructorCodeInput = document.getElementById('instructor-course-code-input');
+    const isTAUser = typeof isTA === 'function' && isTA();
 
-    canBypassInstructorCourseCodes = await checkCourseCodeBypassPermission();
-    applyInstructorCodeJoinPermissions();
+    if (isTAUser) {
+        const joinCourseGroup = joinCourseSelectDropdown?.closest('div');
+        if (joinCourseGroup) {
+            joinCourseGroup.style.display = 'none';
+        }
+        if (joinCourseBtn) {
+            joinCourseBtn.style.display = 'none';
+        }
+        applyInstructorCodeJoinPermissions();
+    } else {
+        canBypassInstructorCourseCodes = await checkCourseCodeBypassPermission();
+        applyInstructorCodeJoinPermissions();
+    }
     
     if (changeCourseBtn) {
         changeCourseBtn.addEventListener('click', showCourseSelector);
@@ -1453,7 +1478,7 @@ async function initializeCourseSelection() {
     
     await Promise.all([
         loadAvailableCourses(),
-        loadJoinableCourses()
+        isTAUser ? Promise.resolve() : loadJoinableCourses()
     ]);
     
     // Load and display current course
@@ -1654,14 +1679,18 @@ async function loadCurrentCourse() {
         const courseId = courseIdFromUrl || courseIdFromStorage;
         
         if (!courseId) {
-            // Try to get the first course from instructor's courses
-            const instructorId = getCurrentInstructorId();
-            if (instructorId) {
-                const response = await authenticatedFetch(`/api/onboarding/instructor/${instructorId}`);
+            // Try to get the first course from the user's courses
+            const userId = getCurrentInstructorId();
+            if (userId) {
+                const isTAUser = typeof isTA === 'function' && isTA();
+                const response = await authenticatedFetch(
+                    isTAUser ? `/api/courses/ta/${userId}` : `/api/onboarding/instructor/${userId}`
+                );
                 if (response.ok) {
                     const result = await response.json();
-                    if (result.data && result.data.courses && result.data.courses.length > 0) {
-                        const firstCourse = dedupeCourses(result.data.courses)[0];
+                    const courses = isTAUser ? (result.data || []) : (result.data?.courses || []);
+                    if (courses.length > 0) {
+                        const firstCourse = dedupeCourses(courses)[0];
                         await setSelectedCourse(firstCourse.courseId, getCourseDisplayName(firstCourse));
                         return;
                     }

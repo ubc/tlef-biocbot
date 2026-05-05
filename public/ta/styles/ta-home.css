@@ -19,6 +19,68 @@
     font-weight: 600;
 }
 
+.section-title-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+}
+
+.section-title-row h2 {
+    margin-bottom: 0;
+}
+
+.course-select-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: min(100%, 340px);
+}
+
+.course-select-control label {
+    color: #495057;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.ta-course-select {
+    width: 100%;
+    min-height: 42px;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    background: white;
+    color: #2c3e50;
+    padding: 8px 12px;
+    font-size: 0.95rem;
+}
+
+.selected-course-summary {
+    display: grid;
+    grid-template-columns: minmax(180px, 2fr) minmax(160px, 1fr) minmax(100px, auto);
+    gap: 16px;
+    margin-top: 18px;
+    padding-top: 18px;
+    border-top: 1px solid #e9ecef;
+}
+
+.selected-course-summary > div {
+    min-width: 0;
+}
+
+.summary-label {
+    display: block;
+    margin-bottom: 4px;
+    color: #6c757d;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+#selected-course-name,
+#selected-course-id {
+    overflow-wrap: anywhere;
+}
+
 /* Content Header */
 .content-header {
     margin-bottom: 32px;
@@ -60,6 +122,24 @@
     border-color: #007bff;
 }
 
+.course-card.selected {
+    background: #f4f9ff;
+    border-color: #007bff;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.12);
+}
+
+.course-card:focus-visible {
+    outline: 3px solid rgba(0, 123, 255, 0.35);
+    outline-offset: 2px;
+}
+
+.course-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
 .course-card h3 {
     margin: 0 0 8px 0;
     color: #2c3e50;
@@ -96,6 +176,47 @@
 .course-status.inactive {
     background: #f8d7da;
     color: #721c24;
+}
+
+.course-permissions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.permission-pill {
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.permission-pill.allowed {
+    background: #e7f3ff;
+    color: #075a9c;
+}
+
+.permission-pill.denied {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.course-select-button {
+    width: 100%;
+    min-height: 40px;
+    margin-top: 16px;
+    border: 1px solid #007bff;
+    border-radius: 6px;
+    background: white;
+    color: #0056b3;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.course-card.selected .course-select-button {
+    background: #007bff;
+    color: white;
 }
 
 /* No Courses Message */
@@ -233,6 +354,16 @@
     .dashboard-section {
         padding: 16px;
         margin-bottom: 16px;
+    }
+
+    .section-title-row,
+    .course-select-control {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .selected-course-summary {
+        grid-template-columns: 1fr;
     }
     
     .content-header h1 {

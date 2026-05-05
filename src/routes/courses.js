@@ -566,7 +566,7 @@ router.get('/', async (req, res) => {
 
 /**
  * GET /api/courses/statistics
- * Get aggregated statistics for all instructor courses
+ * Get aggregated statistics for all instructor/TA courses
  * NOTE: This route must come before /:courseId to avoid route matching issues
  */
 router.get('/statistics', async (req, res) => {
@@ -580,11 +580,11 @@ router.get('/statistics', async (req, res) => {
             });
         }
         
-        // Only instructors can access statistics
-        if (user.role !== 'instructor') {
+        // Only instructors and assigned TAs can access statistics
+        if (user.role !== 'instructor' && user.role !== 'ta') {
             return res.status(403).json({
                 success: false,
-                message: 'Only instructors can access statistics'
+                message: 'Only instructors and TAs can access statistics'
             });
         }
         
@@ -600,14 +600,18 @@ router.get('/statistics', async (req, res) => {
         // Get courseId from query params if provided
         const { courseId: requestedCourseId } = req.query;
         
-        // Get all courses for this instructor
+        // Get all courses for this instructor or TA
         const coursesCollection = db.collection('courses');
-        let coursesQuery = {
-            $or: [
+        let coursesQuery = { status: { $ne: 'deleted' } };
+
+        if (user.role === 'instructor') {
+            coursesQuery.$or = [
                 { instructorId: user.userId },
                 { instructors: user.userId }
-            ]
-        };
+            ];
+        } else {
+            coursesQuery.tas = user.userId;
+        }
         
         // If a specific courseId is requested, filter to that course
         if (requestedCourseId) {
@@ -2647,8 +2651,8 @@ router.get('/:courseId/students', async (req, res) => {
         if (!user) {
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
-        if (user.role !== 'instructor') {
-            return res.status(403).json({ success: false, message: 'Only instructors can view students' });
+        if (user.role !== 'instructor' && user.role !== 'ta') {
+            return res.status(403).json({ success: false, message: 'Only instructors and TAs can view students' });
         }
 
         // DB
@@ -2657,10 +2661,18 @@ router.get('/:courseId/students', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        // Check instructor access to the course
-        const hasAccess = await CourseModel.userHasCourseAccess(db, courseId, user.userId, 'instructor');
+        // Check course access. TAs may access inactive courses as long as they remain assigned.
+        const accessRole = user.role === 'ta' ? 'ta' : 'instructor';
+        const hasAccess = await CourseModel.userHasCourseAccess(db, courseId, user.userId, accessRole);
         if (!hasAccess) {
-            return res.status(403).json({ success: false, message: 'Access denied. You can only view your own courses.' });
+            return res.status(403).json({ success: false, message: 'Access denied. You can only view courses you have access to.' });
+        }
+
+        if (user.role === 'ta') {
+            const canAccessFlags = await CourseModel.checkTAPermission(db, courseId, user.userId, 'flags');
+            if (!canAccessFlags) {
+                return res.status(403).json({ success: false, message: 'Access denied. You do not have permission to view student flags for this course.' });
+            }
         }
 
         // Gather students by union of:

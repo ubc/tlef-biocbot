@@ -48,6 +48,35 @@
                 <p>Welcome to your teaching assistant dashboard</p>
             </div>
 
+            <!-- Course Selection -->
+            <div class="dashboard-section course-picker-section" id="ta-course-picker-section" style="display: none;">
+                <div class="section-title-row">
+                    <div>
+                        <h2>Selected Course</h2>
+                    </div>
+                    <div class="course-select-control">
+                        <label for="ta-course-select">Course</label>
+                        <select id="ta-course-select" class="ta-course-select">
+                            <option value="">Choose a course...</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="selected-course-summary" id="selected-course-summary" aria-live="polite">
+                    <div>
+                        <span class="summary-label">Course</span>
+                        <strong id="selected-course-name">No course selected</strong>
+                    </div>
+                    <div>
+                        <span class="summary-label">Course ID</span>
+                        <span id="selected-course-id">-</span>
+                    </div>
+                    <div>
+                        <span class="summary-label">Status</span>
+                        <span class="course-status active" id="selected-course-status">Active</span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Course Overview -->
             <div class="dashboard-section">
                 <h2>My Courses</h2>

@@ -15,6 +15,31 @@ function getCourseDisplayName(course = {}) {
     return isCourseInactive(course) ? `${courseName} (Inactive)` : courseName;
 }
 
+function getSelectedOrFirstTACourseId() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const candidates = [
+        urlParams.get('courseId'),
+        localStorage.getItem('selectedCourseId'),
+        getCurrentUser()?.preferences?.courseId
+    ];
+
+    return candidates.find(courseId => courseId && taCourses.some(course => course.courseId === courseId))
+        || taCourses[0]?.courseId
+        || null;
+}
+
+function navigateToTACourse(path) {
+    const courseId = getSelectedOrFirstTACourseId();
+
+    if (!courseId) {
+        showNotification('No courses available. Contact your instructor.', 'warning');
+        return;
+    }
+
+    localStorage.setItem('selectedCourseId', courseId);
+    window.location.href = `${path}?courseId=${encodeURIComponent(courseId)}`;
+}
+
 document.addEventListener('DOMContentLoaded', async function() {
     console.log('🚀 [TA SETTINGS] Page loaded');
     
@@ -250,17 +275,7 @@ function setupTANavigationHandlers() {
             e.preventDefault();
             console.log('🔍 [TA SETTINGS] My Courses clicked');
             
-            // Get courseId from URL or use first course
-            const urlParams = new URLSearchParams(window.location.search);
-            const courseId = urlParams.get('courseId');
-            
-            if (courseId) {
-                window.location.href = `/instructor/documents?courseId=${courseId}`;
-            } else if (taCourses.length > 0) {
-                window.location.href = `/instructor/documents?courseId=${taCourses[0].courseId}`;
-            } else {
-                showNotification('No courses available. Contact your instructor.', 'warning');
-            }
+            navigateToTACourse('/instructor/documents');
         });
     }
     
@@ -271,17 +286,7 @@ function setupTANavigationHandlers() {
             e.preventDefault();
             console.log('🔍 [TA SETTINGS] Student Support clicked');
             
-            // Get courseId from URL or use first course
-            const urlParams = new URLSearchParams(window.location.search);
-            const courseId = urlParams.get('courseId');
-            
-            if (courseId) {
-                window.location.href = `/instructor/flagged?courseId=${courseId}`;
-            } else if (taCourses.length > 0) {
-                window.location.href = `/instructor/flagged?courseId=${taCourses[0].courseId}`;
-            } else {
-                showNotification('No courses available. Contact your instructor.', 'warning');
-            }
+            navigateToTACourse('/instructor/flagged');
         });
     }
 }

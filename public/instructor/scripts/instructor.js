@@ -1745,7 +1745,11 @@ function setupTANavigationHandlers() {
         taMyCoursesLink.addEventListener('click', (e) => {
             e.preventDefault();
             console.log('🔍 [TA NAV] My Courses clicked');
-            // Already on courses page, do nothing
+
+            const courseId = getSelectedCourseIdForTA();
+            if (courseId && !window.location.pathname.includes('/instructor/documents')) {
+                window.location.href = `/instructor/documents?courseId=${encodeURIComponent(courseId)}`;
+            }
         });
     }
     
@@ -1754,19 +1758,18 @@ function setupTANavigationHandlers() {
     console.log('🔍 [TA NAV] Looking for ta-student-support-link element:', taStudentSupportLink);
     if (taStudentSupportLink) {
         console.log('🔍 [TA NAV] Setting up TA Student Support link');
-        taStudentSupportLink.addEventListener('click', (e) => {
+        taStudentSupportLink.addEventListener('click', async (e) => {
             e.preventDefault();
             console.log('🔍 [TA NAV] Student Support clicked');
-            
-            // Get courseId from URL
-            const urlParams = new URLSearchParams(window.location.search);
-            const courseId = urlParams.get('courseId');
+
+            const courseId = getSelectedCourseIdForTA() || await getCurrentCourseId();
             console.log('🔍 [TA NAV] Current URL:', window.location.href);
-            console.log('🔍 [TA NAV] CourseId from URL:', courseId);
+            console.log('🔍 [TA NAV] Selected CourseId:', courseId);
             
             if (courseId) {
                 console.log('🔍 [TA NAV] Navigating to flagged page with courseId:', courseId);
-                window.location.href = `/instructor/flagged?courseId=${courseId}`;
+                localStorage.setItem('selectedCourseId', courseId);
+                window.location.href = `/instructor/flagged?courseId=${encodeURIComponent(courseId)}`;
             } else {
                 console.error('❌ [TA NAV] No courseId found in URL');
                 alert('No course selected. Please try again.');
@@ -1775,6 +1778,15 @@ function setupTANavigationHandlers() {
     } else {
         console.warn('⚠️ [TA NAV] TA Student Support link not found');
     }
+}
+
+function getSelectedCourseIdForTA() {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('courseId') ||
+        localStorage.getItem('selectedCourseId') ||
+        getCurrentUser()?.preferences?.courseId ||
+        window.taCourses?.[0]?.courseId ||
+        null;
 }
 
 /**
@@ -1805,6 +1817,7 @@ async function loadTAPermissions() {
         
         const courses = coursesResult.data || [];
         console.log('TA courses for permissions:', courses);
+        window.taCourses = courses;
         
         // Load permissions for each course
         const permissions = {};
@@ -1838,15 +1851,19 @@ function hasPermissionForFeature(feature) {
     if (!window.taPermissions || Object.keys(window.taPermissions).length === 0) {
         return false;
     }
-    
-    // Check permissions for all courses - if any course allows access, grant it
-    for (const courseId in window.taPermissions) {
+
+    const selectedCourseId = getSelectedCourseIdForTA();
+    const courseIds = selectedCourseId && window.taPermissions[selectedCourseId]
+        ? [selectedCourseId]
+        : Object.keys(window.taPermissions);
+
+    for (const courseId of courseIds) {
         const permissions = window.taPermissions[courseId];
         if (permissions) {
-            if (feature === 'courses' && permissions.canAccessCourses) {
+            if (feature === 'courses' && permissions.canAccessCourses !== false) {
                 return true;
             }
-            if (feature === 'flags' && permissions.canAccessFlags) {
+            if (feature === 'flags' && permissions.canAccessFlags !== false) {
                 return true;
             }
         }
