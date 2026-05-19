@@ -1124,6 +1124,13 @@ router.post('/save', async (req, res) => {
             });
         }
 
+        if (req.user?.role === 'student' && req.user.userId !== studentId) {
+            return res.status(403).json({
+                success: false,
+                message: 'You can only save chat sessions for your own account'
+            });
+        }
+
         // Get database instance from app.locals
         const db = req.app.locals.db;
         if (!db) {

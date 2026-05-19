@@ -32,6 +32,13 @@ router.get('/student/:userId', async (req, res) => {
             });
         }
 
+        if (req.user?.role === 'student' && req.user.userId !== userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'You can only view your own struggle activity'
+            });
+        }
+
         const db = req.app.locals.db;
 
         const activities = await StruggleActivity.getActivityByStudent(db, userId, {

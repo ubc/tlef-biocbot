@@ -646,6 +646,21 @@ router.delete('/:courseId/:studentId/sessions/:sessionId', async (req, res) => {
             });
         }
 
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                error: 'Authentication required'
+            });
+        }
+
+        if (user.role !== 'instructor') {
+            return res.status(403).json({
+                success: false,
+                error: 'Only instructors can delete student chat sessions'
+            });
+        }
+
         const db = req.app.locals.db;
         if (!db) {
             return res.status(500).json({

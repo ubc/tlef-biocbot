@@ -1287,9 +1287,21 @@ router.put('/:courseId', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        if (user.role !== 'instructor' || instructorId !== user.userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have permission to update this course'
+            });
+        }
         
         // Check if instructor has access to the course
-        const hasAccess = await CourseModel.userHasCourseAccess(db, courseId, instructorId, 'instructor');
+        const hasAccess = await CourseModel.userHasCourseAccess(db, courseId, user.userId, 'instructor');
         if (!hasAccess) {
             return res.status(403).json({
                 success: false,
@@ -1340,8 +1352,8 @@ router.put('/:courseId', async (req, res) => {
             { 
                 courseId,
                 $or: [
-                    { instructorId: instructorId },
-                    { instructors: instructorId }
+                    { instructorId: user.userId },
+                    { instructors: user.userId }
                 ]
             },
             { $set: updateData }
@@ -1354,7 +1366,7 @@ router.put('/:courseId', async (req, res) => {
             });
         }
         
-        console.log('Course updated in database:', { courseId, name, weeks, lecturesPerWeek, status, instructorId });
+        console.log('Course updated in database:', { courseId, name, weeks, lecturesPerWeek, status, instructorId: user.userId });
         
         res.json({
             success: true,
@@ -3064,9 +3076,21 @@ router.post('/:courseId/units', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        if (user.role !== 'instructor' || instructorId !== user.userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have permission to modify this course'
+            });
+        }
         
         // Check if instructor has access
-        const hasAccess = await CourseModel.userHasCourseAccess(db, courseId, instructorId, 'instructor');
+        const hasAccess = await CourseModel.userHasCourseAccess(db, courseId, user.userId, 'instructor');
         if (!hasAccess) {
             return res.status(403).json({
                 success: false,

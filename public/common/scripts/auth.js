@@ -204,8 +204,17 @@ function updateUserDisplay() {
  * Setup logout button handler
  */
 function setupLogoutHandler() {
+    // If a page-level Auth controller is in place (e.g. dashboard.js exposes
+    // window.Auth with its own logout, or a test installs a shim), defer to
+    // it instead of double-attaching. Without this guard, two handlers fire
+    // on the same click — one navigates and one calls the page controller —
+    // and the navigation races the page logic. See Redundancies R1d.
+    if (typeof window.Auth === 'object' && window.Auth && typeof window.Auth.logout === 'function') {
+        return;
+    }
+
     const logoutBtns = ['logout-btn', 'mobile-logout-btn'];
-    
+
     logoutBtns.forEach(id => {
         const btn = document.getElementById(id);
         if (btn) {

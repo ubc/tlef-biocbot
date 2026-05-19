@@ -96,6 +96,26 @@ Status legend: 🟥 open · 🟡 partial · ✅ fixed · ⏸ deferred
   (`showNotification`, `waitForAuth`, `removeObjective` duplicates within
   the same file).
 
+### R1d. Library auto-attaches click handlers that fight page-level controllers ✅ partial (auth.js logout fixed)
+
+- **Pattern:** A common library (`public/common/scripts/auth.js`) attaches a
+  click handler to a well-known DOM id (`#logout-btn`, `#mobile-logout-btn`)
+  on every page. Some pages (`dashboard.js`) ALSO attach their own handler
+  to delegate through a page-level controller (`window.Auth.logout()`).
+  Both fire on the same click — and the library's handler navigates the
+  page before the page-level handler's side effects can be observed.
+- **Resolution shape (used in auth.js `setupLogoutHandler`):** the library
+  now defers when a page-level controller (`window.Auth.logout`) is already
+  defined. Production behavior unchanged (no page assigns `window.Auth`
+  outside tests/dashboard's read-only use of it), but the test shim and
+  any future page-level Auth controller can now own logout cleanly.
+- **Broader pattern to audit:** any library that auto-binds to a global
+  selector (notification roots, modal anchors, mobile-nav toggles) should
+  either expose an opt-out or check for a page-level controller before
+  binding. Otherwise pages can't reliably override behavior.
+- **Source:** student-dashboard-branches.spec.js
+  `uses the page Auth shim for auth checks and logout handling` (now green).
+
 ### R2. `instructor.js` declares `showNotification` twice 🟥 open
 
 - **Where:** `public/instructor/scripts/instructor.js` lines 344 and 6753.
@@ -179,7 +199,7 @@ Status legend: 🟥 open · 🟡 partial · ✅ fixed · ⏸ deferred
 
 ## Cross-cutting pattern duplications
 
-### R10. Course-access checks: three different patterns 🟥 open
+### R10. Course-access checks: three different patterns 🟡 partial
 
 - **Where:**
   - `src/routes/courses.js` uses local `hasInstructorOrTAAccess()` /
@@ -190,7 +210,33 @@ Status legend: 🟥 open · 🟡 partial · ✅ fixed · ⏸ deferred
     #36, #37](FINDINGS.md)).
 - **Fix direction:** One canonical helper, exported from a single module,
   used by every route that takes a `courseId`.
-- **Source:** [FINDINGS #18](FINDINGS.md).
+- **Progress:**
+  - FINDING #34b fixed for `PUT /api/courses/:courseId` and
+    `POST /api/courses/:courseId/units`: legacy `instructorId` input must now
+    match `req.user.userId`, and authorization/mutation use the session user.
+  - FINDINGS #23/#24/#34 fixed for `src/routes/questions.js`: question-route
+    reads and writes now authorize from `req.user` course access instead of
+    body-supplied `instructorId`, including student, cross-instructor, and
+    TA course-permission guardrails.
+  - FINDINGS #40/#41 fixed for `src/routes/documents.js` and
+    `src/routes/qdrant.js`: direct document/vector APIs now reject students,
+    check requested-course access for instructors/TAs, and do not trust
+    body-supplied `instructorId` for document mutations.
+- **Source:** [FINDINGS #18, #23, #24, #34, #34b, #40, #41](FINDINGS.md).
+
+### R19. Student/user identity accepted from body or path ✅ fixed for chat/history cluster
+
+- **Pattern:** Routes accepted `studentId` / `userId` from request bodies or
+  URL params and used it directly as the acting identity.
+- **Fixed:**
+  - `POST /api/chat/save` rejects student attempts to save under another
+    `studentId`.
+  - `DELETE /api/students/:courseId/:studentId/sessions/:sessionId` is now
+    instructor-only; students must use the `/own` route, which already checks
+    same-user ownership.
+  - `GET /api/struggle-activity/student/:userId` rejects student attempts to
+    read another student's activity history.
+- **Source:** [FINDING #42](FINDINGS.md).
 
 ### R11. Soft-delete / inactive filtering: enforced inconsistently 🟡 partial
 

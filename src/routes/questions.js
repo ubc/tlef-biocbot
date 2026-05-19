@@ -91,6 +91,98 @@ function summarizeAutoLinkResults(matchedQuestions = []) {
     };
 }
 
+async function canReadCourseQuestions(db, courseId, user) {
+    if (!user) {
+        return false;
+    }
+
+    if (hasSystemAdminAccess(user)) {
+        return true;
+    }
+
+    if (user.role === 'ta') {
+        return CourseModel.checkTAPermission(db, courseId, user.userId, 'courses');
+    }
+
+    return CourseModel.userHasCourseAccess(db, courseId, user.userId, user.role);
+}
+
+async function canMutateCourseQuestions(db, courseId, user) {
+    if (!user) {
+        return false;
+    }
+
+    if (hasSystemAdminAccess(user)) {
+        return true;
+    }
+
+    if (user.role === 'instructor') {
+        return CourseModel.userHasCourseAccess(db, courseId, user.userId, 'instructor');
+    }
+
+    if (user.role === 'ta') {
+        return CourseModel.checkTAPermission(db, courseId, user.userId, 'courses');
+    }
+
+    return false;
+}
+
+async function requireCourseQuestionAccess(req, res, db, courseId, { mode, instructorId } = {}) {
+    const user = req.user;
+    if (!user) {
+        res.status(401).json({ success: false, message: 'Authentication required' });
+        return null;
+    }
+
+    if (mode === 'write') {
+        if (user.role === 'instructor' && instructorId && instructorId !== user.userId) {
+            res.status(403).json({
+                success: false,
+                message: 'You do not have permission to modify questions for this course'
+            });
+            return null;
+        }
+
+        const canAttemptWrite = hasSystemAdminAccess(user) || user.role === 'instructor' || user.role === 'ta';
+        if (!canAttemptWrite) {
+            res.status(403).json({
+                success: false,
+                message: 'You do not have permission to modify questions for this course'
+            });
+            return null;
+        }
+
+        const course = await db.collection('courses').findOne(
+            { courseId },
+            { projection: { _id: 1 } }
+        );
+
+        if (!course) {
+            return user;
+        }
+
+        if (!(await canMutateCourseQuestions(db, courseId, user))) {
+            res.status(403).json({
+                success: false,
+                message: 'You do not have permission to modify questions for this course'
+            });
+            return null;
+        }
+
+        return user;
+    }
+
+    if (!(await canReadCourseQuestions(db, courseId, user))) {
+        res.status(403).json({
+            success: false,
+            message: 'You do not have permission to access questions for this course'
+        });
+        return null;
+    }
+
+    return user;
+}
+
 async function linkQuestionsToLearningObjectives(llmService, learningObjectives = [], questions = [], preserveExisting = true) {
     const normalizedObjectives = (learningObjectives || [])
         .map(objective => normalizeLearningObjective(objective))
@@ -194,6 +286,12 @@ router.post('/', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const user = await requireCourseQuestionAccess(req, res, db, courseId, {
+            mode: 'write',
+            instructorId
+        });
+        if (!user) return;
         
         // Prepare question data
         const questionData = {
@@ -220,7 +318,7 @@ router.post('/', async (req, res) => {
             courseId, 
             lectureName, 
             questionData, 
-            instructorId
+            user.userId
         );
         
         if (!result.success) {
@@ -230,7 +328,7 @@ router.post('/', async (req, res) => {
             });
         }
         
-        console.log(`Question created for ${lectureName} by instructor ${instructorId}`);
+        console.log(`Question created for ${lectureName} by user ${user.userId}`);
         
         res.json({
             success: true,
@@ -278,6 +376,26 @@ router.get('/lecture', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const course = await db.collection('courses').findOne(
+            { courseId },
+            { projection: { _id: 1 } }
+        );
+
+        if (!course) {
+            return res.json({
+                success: true,
+                data: {
+                    courseId,
+                    lectureName,
+                    questions: [],
+                    count: 0
+                }
+            });
+        }
+
+        const user = await requireCourseQuestionAccess(req, res, db, courseId, { mode: 'read' });
+        if (!user) return;
         
         // Fetch questions from the course structure using Course model
         const questions = await CourseModel.getAssessmentQuestions(db, courseId, lectureName);
@@ -329,6 +447,12 @@ router.post('/auto-link-learning-objectives', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const user = await requireCourseQuestionAccess(req, res, db, courseId, {
+            mode: 'write',
+            instructorId
+        });
+        if (!user) return;
 
         const llmService = req.app.locals.llm;
         if (!llmService) {
@@ -417,7 +541,7 @@ router.post('/auto-link-learning-objectives', async (req, res) => {
                     questionId: matchedQuestion.questionId,
                     learningObjective: matchedObjective
                 },
-                instructorId || req.user?.userId || 'system'
+                user.userId
             );
 
             if (result.success) {
@@ -749,6 +873,9 @@ router.get('/:questionId', async (req, res) => {
                 message: 'Question not found'
             });
         }
+
+        const user = await requireCourseQuestionAccess(req, res, db, course.courseId, { mode: 'read' });
+        if (!user) return;
         
         // Find the specific question
         let foundQuestion = null;
@@ -804,6 +931,12 @@ router.put('/:questionId', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const user = await requireCourseQuestionAccess(req, res, db, courseId, {
+            mode: 'write',
+            instructorId
+        });
+        if (!user) return;
         
         // Prepare the updated question data
         const questionData = sanitizeQuestionPayload(rawUpdateData);
@@ -837,7 +970,7 @@ router.put('/:questionId', async (req, res) => {
             courseId,
             lectureName,
             questionData,
-            instructorId
+            user.userId
         );
         
         if (!result.success) {
@@ -892,6 +1025,12 @@ router.delete('/:questionId', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const user = await requireCourseQuestionAccess(req, res, db, courseId, {
+            mode: 'write',
+            instructorId
+        });
+        if (!user) return;
         
         // Delete the question from the course structure using Course model
         const result = await CourseModel.deleteAssessmentQuestion(
@@ -899,7 +1038,7 @@ router.delete('/:questionId', async (req, res) => {
             courseId, 
             lectureName, 
             questionId, 
-            instructorId
+            user.userId
         );
         
         if (!result.success) {
@@ -909,7 +1048,7 @@ router.delete('/:questionId', async (req, res) => {
             });
         }
         
-        console.log(`Question deleted: ${questionId} by instructor ${instructorId}`);
+        console.log(`Question deleted: ${questionId} by user ${user.userId}`);
         
         res.json({
             success: true,
@@ -952,6 +1091,12 @@ router.post('/bulk', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const user = await requireCourseQuestionAccess(req, res, db, courseId, {
+            mode: 'write',
+            instructorId
+        });
+        if (!user) return;
         
         let insertedCount = 0;
         let autoLinkedCount = 0;
@@ -1001,7 +1146,7 @@ router.post('/bulk', async (req, res) => {
                 courseId, 
                 lectureName, 
                 questionData, 
-                instructorId
+                user.userId
             );
             
             if (result.success) {

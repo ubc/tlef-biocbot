@@ -285,7 +285,7 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **Fix:** Normalize question objects at the page boundary, then render from one
   shape.
 
-### 23. Question routes trust body `instructorId` and do not check course access
+### 23. ✅ FIXED — Question routes trust body `instructorId` and do not check course access
 
 - **Where:** `src/routes/questions.js` lines 159-220, 519-551, 585-613, and
   734-803.
@@ -300,8 +300,18 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   proving authorization.
 - **Fix:** Use `req.user.userId`, ignore body `instructorId` except where a
   migration absolutely needs it, and call the canonical course-access helper.
+- **Now:** `POST /api/questions`, `PUT /api/questions/:questionId`,
+  `DELETE /api/questions/:questionId`, `POST /api/questions/bulk`, and
+  `POST /api/questions/auto-link-learning-objectives` authorize from
+  `req.user`, require real course access, and use the session user as the
+  mutation actor. Legacy `instructorId` input is still accepted for caller
+  compatibility, but a mismatched instructor body no longer authorizes a write.
+- **Failing tests (now green):** `tests/e2e/routes-questions-api.spec.js` ›
+  the FINDINGS #23 POST tests, and
+  `tests/e2e/questions-api-ownership-branches.spec.js` › cross-instructor
+  mutation tests.
 
-### 24. `GET /api/questions/:questionId` searches globally with no access check
+### 24. ✅ FIXED — `GET /api/questions/:questionId` searches globally with no access check
 
 - **Where:** `src/routes/questions.js` lines 452-503.
 - **Symptom:** The endpoint finds a question by ID across all courses and returns
@@ -311,6 +321,13 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   content across courses.
 - **Fix:** Include course context in the request, or derive the containing course
   and check `userHasCourseAccess()` before responding.
+- **Now:** After locating the containing course, the route requires the
+  authenticated user to have access to that course before returning the
+  question record. Inaccessible questions return a denial instead of raw
+  assessment content.
+- **Failing tests (now green):** `tests/e2e/routes-questions-api.spec.js` ›
+  FINDINGS #24 direct question fetch, plus
+  `tests/e2e/questions-api-ownership-branches.spec.js` read-leak coverage.
 
 ### 25. `instructor.js` runs document-page side effects on pages that only wanted settings
 
@@ -444,7 +461,7 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   "PRODUCT BUG: /stats is shadowed by /:courseId".
 - **Fix:** Move `router.get('/stats', ...)` above `router.get('/:courseId', ...)`.
 
-### 34. 🔒 `src/routes/questions.js` has no role gate or per-course access check on most verbs
+### 34. ✅ FIXED — 🔒 `src/routes/questions.js` has no role gate or per-course access check on most verbs
 
 - **Where:** Every endpoint in `src/routes/questions.js` *except*
   `POST /generate-ai` (lines 1121-1139). The router is mounted at
@@ -473,6 +490,40 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   (e.g. `requireCourseInstructorOrTA(courseId)` driven off `req.user`), drop
   body `instructorId`, and add the same access check to `GET /lecture` and
   `GET /:questionId` (already noted in FINDINGS #24).
+- **Now:** `src/routes/questions.js` uses one local helper for question-route
+  read/write course checks. Students cannot mutate questions, instructors
+  cannot mutate or list another instructor's course questions, and TAs must
+  have the course permission before direct assessment-question mutations.
+  Missing-course write requests from legitimate staff still fall through to
+  the existing model-level 400/404 behavior.
+- **Failing tests (now green):** `tests/e2e/questions-api-ownership-branches.spec.js`
+  all 15 tests; `tests/e2e/ta.spec.js` › "TA with canAccessCourses=false
+  cannot create, update, or delete assessment questions by direct API".
+
+### 34b. ✅ FIXED — 🔒 `courses.js` PUT and POST units accepted spoofed `instructorId` from body
+
+- **Where:** `src/routes/courses.js` — `PUT /api/courses/:courseId` (course
+  settings) and `POST /api/courses/:courseId/units` (add a unit). Both routes
+  accepted `instructorId` from the request and used it for authorization
+  instead of comparing to `req.user.userId`.
+- **Was:** A TA with `canAccessCourses: false` (or any authenticated
+  user who knows a courseId and the real instructor's id) can:
+  - rename the course (e.g. to "TA Spoofed Course Name"),
+  - change the course's `status` (e.g. flip 'active' → 'inactive'),
+  - add new units / lectures.
+  All return **200**, all mutations land in the database.
+- **Now:** The routes still accept legacy `instructorId` input for existing
+  caller compatibility, but it must match the authenticated session user. The
+  actual course-access check and mutation query use `req.user.userId`, so a TA
+  or mismatched instructorId gets 403 before any write.
+- **Failing test (now green):** `tests/e2e/ta.spec.js:1468` ›
+  "TA cannot spoof an instructorId to mutate instructor-only course
+  settings or units".
+- **Why it matters:** Course settings and unit structure are
+  instructor-only operations. Bypassing them lets a TA (or any session
+  with a guessed instructorId) silently sabotage a course.
+- **Pattern:** Same shape as FINDING #34 — request-body identity must not be
+  trusted for course mutations. See Redundancies R10.
 
 ### 35b. ✅ FIXED — `deleteAssessmentQuestion` returns `deletedCount: 1` even when `$pull` matched nothing
 
@@ -624,6 +675,60 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   redirect the user to `/login`, instead of leaving them stuck on the
   current page with a generic error. See Redundancies.md → R0.
 
+### 40. ✅ FIXED — 🔒 Document APIs trusted direct student access and body `instructorId`
+
+- **Where:** `src/routes/documents.js` — direct document creation, listing,
+  stats, fetch, delete, and cleanup routes.
+- **Was:** A student could call document APIs directly and either read course
+  material metadata or mutate course document state. Some mutation routes also
+  accepted body-supplied `instructorId`, so the request body could be used as
+  the authorization identity instead of the authenticated session.
+- **Now:** Document routes authorize from `req.user`, restrict direct document
+  management/read APIs to course staff, require real course access, and reject
+  instructor-body identity mismatches before writes. TA access is still
+  supported when the TA has the course permission.
+- **Failing tests (now green):** `tests/e2e/chat-rag-documents.spec.js` ›
+  "Document API permission boundaries for students", and `tests/e2e/ta.spec.js`
+  › "TA with canAccessCourses=false cannot create, upload, or delete course
+  documents by direct API".
+- **Pattern:** Same root cause as FINDINGS #23/#34/#34b: route handlers must
+  authorize from `req.user` and course membership, not request-body identity.
+  See Redundancies R10.
+
+### 41. ✅ FIXED — 🔒 Direct Qdrant APIs were reachable by students
+
+- **Where:** `src/routes/qdrant.js` — `POST /process-document`, `POST /search`,
+  `POST /cleanup-vectors`, `GET /collection-stats`, and
+  `DELETE /document/:documentId`.
+- **Was:** Direct vector-processing/search/cleanup routes had validation and
+  service-level logic but no role gate. A student session could reach them
+  through direct API calls, and course-scoped routes did not consistently
+  verify that staff access matched the requested course.
+- **Now:** Direct Qdrant routes require an authenticated instructor, TA with the
+  course permission, or system admin. Course-scoped requests check access to the
+  requested course before processing/searching/cleanup; students receive 403
+  before validation/service work.
+- **Failing tests (now green):** `tests/e2e/chat-rag-documents.spec.js` ›
+  "Qdrant API permission boundaries for students".
+- **Pattern:** Same route-level course-access gap as FINDING #40. See
+  Redundancies R10.
+
+### 42. ✅ FIXED — 🔒 Student chat/history routes trusted body or path `studentId`
+
+- **Where:** `src/routes/chat.js` `POST /api/chat/save`,
+  `src/routes/students.js` `DELETE /api/students/:courseId/:studentId/sessions/:sessionId`,
+  and `src/routes/struggle-activity.js` `GET /api/struggle-activity/student/:userId`.
+- **Was:** A logged-in student could supply another student's id in the body or
+  URL and save a chat row under that account, delete another student's session
+  through the instructor delete path, or read another student's struggle
+  activity history.
+- **Now:** Student sessions can only save/read/delete under their own user id;
+  the non-`/own` session delete route is instructor-only.
+- **Failing tests (now green):** `tests/e2e/student-chat.spec.js` ›
+  "Security — student-controlled inputs that bypass auth".
+- **Pattern:** Request body/path identity must be treated as the target record,
+  not as authorization. See Redundancies R19.
+
 ## Duplicate top-level declarations in `public/instructor/scripts/instructor.js`
 
 - `waitForAuth`: the declaration at lines 13-33 is shadowed by the later declaration at lines 6952-6969. Coverage marks the shadowed copy as uncovered.
@@ -652,6 +757,17 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   "current user resolves through an external auth helper".
 - **Pattern:** see Redundancies R1c — this is a class of footgun that will
   recur until page scripts are wrapped in IIFEs or migrated to modules.
+
+## Mobile layout initial collapsed icon ✅ FIXED
+
+- **Was:** `public/common/scripts/mobile-layout.js` always initialized the
+  toggle button icon to `▲`, even if another script or server-rendered markup
+  had already put `mobile-collapsed` on `body`.
+- **Now:** the icon is initialized from the actual `body.mobile-collapsed`
+  state before click handlers run, so the first render matches the visible
+  layout.
+- **Failing test (now green):** `tests/e2e/mobile-layout-coverage.spec.js` ›
+  "PRODUCT BUG: initial icon ignores body already in mobile-collapsed state".
 
 ## Qdrant service coverage notes
 

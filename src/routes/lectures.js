@@ -104,6 +104,25 @@ router.get('/publish-status', async (req, res) => {
         if (!user) {
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
+
+        // Distinguish "course doesn't exist" (return empty map — matches the
+        // legacy contract that course-model-branch-coverage relies on) from
+        // "course exists but caller has no access" (403). Without this split,
+        // an instructor querying a nonexistent course id would get a
+        // misleading 403.
+        const course = await CourseModel.getCourseById(db, courseId);
+        if (!course) {
+            return res.json({
+                success: true,
+                data: {
+                    instructorId,
+                    courseId,
+                    publishStatus: {},
+                    lastUpdated: new Date().toISOString()
+                }
+            });
+        }
+
         const hasAccess = await CourseModel.userHasCourseAccess(db, courseId, user.userId, user.role);
         if (!hasAccess) {
             return res.status(403).json({ success: false, message: 'No access to this course' });
