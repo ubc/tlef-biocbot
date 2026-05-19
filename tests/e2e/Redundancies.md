@@ -32,6 +32,18 @@ Status legend: 🟥 open · 🟡 partial · ✅ fixed · ⏸ deferred
 - **Impact:** Silently fixed JSON 401 behavior for *every* auth-protected
   API route, not just the three the tests called out.
 
+### R1b. `req.body` destructure without `|| {}` (Express 5 leaves it undefined) 🟡 partial
+
+- **Where:** Pattern of `const { foo } = req.body;` at the top of POST/DELETE
+  handlers. In Express 5, a request with no body / no Content-Type leaves
+  `req.body` as `undefined`, so the destructure throws and the route 500s.
+- **Progress:**
+  - `DELETE /api/courses/:courseId/units/:unitName` (FINDING #31) — fixed.
+  - `POST /api/user-agreement/agree` (FINDING #31b) — fixed.
+- **Audit follow-up:** grep for `} = req.body;` (no `|| {}`) in `src/routes/`
+  and verify each handler's tolerance to bodyless calls. Likely a few more
+  live instances.
+
 ### R1. Route ordering: static GET paths registered after `/:param` siblings ✅ fixed
 
 - **Where:** `src/routes/questions.js`, `src/routes/onboarding.js`

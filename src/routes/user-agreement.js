@@ -56,7 +56,7 @@ router.post('/agree', async (req, res) => {
         console.log('📝 [AGREEMENT] db:', req.app.locals.db);
         
         const { userId, role } = req.user;
-        const { agreementVersion = '1.0' } = req.body;
+        const { agreementVersion = '1.0' } = req.body || {};
         const db = req.app.locals.db;
         
         if (!db) {

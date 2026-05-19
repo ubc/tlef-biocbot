@@ -381,6 +381,16 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **Fix:** Pass `projection` as the second argument to `findOne`:
   `usersCollection.findOne({ userId }, { projection: { userId: 1, ... } })`.
 
+### 31b. ✅ FIXED — `POST /api/user-agreement/agree` 500s when no body sent
+
+- **Where:** `src/routes/user-agreement.js:59`.
+- **Was:** `const { agreementVersion = '1.0' } = req.body;` threw a TypeError
+  when Playwright (or any client) sent a POST with no body, because Express 5
+  leaves `req.body` undefined in that case. Same pattern as FINDING #31.
+- **Now:** `req.body || {}` — the default value path is reachable.
+- **Failing test (now green):** `tests/e2e/routes-user-agreement-api.spec.js` ›
+  "POST /agree › an empty request body (no data field) still records the default".
+
 ### 31. `DELETE /api/courses/:courseId/units/:unitName` 500s when no body sent
 
 - **Where:** `src/routes/courses.js` line 3140.
@@ -455,6 +465,21 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   (e.g. `requireCourseInstructorOrTA(courseId)` driven off `req.user`), drop
   body `instructorId`, and add the same access check to `GET /lecture` and
   `GET /:questionId` (already noted in FINDINGS #24).
+
+### 35b. ✅ FIXED — `deleteAssessmentQuestion` returns `deletedCount: 1` even when `$pull` matched nothing
+
+- **Where:** `src/models/Course.js` `deleteAssessmentQuestion` (~line 622).
+- **Was:** The update used `$pull` to remove the question and `$set` to bump
+  `updatedAt`. Because `$set` always changes the doc, `result.modifiedCount`
+  was `1` regardless of whether `$pull` actually matched. The route reported
+  `deletedCount: 1` for a no-op DELETE on an unknown questionId, and also
+  spuriously bumped the course's `updatedAt`.
+- **Now:** Existence-check the questionId in the lecture's
+  `assessmentQuestions` first. If absent, return `{ success: true,
+  deletedCount: 0 }` without touching the doc.
+- **Failing test (now green):** `tests/e2e/questions-api-ownership-branches.spec.js` ›
+  "DELETE on existing course/lecture but unknown questionId → success with
+  deletedCount=0".
 
 ### 35. `PUT /api/questions/:questionId` silently creates when the question does not exist
 
