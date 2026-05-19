@@ -13,6 +13,25 @@ Status legend: 🟥 open · 🟡 partial · ✅ fixed · ⏸ deferred
 
 ## Bug-pattern duplications (same mistake, multiple places)
 
+### R0. `req.path` vs `req.originalUrl` for "is this an API request?" ✅ fixed
+
+- **Where:** `src/middleware/auth.js` — 16 occurrences across `requireAuth`,
+  `requireRole`, `requireInstructor`, `requireSystemAdmin`,
+  `requireCourseContext`, `requireTAPermission`, etc.
+- **Why it duplicates:** Every gate copy-pasted
+  `req.path.startsWith('/api/')` to decide JSON-401 vs redirect-to-login.
+  But inside a mounted router (`app.use('/api/foo', router)`), Express
+  strips the prefix and `req.path` is `/bar`, not `/api/foo/bar`. The
+  check was always false for mounted API routes, so every auth failure
+  on an API endpoint redirected to `/login` (HTML 200) instead of
+  returning JSON 401.
+- **Resolution:** `replace_all` changed all 16 occurrences from
+  `req.path` to `req.originalUrl`. Tests for unauthenticated 401 across
+  user-agreement / mental-health-flags / struggle-activity now pass.
+- **Source:** FINDINGS candidates H + I + J.
+- **Impact:** Silently fixed JSON 401 behavior for *every* auth-protected
+  API route, not just the three the tests called out.
+
 ### R1. Route ordering: static GET paths registered after `/:param` siblings ✅ fixed
 
 - **Where:** `src/routes/questions.js`, `src/routes/onboarding.js`

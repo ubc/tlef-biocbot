@@ -110,12 +110,13 @@ test.afterAll(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// requireAuth — unauthenticated /api/* redirects (Express strips the mount
-// prefix from req.path, so `req.path.startsWith('/api/')` is always false
-// from inside the mounted middleware; the JSON-401 branches are dead).
+// requireAuth — unauthenticated /api/* returns 401 JSON. Page routes still
+// redirect to /login (see the non-API test below). FINDING #39 fixed a bug
+// where the API path also redirected because `req.path` is mount-stripped;
+// `req.originalUrl` is used now so /api/* requests get a clean JSON 401.
 // ---------------------------------------------------------------------------
 test.describe('requireAuth', () => {
-    test('GET /api/courses without session redirects to /login', async ({ baseURL }) => {
+    test('GET /api/courses without session returns 401 JSON', async ({ baseURL }) => {
         const anon = await request.newContext({
             baseURL,
             storageState: { cookies: [], origins: [] },
@@ -125,14 +126,16 @@ test.describe('requireAuth', () => {
                 maxRedirects: 0,
                 failOnStatusCode: false,
             });
-            expect(res.status()).toBe(302);
-            expect(res.headers().location || '').toContain('/login');
+            expect(res.status()).toBe(401);
+            const body = await res.json();
+            expect(body.success).toBe(false);
+            expect(body.redirect).toBe('/login');
         } finally {
             await anon.dispose();
         }
     });
 
-    test('session-fallback: deleted user redirects to /login on /api/*', async ({ baseURL }) => {
+    test('session-fallback: deleted user yields 401 JSON on /api/*', async ({ baseURL }) => {
         const { username, password } = await registerThrowaway(baseURL, 'student');
         const ctx = await request.newContext({ baseURL });
         try {
@@ -144,8 +147,10 @@ test.describe('requireAuth', () => {
                 maxRedirects: 0,
                 failOnStatusCode: false,
             });
-            expect(res.status()).toBe(302);
-            expect(res.headers().location || '').toContain('/login');
+            expect(res.status()).toBe(401);
+            const body = await res.json();
+            expect(body.success).toBe(false);
+            expect(body.redirect).toBe('/login');
         } finally {
             await ctx.dispose();
         }

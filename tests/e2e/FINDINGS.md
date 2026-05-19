@@ -541,6 +541,40 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   `const finalStatus = responseData.flagStatus || 'resolved'; if
   (finalStatus === 'resolved') updateData.resolvedAt = now;`.
 
+### 39. ✅ FIXED — auth middleware always redirected API requests instead of returning 401 JSON
+
+- **Where:** `src/middleware/auth.js` — `requireAuth` and ~15 other role/
+  permission gates all used `if (req.path.startsWith('/api/'))` to decide
+  between JSON 401 and HTML redirect.
+- **Symptom:** When a request comes in through a mounted router
+  (`app.use('/api/foo', router)`), Express strips the mount prefix from
+  `req.path` inside the middleware — so `req.path` is `/agree`, not
+  `/api/user-agreement/agree`. The startsWith check is always false for
+  any mounted API route, so every unauthenticated API call returned a
+  302 to `/login` instead of a 401 JSON. Playwright (and any fetch())
+  auto-follows the redirect and ends up with a 200 + HTML body, masking
+  the real auth failure.
+- **Impact pre-fix:** Frontend `fetch()` that tried `await response.json()`
+  on an expired-session API call would silently throw on the HTML body;
+  users saw generic error toasts instead of a clear "session expired"
+  signal. Hid every auth-required failure behind a fake 200.
+- **Failing tests that surfaced it:**
+  - `tests/e2e/routes-user-agreement-api.spec.js` › "unauthenticated GET /status returns 401"
+  - `tests/e2e/routes-user-agreement-api.spec.js` › "unauthenticated POST /agree returns 401"
+  - `tests/e2e/routes-mental-health-flags-api.spec.js` › "unauthenticated GET /course/:courseId returns 401"
+  - `tests/e2e/routes-mental-health-flags-api.spec.js` › "unauthenticated PUT /escalate returns 401"
+  - `tests/e2e/routes-struggle-activity-api.spec.js` › "unauthenticated request returns 401 with JSON body"
+- **Fix landed:** Replaced `req.path.startsWith('/api/')` with
+  `req.originalUrl.startsWith('/api/')` in all 16 occurrences across
+  the middleware file. `req.originalUrl` keeps the full client URL
+  regardless of router mount depth. Page-route behavior (redirect to
+  `/login` for unauthenticated `/student/dashboard` etc.) is unchanged.
+- **Follow-up — not done:** The frontend has only one explicit 401 handler
+  (`public/instructor/scripts/instructor.js:4324`). Now that the server
+  emits clean JSON 401s on session expiry, a global handler in
+  `public/common/scripts/auth.js` could intercept any API 401 and
+  redirect the user to `/login`, instead of leaving them stuck on the
+  current page with a generic error. See Redundancies.md → R0.
 
 ## Duplicate top-level declarations in `public/instructor/scripts/instructor.js`
 
