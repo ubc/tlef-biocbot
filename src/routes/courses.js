@@ -540,9 +540,9 @@ router.get('/', async (req, res) => {
             });
         }
         
-        // Query database for instructor's courses
+        // Query database for instructor's courses (exclude soft-deleted).
         const collection = db.collection('courses');
-        const courses = await collection.find({ instructorId }).toArray();
+        const courses = await collection.find({ instructorId, status: { $ne: 'deleted' } }).toArray();
         
         // Transform the data to match expected format
         const transformedCourses = courses.map(course => ({
@@ -1945,10 +1945,12 @@ router.get('/available/all', async (req, res) => {
         // TAs can always see their assigned/invited courses, and can join active courses with a student code.
         if (user && user.role === 'ta') {
             console.log(`Filtering courses for TA ${user.userId}`);
-            
+
             const invitedCourses = new Set(user.invitedCourses || []);
-            
-            availableCourses = courses.filter(course => {
+
+            // Filter from the already-narrowed availableCourses, not the raw
+            // `courses` list. Avoids undoing any earlier role-based narrowing.
+            availableCourses = availableCourses.filter(course => {
                 const isInvited = invitedCourses.has(course.courseId);
                 const isAssigned = course.tas && course.tas.includes(user.userId);
                 const isActive = (course.status || 'active') === 'active';
@@ -3138,8 +3140,9 @@ router.post('/:courseId/units', async (req, res) => {
 router.delete('/:courseId/units/:unitName', async (req, res) => {
     try {
         const { courseId, unitName } = req.params;
-        const { instructorId } = req.body; // Pass in body as it's a delete with authorization
-        
+        // Default to {} so a DELETE with no body (the documented querystring fallback) doesn't throw.
+        const { instructorId } = req.body || {};
+
         // If instructorID is not in body, check query (common for DELETE requests)
         const effectiveInstructorId = instructorId || req.query.instructorId;
         

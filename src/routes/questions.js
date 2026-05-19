@@ -174,8 +174,12 @@ router.post('/', async (req, res) => {
             metadata
         } = req.body;
         
-        // Validate required fields
-        if (!courseId || !lectureName || !instructorId || !questionType || !question || !correctAnswer) {
+        // Validate required fields. Use an explicit presence check for
+        // correctAnswer so structured falsy answers (TF `false`, MCQ index `0`)
+        // aren't rejected as missing.
+        const correctAnswerMissing =
+            correctAnswer === undefined || correctAnswer === null || correctAnswer === '';
+        if (!courseId || !lectureName || !instructorId || !questionType || !question || correctAnswerMissing) {
             return res.status(400).json({
                 success: false,
                 message: 'Missing required fields: courseId, lectureName, instructorId, questionType, question, correctAnswer'
@@ -445,6 +449,270 @@ router.post('/auto-link-learning-objectives', async (req, res) => {
     }
 });
 
+// Static GET paths must be registered before /:questionId, otherwise Express
+// matches them as questionId lookups and the real handlers never run.
+
+/**
+ * GET /api/questions/stats
+ * Get question statistics for a course
+ */
+router.get('/stats', async (req, res) => {
+    try {
+        const { courseId } = req.query;
+
+        if (!courseId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required parameter: courseId'
+            });
+        }
+
+        // Get database instance from app.locals
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({
+                success: false,
+                message: 'Database connection not available'
+            });
+        }
+
+        // Get course data to calculate statistics
+        const collection = db.collection('courses');
+        const course = await collection.findOne({ courseId });
+
+        if (!course || !course.lectures) {
+            return res.json({
+                success: true,
+                data: {
+                    courseId,
+                    totalQuestions: 0,
+                    totalPoints: 0,
+                    typeBreakdown: []
+                }
+            });
+        }
+
+        // Calculate statistics from the course structure
+        let totalQuestions = 0;
+        let totalPoints = 0;
+        const typeBreakdown = {};
+
+        for (const lecture of course.lectures) {
+            if (lecture.assessmentQuestions) {
+                for (const question of lecture.assessmentQuestions) {
+                    totalQuestions++;
+                    totalPoints += question.points || 1;
+
+                    const type = question.questionType;
+                    if (!typeBreakdown[type]) {
+                        typeBreakdown[type] = { count: 0, points: 0 };
+                    }
+                    typeBreakdown[type].count++;
+                    typeBreakdown[type].points += question.points || 1;
+                }
+            }
+        }
+
+        const stats = {
+            totalQuestions,
+            totalPoints,
+            typeBreakdown: Object.entries(typeBreakdown).map(([type, data]) => ({
+                type,
+                count: data.count,
+                points: data.points
+            }))
+        };
+
+        res.json({
+            success: true,
+            data: {
+                courseId,
+                stats
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching question stats:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while fetching question stats'
+        });
+    }
+});
+
+/**
+ * GET /api/questions/course-material
+ * Get course material content for AI question generation
+ */
+router.get('/course-material', async (req, res) => {
+    try {
+        const { courseId, lectureName, instructorId } = req.query;
+
+        // Validate required fields
+        if (!courseId || !lectureName || !instructorId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required fields: courseId, lectureName, instructorId'
+            });
+        }
+
+        // Get database instance from app.locals
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({
+                success: false,
+                message: 'Database connection not available'
+            });
+        }
+
+        // Get course data to find documents for the specific lecture/unit
+        const course = await CourseModel.getCourseWithOnboarding(db, courseId);
+
+        if (!course) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        // Check if the instructor has access to this course
+        if (course.instructorId !== instructorId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied: You do not have permission to access this course'
+            });
+        }
+
+        // Find the specific lecture/unit
+        const unit = course.lectures?.find(l => l.name === lectureName);
+
+        if (!unit) {
+            return res.status(404).json({
+                success: false,
+                message: `Unit ${lectureName} not found in course`
+            });
+        }
+
+        // Get documents for this unit
+        const documents = unit.documents || [];
+
+        if (documents.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: `No course materials found for ${lectureName}`,
+                data: {
+                    hasMaterials: false,
+                    content: null
+                }
+            });
+        }
+
+        // Combine content from all documents (prioritize lecture notes and practice questions)
+        let combinedContent = '';
+        let hasRequiredMaterials = false;
+
+        // First, look for lecture notes and practice questions
+        const priorityDocuments = documents.filter(doc =>
+            doc.type === 'lecture_notes' ||
+            doc.type === 'practice_q_tutorials' ||
+            doc.documentType === 'lecture-notes' ||
+            doc.documentType === 'practice-quiz'
+        );
+
+        if (priorityDocuments.length > 0) {
+            hasRequiredMaterials = true;
+            // Combine content from priority documents
+            priorityDocuments.forEach(doc => {
+                if (doc.content && doc.content.trim()) {
+                    combinedContent += `\n\n--- ${doc.originalName || 'Document'} ---\n${doc.content}`;
+                }
+            });
+        } else {
+            // Fallback to any document with content
+            documents.forEach(doc => {
+                if (doc.content && doc.content.trim()) {
+                    combinedContent += `\n\n--- ${doc.originalName || 'Document'} ---\n${doc.content}`;
+                }
+            });
+        }
+
+        if (!combinedContent.trim()) {
+            return res.status(404).json({
+                success: false,
+                message: `No content found in documents for ${lectureName}`,
+                data: {
+                    hasMaterials: false,
+                    content: null
+                }
+            });
+        }
+
+        // Handle content length intelligently
+        const maxContentLength = 16000; // Increased limit for better context
+
+        if (combinedContent.length > maxContentLength) {
+            console.log(`📚 [CONTENT] Original content length: ${combinedContent.length} chars`);
+
+            // Split content into sections
+            const sections = combinedContent.split('---').filter(s => s.trim());
+            console.log(`📚 [CONTENT] Found ${sections.length} sections`);
+
+            // Sort sections: Priority docs first, then additional materials
+            const prioritizedSections = sections.sort((a, b) => {
+                const aIsPriority = a.includes('Lecture Notes') || a.includes('Practice Questions');
+                const bIsPriority = b.includes('Lecture Notes') || b.includes('Practice Questions');
+                if (aIsPriority && !bIsPriority) return -1;
+                if (!aIsPriority && bIsPriority) return 1;
+                return 0; // Keep original order for additional materials
+            });
+
+            console.log('📚 [CONTENT] Section types:', prioritizedSections.map(s => {
+                if (s.includes('Lecture Notes')) return 'Lecture Notes';
+                if (s.includes('Practice Questions')) return 'Practice Questions';
+                return 'Additional Material';
+            }));
+
+            // Rebuild content with prioritized sections up to limit
+            let newContent = '';
+            let sectionsIncluded = 0;
+
+            for (const section of prioritizedSections) {
+                if ((newContent + section).length <= maxContentLength) {
+                    newContent += '---' + section;
+                    sectionsIncluded++;
+                } else {
+                    break;
+                }
+            }
+
+            combinedContent = newContent.trim() + `\n\n[Content truncated: ${sectionsIncluded}/${sections.length} sections included]`;
+            console.log(`📚 [CONTENT] Truncated to ${combinedContent.length} chars, included ${sectionsIncluded} sections`);
+        }
+
+        console.log(`📚 Retrieved course material content for ${lectureName}: ${combinedContent.length} characters`);
+
+        res.json({
+            success: true,
+            message: 'Course material content retrieved successfully',
+            data: {
+                hasMaterials: true,
+                content: combinedContent,
+                documentCount: documents.length,
+                unitName: lectureName,
+                courseId: courseId
+            }
+        });
+
+    } catch (error) {
+        console.error('Error retrieving course material content:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while retrieving course material content',
+            error: error.message
+        });
+    }
+});
+
 /**
  * GET /api/questions/:questionId
  * Get a specific question by ID (search across all courses)
@@ -540,13 +808,26 @@ router.put('/:questionId', async (req, res) => {
         // Prepare the updated question data
         const questionData = sanitizeQuestionPayload(rawUpdateData);
         questionData.questionId = questionId;
-        
+
+        // Confirm the question exists before updating. PUT must not silently
+        // create a new record when :questionId points at nothing.
+        const existing = await db.collection('courses').findOne(
+            { courseId, 'lectures.name': lectureName, 'lectures.assessmentQuestions.questionId': questionId },
+            { projection: { _id: 1 } }
+        );
+        if (!existing) {
+            return res.status(404).json({
+                success: false,
+                message: `Question ${questionId} not found on lecture ${lectureName}`
+            });
+        }
+
         // Update question in the course structure using Course model
         const result = await CourseModel.updateAssessmentQuestions(
-            db, 
-            courseId, 
-            lectureName, 
-            questionData, 
+            db,
+            courseId,
+            lectureName,
+            questionData,
             instructorId
         );
         
@@ -635,94 +916,6 @@ router.delete('/:questionId', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Internal server error while deleting question'
-        });
-    }
-});
-
-/**
- * GET /api/questions/stats
- * Get question statistics for a course
- */
-router.get('/stats', async (req, res) => {
-    try {
-        const { courseId } = req.query;
-        
-        if (!courseId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Missing required parameter: courseId'
-            });
-        }
-        
-        // Get database instance from app.locals
-        const db = req.app.locals.db;
-        if (!db) {
-            return res.status(503).json({
-                success: false,
-                message: 'Database connection not available'
-            });
-        }
-        
-        // Get course data to calculate statistics
-        const collection = db.collection('courses');
-        const course = await collection.findOne({ courseId });
-        
-        if (!course || !course.lectures) {
-            return res.json({
-                success: true,
-                data: {
-                    courseId,
-                    totalQuestions: 0,
-                    totalPoints: 0,
-                    typeBreakdown: []
-                }
-            });
-        }
-        
-        // Calculate statistics from the course structure
-        let totalQuestions = 0;
-        let totalPoints = 0;
-        const typeBreakdown = {};
-        
-        for (const lecture of course.lectures) {
-            if (lecture.assessmentQuestions) {
-                for (const question of lecture.assessmentQuestions) {
-                    totalQuestions++;
-                    totalPoints += question.points || 1;
-                    
-                    const type = question.questionType;
-                    if (!typeBreakdown[type]) {
-                        typeBreakdown[type] = { count: 0, points: 0 };
-                    }
-                    typeBreakdown[type].count++;
-                    typeBreakdown[type].points += question.points || 1;
-                }
-            }
-        }
-        
-        const stats = {
-            totalQuestions,
-            totalPoints,
-            typeBreakdown: Object.entries(typeBreakdown).map(([type, data]) => ({
-                type,
-                count: data.count,
-                points: data.points
-            }))
-        };
-        
-        res.json({
-            success: true,
-            data: {
-                courseId,
-                stats
-            }
-        });
-        
-    } catch (error) {
-        console.error('Error fetching question stats:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Internal server error while fetching question stats'
         });
     }
 });
@@ -827,179 +1020,6 @@ router.post('/bulk', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Internal server error while bulk creating questions',
-            error: error.message
-        });
-    }
-});
-
-/**
- * GET /api/questions/course-material
- * Get course material content for AI question generation
- */
-router.get('/course-material', async (req, res) => {
-    try {
-        const { courseId, lectureName, instructorId } = req.query;
-        
-        // Validate required fields
-        if (!courseId || !lectureName || !instructorId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Missing required fields: courseId, lectureName, instructorId'
-            });
-        }
-        
-        // Get database instance from app.locals
-        const db = req.app.locals.db;
-        if (!db) {
-            return res.status(503).json({
-                success: false,
-                message: 'Database connection not available'
-            });
-        }
-        
-        // Get course data to find documents for the specific lecture/unit
-        const course = await CourseModel.getCourseWithOnboarding(db, courseId);
-        
-        if (!course) {
-            return res.status(404).json({
-                success: false,
-                message: 'Course not found'
-            });
-        }
-        
-        // Check if the instructor has access to this course
-        if (course.instructorId !== instructorId) {
-            return res.status(403).json({
-                success: false,
-                message: 'Access denied: You do not have permission to access this course'
-            });
-        }
-        
-        // Find the specific lecture/unit
-        const unit = course.lectures?.find(l => l.name === lectureName);
-        
-        if (!unit) {
-            return res.status(404).json({
-                success: false,
-                message: `Unit ${lectureName} not found in course`
-            });
-        }
-        
-        // Get documents for this unit
-        const documents = unit.documents || [];
-        
-        if (documents.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: `No course materials found for ${lectureName}`,
-                data: {
-                    hasMaterials: false,
-                    content: null
-                }
-            });
-        }
-        
-        // Combine content from all documents (prioritize lecture notes and practice questions)
-        let combinedContent = '';
-        let hasRequiredMaterials = false;
-        
-        // First, look for lecture notes and practice questions
-        const priorityDocuments = documents.filter(doc => 
-            doc.type === 'lecture_notes' || 
-            doc.type === 'practice_q_tutorials' ||
-            doc.documentType === 'lecture-notes' ||
-            doc.documentType === 'practice-quiz'
-        );
-        
-        if (priorityDocuments.length > 0) {
-            hasRequiredMaterials = true;
-            // Combine content from priority documents
-            priorityDocuments.forEach(doc => {
-                if (doc.content && doc.content.trim()) {
-                    combinedContent += `\n\n--- ${doc.originalName || 'Document'} ---\n${doc.content}`;
-                }
-            });
-        } else {
-            // Fallback to any document with content
-            documents.forEach(doc => {
-                if (doc.content && doc.content.trim()) {
-                    combinedContent += `\n\n--- ${doc.originalName || 'Document'} ---\n${doc.content}`;
-                }
-            });
-        }
-        
-        if (!combinedContent.trim()) {
-            return res.status(404).json({
-                success: false,
-                message: `No content found in documents for ${lectureName}`,
-                data: {
-                    hasMaterials: false,
-                    content: null
-                }
-            });
-        }
-        
-        // Handle content length intelligently
-        const maxContentLength = 16000; // Increased limit for better context
-        
-        if (combinedContent.length > maxContentLength) {
-            console.log(`📚 [CONTENT] Original content length: ${combinedContent.length} chars`);
-            
-            // Split content into sections
-            const sections = combinedContent.split('---').filter(s => s.trim());
-            console.log(`📚 [CONTENT] Found ${sections.length} sections`);
-            
-            // Sort sections: Priority docs first, then additional materials
-            const prioritizedSections = sections.sort((a, b) => {
-                const aIsPriority = a.includes('Lecture Notes') || a.includes('Practice Questions');
-                const bIsPriority = b.includes('Lecture Notes') || b.includes('Practice Questions');
-                if (aIsPriority && !bIsPriority) return -1;
-                if (!aIsPriority && bIsPriority) return 1;
-                return 0; // Keep original order for additional materials
-            });
-            
-            console.log('📚 [CONTENT] Section types:', prioritizedSections.map(s => {
-                if (s.includes('Lecture Notes')) return 'Lecture Notes';
-                if (s.includes('Practice Questions')) return 'Practice Questions';
-                return 'Additional Material';
-            }));
-            
-            // Rebuild content with prioritized sections up to limit
-            let newContent = '';
-            let sectionsIncluded = 0;
-            
-            for (const section of prioritizedSections) {
-                if ((newContent + section).length <= maxContentLength) {
-                    newContent += '---' + section;
-                    sectionsIncluded++;
-                } else {
-                    break;
-                }
-            }
-            
-            combinedContent = newContent.trim() + `\n\n[Content truncated: ${sectionsIncluded}/${sections.length} sections included]`;
-            console.log(`📚 [CONTENT] Truncated to ${combinedContent.length} chars, included ${sectionsIncluded} sections`);
-        }
-        
-        console.log(`📚 Retrieved course material content for ${lectureName}: ${combinedContent.length} characters`);
-        
-        res.json({
-            success: true,
-            message: 'Course material content retrieved successfully',
-            data: {
-                hasMaterials: true,
-                content: combinedContent,
-                documentCount: documents.length,
-                unitName: lectureName,
-                courseId: courseId
-            }
-        });
-        
-    } catch (error) {
-        console.error('Error retrieving course material content:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Internal server error while retrieving course material content',
             error: error.message
         });
     }

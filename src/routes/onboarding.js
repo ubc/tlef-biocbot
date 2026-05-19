@@ -148,6 +148,49 @@ router.post('/', async (req, res) => {
     }
 });
 
+// Static GET paths must be registered before /:courseId, otherwise Express
+// matches them as courseId lookups and the real handlers never run.
+
+/**
+ * GET /api/onboarding/stats
+ * Get onboarding statistics
+ */
+router.get('/stats', async (req, res) => {
+    try {
+        // Get database instance from app.locals
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({
+                success: false,
+                message: 'Database connection not available'
+            });
+        }
+
+        // Get course statistics (since we're now using courses instead of onboarding)
+        const collection = db.collection('courses');
+        const totalCourses = await collection.countDocuments();
+        const totalInstructors = await collection.distinct('instructorId');
+
+        const stats = {
+            totalCourses,
+            totalInstructors: totalInstructors.length,
+            lastUpdated: new Date().toISOString()
+        };
+
+        res.json({
+            success: true,
+            data: stats
+        });
+
+    } catch (error) {
+        console.error('Error fetching course stats:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while fetching course stats'
+        });
+    }
+});
+
 /**
  * GET /api/onboarding/:courseId
  * Get onboarding data for a specific course
@@ -538,46 +581,6 @@ router.delete('/:courseId/unit/:unitName', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Internal server error while deleting unit'
-        });
-    }
-});
-
-/**
- * GET /api/onboarding/stats
- * Get onboarding statistics
- */
-router.get('/stats', async (req, res) => {
-    try {
-        // Get database instance from app.locals
-        const db = req.app.locals.db;
-        if (!db) {
-            return res.status(503).json({
-                success: false,
-                message: 'Database connection not available'
-                });
-        }
-        
-        // Get course statistics (since we're now using courses instead of onboarding)
-        const collection = db.collection('courses');
-        const totalCourses = await collection.countDocuments();
-        const totalInstructors = await collection.distinct('instructorId');
-        
-        const stats = {
-            totalCourses,
-            totalInstructors: totalInstructors.length,
-            lastUpdated: new Date().toISOString()
-        };
-        
-        res.json({
-            success: true,
-            data: stats
-        });
-        
-    } catch (error) {
-        console.error('Error fetching course stats:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Internal server error while fetching course stats'
         });
     }
 });

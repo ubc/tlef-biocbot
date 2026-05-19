@@ -1579,6 +1579,14 @@ async function joinCourseAsInstructor(db, courseId, instructorId, code, options 
         return { success: false, error: 'Course not found' };
     }
 
+    // Reject joins to courses the UI would not list (deleted or inactive).
+    // /api/courses/available/joinable already hides these; the direct-join path
+    // must not be a side door around that.
+    const courseStatus = course.status || 'active';
+    if (courseStatus === 'deleted' || courseStatus === 'inactive') {
+        return { success: false, error: 'Course is not available to join' };
+    }
+
     const instructors = Array.isArray(course.instructors) ? course.instructors : [];
     if (course.instructorId === instructorId || instructors.includes(instructorId)) {
         return {

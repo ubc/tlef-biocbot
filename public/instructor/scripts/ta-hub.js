@@ -276,11 +276,12 @@ function displayTAs() {
     tasContainer.innerHTML = currentTAs.map(ta => {
         const coursePermissions = taPermissions[ta.courseId] || {};
         const permissions = coursePermissions[ta.userId] || { canAccessCourses: true, canAccessFlags: true };
-        
+        const displayLabel = ta.displayName || ta.username || ta.userId;
+
         return `
             <div class="ta-card">
                 <div class="ta-header">
-                    <h3 class="ta-name">${ta.displayName}</h3>
+                    <h3 class="ta-name">${displayLabel}</h3>
                     <span class="ta-role">TA</span>
                 </div>
                 <div class="ta-info">
@@ -312,7 +313,7 @@ function displayTAs() {
                 </div>
                 
                 <div class="ta-actions">
-                    <button class="btn-small btn-danger" onclick="openRemoveTAModal('${ta.userId}', '${ta.displayName}')">Remove</button>
+                    <button class="btn-small btn-danger" onclick="openRemoveTAModal('${ta.userId}', '${displayLabel}')">Remove</button>
                 </div>
             </div>
         `;
