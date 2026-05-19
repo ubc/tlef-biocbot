@@ -809,17 +809,26 @@ router.put('/:questionId', async (req, res) => {
         const questionData = sanitizeQuestionPayload(rawUpdateData);
         questionData.questionId = questionId;
 
-        // Confirm the question exists before updating. PUT must not silently
-        // create a new record when :questionId points at nothing.
-        const existing = await db.collection('courses').findOne(
+        // PUT must not silently create a new record. Only 404 when the course
+        // and lecture exist but the question id doesn't — leave the model to
+        // surface "Course/Lecture not found" (→ 400) for the other cases.
+        const questionExists = await db.collection('courses').findOne(
             { courseId, 'lectures.name': lectureName, 'lectures.assessmentQuestions.questionId': questionId },
             { projection: { _id: 1 } }
         );
-        if (!existing) {
-            return res.status(404).json({
-                success: false,
-                message: `Question ${questionId} not found on lecture ${lectureName}`
-            });
+        if (!questionExists) {
+            const lectureExists = await db.collection('courses').findOne(
+                { courseId, 'lectures.name': lectureName },
+                { projection: { _id: 1 } }
+            );
+            if (lectureExists) {
+                return res.status(404).json({
+                    success: false,
+                    message: `Question ${questionId} not found on lecture ${lectureName}`
+                });
+            }
+            // Course or lecture missing — fall through to the model so the
+            // existing "Course not found" / "Lecture not found" → 400 path runs.
         }
 
         // Update question in the course structure using Course model
