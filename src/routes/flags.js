@@ -8,9 +8,46 @@ const router = express.Router();
 
 // Import the FlaggedQuestion model
 const FlaggedQuestionModel = require('../models/FlaggedQuestion');
+const CourseModel = require('../models/Course');
 
 // Middleware for JSON parsing
 router.use(express.json());
+
+/**
+ * Shared gate for flag mutation endpoints (DELETE, PUT /:flagId/response,
+ * PUT /:flagId/status). Verifies the caller is an instructor/TA AND has
+ * access to the specific course the flag belongs to. Writes the response
+ * and returns null on failure; returns the flag doc on success.
+ */
+async function loadFlagAndAssertCourseAccess(req, res, flagId) {
+    const user = req.user;
+    if (!user) {
+        res.status(401).json({ success: false, message: 'Authentication required' });
+        return null;
+    }
+    if (user.role !== 'instructor' && user.role !== 'ta') {
+        res.status(403).json({ success: false, message: 'Only instructors and TAs can manage flags' });
+        return null;
+    }
+    const db = req.app.locals.db;
+    const flag = await FlaggedQuestionModel.getFlaggedQuestionById(db, flagId);
+    if (!flag) {
+        // 400 here preserves the legacy contract — see Redundancies R12b.
+        // The REST-correct shape for "unknown :flagId" is 404; tests at
+        // flags-api-coverage.spec.js:{437,513,570} currently pin 400, mirroring
+        // the model's `{success:false}` → 400 mapping. Flip to 404 (and update
+        // those three tests) when the broader `error`-vs-`message` /
+        // not-found-status audit lands.
+        res.status(400).json({ success: false, message: 'Flag not found' });
+        return null;
+    }
+    const hasAccess = await CourseModel.userHasCourseAccess(db, flag.courseId, user.userId, user.role);
+    if (!hasAccess) {
+        res.status(403).json({ success: false, message: 'No access to this course' });
+        return null;
+    }
+    return flag;
+}
 
 /**
  * GET /api/flags/my
@@ -292,32 +329,14 @@ router.put('/:flagId/response', async (req, res) => {
             response,
             flagStatus
         } = req.body;
-        
-        // Get authenticated user information
-        const user = req.user;
-        if (!user) {
-            return res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-        }
-        
-        // Only instructors and TAs can respond to flags
-        if (user.role !== 'instructor' && user.role !== 'ta') {
-            return res.status(403).json({
-                success: false,
-                message: 'Only instructors and TAs can respond to flagged questions'
-            });
-        }
-        
+
         if (!flagId || !response) {
             return res.status(400).json({
                 success: false,
                 message: 'Missing required fields: response'
             });
         }
-        
-        // Get database instance from app.locals
+
         const db = req.app.locals.db;
         if (!db) {
             return res.status(503).json({
@@ -325,7 +344,11 @@ router.put('/:flagId/response', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
-        
+
+        const flag = await loadFlagAndAssertCourseAccess(req, res, flagId);
+        if (!flag) return;
+        const user = req.user;
+
         // Update the instructor response with authenticated user info
         // Use appropriate field name based on role (instructorId for both instructors and TAs)
         const result = await FlaggedQuestionModel.updateInstructorResponse(db, flagId, {
@@ -371,32 +394,14 @@ router.put('/:flagId/status', async (req, res) => {
     try {
         const { flagId } = req.params;
         const { status } = req.body;
-        
-        // Get authenticated user information
-        const user = req.user;
-        if (!user) {
-            return res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-        }
-        
-        // Only instructors and TAs can update flag status
-        if (user.role !== 'instructor' && user.role !== 'ta') {
-            return res.status(403).json({
-                success: false,
-                message: 'Only instructors and TAs can update flag status'
-            });
-        }
-        
+
         if (!flagId || !status) {
             return res.status(400).json({
                 success: false,
                 message: 'Missing required fields: status'
             });
         }
-        
-        // Get database instance from app.locals
+
         const db = req.app.locals.db;
         if (!db) {
             return res.status(503).json({
@@ -404,7 +409,11 @@ router.put('/:flagId/status', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
-        
+
+        const flag = await loadFlagAndAssertCourseAccess(req, res, flagId);
+        if (!flag) return;
+        const user = req.user;
+
         // Update the flag status with authenticated user info
         const result = await FlaggedQuestionModel.updateFlagStatus(db, flagId, status, user.userId);
         
@@ -490,15 +499,14 @@ router.get('/stats/:courseId', async (req, res) => {
 router.delete('/:flagId', async (req, res) => {
     try {
         const { flagId } = req.params;
-        
+
         if (!flagId) {
             return res.status(400).json({
                 success: false,
                 message: 'Missing required parameter: flagId'
             });
         }
-        
-        // Get database instance from app.locals
+
         const db = req.app.locals.db;
         if (!db) {
             return res.status(503).json({
@@ -506,7 +514,10 @@ router.delete('/:flagId', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
-        
+
+        const flag = await loadFlagAndAssertCourseAccess(req, res, flagId);
+        if (!flag) return;
+
         // Delete the flagged question
         const result = await FlaggedQuestionModel.deleteFlaggedQuestion(db, flagId);
         

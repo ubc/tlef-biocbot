@@ -62,6 +62,40 @@ Status legend: 🟥 open · 🟡 partial · ✅ fixed · ⏸ deferred
 
 ## Duplicate function declarations (same name, same file, later wins)
 
+### R1c. Global script collision: top-level `function foo()` aliases `window.foo` 🟡 partial
+
+- **Where the pattern shows up:**
+  - `public/common/scripts/auth.js:266` declares `function getCurrentUser()`.
+  - `public/student/scripts/history.js:176` declares its own
+    `function getCurrentUser()` AFTER auth.js loads — silently overwrites
+    `window.getCurrentUser`.
+  - Same pattern likely exists for any helper name re-declared across
+    `public/common/` and a page-specific script.
+- **Why it bites:** In a non-strict global script, a top-level
+  `function foo()` binds the lexical name `foo` to the same slot as
+  `window.foo`. Reassigning `window.foo = bar` later means a subsequent
+  in-function check like `if (window.foo !== foo)` is comparing `bar` to
+  `bar` — always false. Any "delegate to an external helper if window.foo
+  has been replaced" fallback is dead.
+- **Symptoms it produces:**
+  - The `history.js` `getCurrentUser` fallback branch (FINDINGS history-page
+    note) was unreachable until fixed.
+  - Test pollution / staleness: tests that replace a global helper see the
+    old behavior because the page-local copy still shadows.
+  - Hard-to-debug "this branch never fires in production" coverage gaps.
+- **Resolution shape (used in history.js):** capture the function reference
+  into a separately-named `const` *after* the declaration. The const is a
+  block-scoped binding that does NOT alias `window.foo`, so the `!==` check
+  becomes meaningful.
+- **Better long-term:** wrap page scripts in IIFEs (`(function () { ... })()`)
+  so they don't pollute the global object at all, and explicitly publish
+  what they want on `window.someNamespace = { ... }`. Until then, audit any
+  page script that declares a function whose name also exists in
+  `public/common/scripts/` — those are all latent shadow conflicts.
+- **Source:** FINDINGS history.js note (now fixed) + FINDING #26 family
+  (`showNotification`, `waitForAuth`, `removeObjective` duplicates within
+  the same file).
+
 ### R2. `instructor.js` declares `showNotification` twice 🟥 open
 
 - **Where:** `public/instructor/scripts/instructor.js` lines 344 and 6753.
@@ -184,6 +218,30 @@ Status legend: 🟥 open · 🟡 partial · ✅ fixed · ⏸ deferred
 - **Fix direction:** Standardize on one key + small `sendError(res, status,
   msg)` helper.
 - **Source:** [FINDINGS #12](FINDINGS.md).
+
+### R12b. "Not found" mapped to 400 instead of 404 across routes 🟥 open (tech debt)
+
+- **Pattern:** Several routes (and their tests) rely on a "model returns
+  `{success: false, error: 'not found'}` → route returns 400" mapping
+  instead of the REST-correct 404. Encountered while landing FINDING #36/#37:
+  `loadFlagAndAssertCourseAccess` in `src/routes/flags.js` would prefer to
+  404 on an unknown `:flagId`, but three coverage tests (in
+  `flags-api-coverage.spec.js` lines ~437, 513, 570) explicitly assert
+  `expect(res.status()).toBe(400)`. Kept at 400 to preserve the legacy
+  contract; an inline comment in `flags.js` points back here.
+- **Why it matters:** Clients (and humans reading the API) can't
+  distinguish "you gave me a bad ID" (404) from "your input was malformed"
+  (400). Hampers retry logic, idempotency reasoning, and log triage.
+- **Other suspects to audit** (likely same shape, not yet verified):
+  - `src/routes/questions.js` — `updateAssessmentQuestions` "not found"
+    branch surfaces as 400 today (see FINDING #35).
+  - `src/routes/courses.js` — many "course not found" branches return 400.
+  - `src/routes/lectures.js`, `src/routes/onboarding.js` — same idiom.
+- **Fix direction (when undertaken):** add a small `sendNotFound(res, msg)`
+  helper that returns 404 + `{ success: false, message }`, migrate routes
+  one at a time, and flip the matching tests. Combine with R12
+  (`error`-vs-`message`) so a single audit fixes both shape drifts.
+- **Source:** FINDING #36/#37 fix (Aug 2026 wave).
 
 ### R13. ID generation: ad-hoc scheme per route 🟥 open
 

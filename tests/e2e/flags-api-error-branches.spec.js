@@ -411,7 +411,9 @@ test.describe('PUT /api/flags/:flagId/status non-resolved branches', () => {
         await withDb((db) =>
             db.collection('courses').updateOne(
                 { courseId: COURSE_A },
-                { $set: { tas: [{ userId: taId, email: TEST_USERS.ta.email }] } }
+                // tas is [String] in product code (Course.js:1219, schema L18);
+                // userHasCourseAccess queries `tas: userId` against bare strings.
+                { $set: { tas: [taId] } }
             )
         );
         const id = await seedFlagDoc({ flagId: 'eb-st-reviewed-ta' });

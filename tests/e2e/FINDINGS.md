@@ -157,13 +157,21 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **Pattern:** Some routes filter `status !== 'deleted'` directly in the route (defensive), some helpers do, some don't. Closely related to #6 and #7.
 - **Fix:** Audit every read path that resolves a `courseId` → course doc; standardize on either always filtering or having one canonical "active courses only" helper.
 
-### 11. 🔒 `/api/lectures/publish-status` trusts an `instructorId` query param with no auth check
+### 11. ✅ FIXED — 🔒 `/api/lectures/publish-status` trusts an `instructorId` query param with no auth check
 
 - **Where:** `src/routes/lectures.js` lines 81–121.
 - **Symptom:** Route accepts `instructorId` and `courseId` from query string and calls `CourseModel.getLecturePublishStatus(db, courseId)` directly. **There is no check that `req.user.userId === instructorId` or that the requester has any access to the course.** A logged-in student (or any authenticated user) hitting `GET /api/lectures/publish-status?instructorId=anybody&courseId=anycourse` gets back the publish state of every unit.
 - **Compare to:** Other `lectures.js` routes (e.g. `/publish` at line 14) check `userHasCourseAccess()` before mutating.
 - **Why it matters:** Information leak — students could enumerate course publish states, including units the instructor hasn't released.
-- **Fix:** Drop the `instructorId` query param (use `req.user.userId` only). Add `userHasCourseAccess(db, courseId, req.user.userId)` check before responding.
+- **Fix landed:** Added the same `req.user` + `CourseModel.userHasCourseAccess`
+  gate that sister route `POST /publish` already uses. The `instructorId`
+  query param is still accepted (kept for the existing 400-when-missing
+  contract) but is now informational only — authorization is from the
+  session. Students hitting the route get 403; the legitimate instructor
+  dashboard still works (only caller is `instructor.js:2137`).
+- **Failing test (now green):** `tests/e2e/routes-lectures-api.spec.js` ›
+  "PRODUCT BUG (FINDINGS #11): a student can read the publish state of any
+  course".
 
 ### 11a. TA Hub renders a missing TA display name as `undefined`
 
@@ -503,7 +511,7 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   surface `created` truthy and reject it on the PUT path) and return 404 when
   the question does not exist. Bulk insertion / create stays the POST path.
 
-### 36. 🔒 `DELETE /api/flags/:flagId` has no role gate or ownership check
+### 36. ✅ FIXED — 🔒 `DELETE /api/flags/:flagId` has no role gate or ownership check
 
 - **Where:** `src/routes/flags.js` lines 490-538. The router is mounted at
   `src/server.js:492` with `requireAuth` + `requireActiveCourseForNonInstructors`
@@ -519,12 +527,17 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   can erase flags raised against questions on courses they don't own.
 - **Failing test:** `tests/e2e/flags-api-error-branches.spec.js` ›
   "PRODUCT BUG: a student can delete any flag (no role gate)".
-- **Fix:** Restrict the route to `requireInstructorOrTA` (or whoever owns
-  the cleanup workflow) and enforce per-course access — load the flag,
-  resolve its `courseId`, and confirm `req.user` is the course instructor /
-  on its `tas` array.
+- **Fix landed:** Extracted `loadFlagAndAssertCourseAccess(req, res, flagId)`
+  in `src/routes/flags.js` (top of file). It (1) requires authentication,
+  (2) requires `role === 'instructor' || 'ta'`, (3) loads the flag and 400s
+  if missing (preserving the legacy "from model" contract), (4) calls
+  `CourseModel.userHasCourseAccess(db, flag.courseId, user.userId, user.role)`
+  and 403s if not on the course. The DELETE route (and the two PUT routes
+  in FINDING #37) now call this helper.
+- **Failing test (now green):** `tests/e2e/flags-api-error-branches.spec.js` ›
+  "PRODUCT BUG: a student can delete any flag (no role gate)".
 
-### 37. 🔒 Flag instructor/TA response endpoints don't verify course membership
+### 37. ✅ FIXED — 🔒 Flag instructor/TA response endpoints don't verify course membership
 
 - **Where:** `src/routes/flags.js` PUT `/:flagId/response` (lines 288-364)
   and PUT `/:flagId/status` (lines 370-438). Both endpoints only check
@@ -542,10 +555,20 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   "PRODUCT BUG: an instructor not on the flag's course can still update the
   response" and "PRODUCT BUG: a TA not on the flag's course can still
   update the status".
-- **Fix:** After resolving the flag, look up its `courseId` and confirm the
-  caller is the course's `instructorId`, in `instructors`, or in `tas`
-  before updating. Mirrors the access pattern called out in FINDING #34
-  for questions.
+- **Fix landed:** Both PUT routes now call the same
+  `loadFlagAndAssertCourseAccess` helper introduced in FINDING #36's fix.
+  Cross-instructor / cross-course writes return 403.
+- **Failing tests (now green):**
+  - `tests/e2e/flags-api-error-branches.spec.js` ›
+    "PRODUCT BUG: an instructor not on the flag's course can still update
+    the response"
+  - same file › "PRODUCT BUG: a TA not on the flag's course can still
+    update the status".
+- **Test-side cleanup:** Two seeds in `flags-api-error-branches.spec.js`
+  and `flags-api-coverage.spec.js` were storing `tas` as
+  `[{ userId, email }]` objects, which `userHasCourseAccess` doesn't match
+  (it queries `tas: userId` against bare strings, per `Course.js:1219`
+  and the schema comment at L18). Seeds updated to `tas: [taId]`.
 
 ### 38. `updateInstructorResponse` defaults `flagStatus` to "resolved" but does not stamp `resolvedAt`
 
@@ -610,9 +633,25 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 
 - `removeObjective`: the declaration at lines 1590-1605 is shadowed by the later declaration at lines 1868-1872. Coverage marks the shadowed copy as uncovered.
 
-## History page auth-helper fallback in `public/student/scripts/history.js`
+## History page auth-helper fallback in `public/student/scripts/history.js` ✅ FIXED
 
-- `getCurrentUser`: the branch at lines 183-185 intends to call the `auth.js` helper when `window.getCurrentUser` is a different function, but `history.js` declares its own top-level `getCurrentUser`, replacing the global name on the page. A page-driven test that installs an external helper after load still returns `null`, leaving this fallback branch effectively unreachable/dead under the real script load order.
+- **Was:** The branch at lines 183-185 intended to call the `auth.js` helper
+  when `window.getCurrentUser` had been replaced by an external helper.
+  But `history.js` declares its own top-level `function getCurrentUser()`,
+  and in a non-strict global script that lexical name *aliases*
+  `window.getCurrentUser` — so the check
+  `window.getCurrentUser !== getCurrentUser` was always false once
+  `window.getCurrentUser` got reassigned. A page-driven test that installed
+  an external helper after load returned `null`.
+- **Now:** the function captures itself into a separately-named
+  module-private const (`_historyGetCurrentUserSelf`) immediately after the
+  declaration. The check is against that const, which doesn't share
+  storage with the window property, so the fallback branch is reachable.
+- **Failing test (now green):**
+  `tests/e2e/student-history-storage-branches.spec.js` ›
+  "current user resolves through an external auth helper".
+- **Pattern:** see Redundancies R1c — this is a class of footgun that will
+  recur until page scripts are wrapped in IIFEs or migrated to modules.
 
 ## Qdrant service coverage notes
 
