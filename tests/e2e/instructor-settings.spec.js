@@ -1076,6 +1076,7 @@ test.describe('Instructor settings UI', () => {
                                 window.getCurrentInstructorId = () => '${instructorId || 'instructor'}';
                                 window.setCurrentCourseId = async () => {};
                             </script>
+                            <script src="/common/scripts/notifications.js"></script>
                             <script src="/instructor/scripts/settings.js"></script>
                         </body>
                     </html>
@@ -1225,6 +1226,7 @@ test.describe('Instructor settings UI', () => {
                                 window.getCurrentUser = () => ({ role: 'student', email: 'student@test.local' });
                                 window.getCurrentCourseId = async () => 'STUDENT-COURSE';
                             </script>
+                            <script src="/common/scripts/notifications.js"></script>
                             <script src="/instructor/scripts/settings.js"></script>
                         </body>
                     </html>

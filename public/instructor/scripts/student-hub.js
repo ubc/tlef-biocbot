@@ -338,35 +338,6 @@ async function waitForAuth() {
     }
 }
 
-function showNotification(message, type) {
-    const notification = document.createElement('div');
-    notification.className = `notification ${type}`;
-    notification.innerHTML = `
-        <span>${message}</span>
-        <button class="notification-close" onclick="this.parentElement.remove()">×</button>
-    `;
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 15px 20px;
-        border-radius: 6px;
-        color: white;
-        font-weight: 500;
-        z-index: 1000;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        max-width: 400px;
-        ${type === 'success' ? 'background-color: #28a745;' : 
-          type === 'error' ? 'background-color: #dc3545;' : 
-          type === 'warning' ? 'background-color: #ffc107; color: #000;' : 
-          'background-color: #17a2b8;'}
-    `;
-    document.body.appendChild(notification);
-    setTimeout(() => { if (notification.parentElement) notification.remove(); }, 5000);
-}
-
 /**
  * Render struggle topics list
  */

@@ -3726,46 +3726,6 @@ function showSuccessMessage(message) {
 function showErrorMessage(message) {
     showNotification(message, 'error');
 }
-
-function showNotification(message, type) {
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.className = `notification ${type}`;
-    notification.innerHTML = `
-        <span>${message}</span>
-        <button class="notification-close" onclick="this.parentElement.remove()">×</button>
-    `;
-    
-    // Add styles
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 15px 20px;
-        border-radius: 6px;
-        color: white;
-        font-weight: 500;
-        z-index: 1000;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        max-width: 400px;
-        ${type === 'success' ? 'background-color: var(--success-color);' : 'background-color: var(--danger-color);'}
-    `;
-    
-    // Add to page
-    document.body.appendChild(notification);
-    
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-        if (notification.parentElement) {
-            notification.remove();
-        }
-    }, 5000);
-}
-
-
-
 /**
  * Remove existing document of a specific type for a unit
  * @param {string} courseId - Course identifier

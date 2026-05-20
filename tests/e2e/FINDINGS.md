@@ -211,12 +211,12 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **Why it matters:** Real bugs — frontend will silently swallow real error messages from any route using the "wrong" key, showing generic fallback text instead of the actual reason.
 - **Fix:** Pick one. Most routes already use `message`, so probably standardize on that and migrate `auth.js` + the affected `settings.js` lines. Add a small response helper (`sendError(res, status, message)`) to discourage future drift.
 
-### 13. `showNotification()` is defined twice in `instructor.js`
+### 13. ✅ FIXED — `showNotification()` was defined twice in `instructor.js`
 
-- **Where:** `public/instructor/scripts/instructor.js` line 344 AND line 6736 — both `function showNotification(message, type = 'info')`.
-- **Symptom:** Two function declarations with the same name. JS hoisting means whichever is parsed second silently wins. If a fix is applied to one but not the other, the wrong copy may execute.
-- **Why it matters:** Whichever is "live" depends on script-load order, easy to mis-debug. Also an obvious code smell.
-- **Fix:** Delete one. Better: extract `showNotification` to `public/common/scripts/notifications.js` so `onboarding.js`, `instructor.js`, `student.js`, etc. all share one helper. Currently each script has its own slightly-different copy.
+- **Where:** Was `public/instructor/scripts/instructor.js` line 344 AND line 6736 — both `function showNotification(message, type = 'info')`.
+- **Was:** Two function declarations with the same name. JS hoisting meant whichever was parsed second silently won.
+- **Fix:** Extracted simple message/type toast rendering to `public/common/scripts/notifications.js` and loaded it before the instructor/TA page scripts that call `showNotification`.
+- **Remaining note:** `public/student/scripts/flag-notifications.js` intentionally remains separate because it accepts a notification object and manages stacked student flag notifications.
 
 ### 14. Status field is a string enum with no canonical definition
 

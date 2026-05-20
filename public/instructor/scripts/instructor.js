@@ -340,38 +340,6 @@ window.confirmDeleteUnit = confirmDeleteUnit;
     monitorLectureNotesStatus();
 });
 
-// Global function to show notification
-function showNotification(message, type = 'info') {
-    // Check if notification container exists, if not create it
-    let notificationContainer = document.querySelector('.notification-container');
-    if (!notificationContainer) {
-        notificationContainer = document.createElement('div');
-        notificationContainer.classList.add('notification-container');
-        document.body.appendChild(notificationContainer);
-    }
-    
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.classList.add('notification', type);
-    notification.textContent = message;
-    
-    // Add close button
-    const closeBtn = document.createElement('button');
-    closeBtn.classList.add('notification-close');
-    closeBtn.innerHTML = '&times;';
-    closeBtn.addEventListener('click', () => {
-        notification.remove();
-    });
-    
-    notification.appendChild(closeBtn);
-    notificationContainer.appendChild(notification);
-    
-    // Auto remove after 5 seconds
-    setTimeout(() => {
-        notification.remove();
-    }, 5000);
-}
-
 // Modal functionality for content upload
 let uploadedFile = null;
 let currentWeek = null;
@@ -6769,40 +6737,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 });
 
-/**
- * Show a notification to the user
- * @param {string} message - The message to display
- */
-function showNotification(message, type = 'info') {
-    // Check if notification container exists, if not create it
-    let notificationContainer = document.querySelector('.notification-container');
-    if (!notificationContainer) {
-        notificationContainer = document.createElement('div');
-        notificationContainer.classList.add('notification-container');
-        document.body.appendChild(notificationContainer);
-    }
-    
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.classList.add('notification', type);
-    notification.textContent = message;
-    
-    // Add close button
-    const closeBtn = document.createElement('button');
-    closeBtn.classList.add('notification-close');
-    closeBtn.innerHTML = '&times;';
-    closeBtn.addEventListener('click', () => {
-        notification.remove();
-    });
-    
-    notification.appendChild(closeBtn);
-    notificationContainer.appendChild(notification);
-    
-    // Auto remove after 5 seconds
-    setTimeout(() => {
-        notification.remove();
-    }, 5000);
-}
 /**
  * Open the regenerate modal with current question content
  */

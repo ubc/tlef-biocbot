@@ -123,56 +123,6 @@ async function fetchCourseId() {
 }
 
 /**
- * Show notification message
- * @param {string} message - Message to display
- * @param {string} type - Type of notification (success, error, info)
- */
-function showNotification(message, type = 'info') {
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.className = `notification notification-${type}`;
-    notification.textContent = message;
-    
-    // Add styles
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 12px 20px;
-        border-radius: 4px;
-        color: white;
-        font-weight: 500;
-        z-index: 1000;
-        max-width: 400px;
-        word-wrap: break-word;
-    `;
-    
-    // Set background color based on type
-    switch (type) {
-        case 'success':
-            notification.style.backgroundColor = '#4CAF50';
-            break;
-        case 'error':
-            notification.style.backgroundColor = '#f44336';
-            break;
-        case 'info':
-        default:
-            notification.style.backgroundColor = '#2196F3';
-            break;
-    }
-    
-    // Add to page
-    document.body.appendChild(notification);
-    
-    // Remove after 5 seconds
-    setTimeout(() => {
-        if (notification.parentNode) {
-            notification.parentNode.removeChild(notification);
-        }
-    }, 5000);
-}
-
-/**
  * Wait for authentication to be ready
  * @returns {Promise<void>}
  */
