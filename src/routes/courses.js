@@ -2923,19 +2923,28 @@ router.get('/:courseId/students', async (req, res) => {
         // Also include any students present only in enrollmentMap (no profile fetched yet)
         const missingIds = Object.keys(enrollmentMap).filter(id => !byId.has(id));
         
+        // Track which enrollmentMap IDs correspond to known-inactive accounts so
+        // we can skip the synthetic fallback below and avoid resurrecting them.
+        const inactiveIds = new Set();
+
         if (missingIds.length > 0) {
             // Fetch details for these users regardless of role
             const additionalUsers = await usersCol.find({ userId: { $in: missingIds } })
-                .project({ userId: 1, username: 1, email: 1, displayName: 1, role: 1, invitedCourses: 1, createdAt: 1, lastLogin: 1, struggleState: 1 })
+                .project({ userId: 1, username: 1, email: 1, displayName: 1, role: 1, invitedCourses: 1, createdAt: 1, lastLogin: 1, struggleState: 1, isActive: 1 })
                 .toArray();
-                
+
             additionalUsers.forEach(s => {
+                if (s.isActive === false) {
+                    inactiveIds.add(s.userId);
+                    return;
+                }
                 byId.set(s.userId, s);
             });
         }
 
         // Fallback for truly missing users (still not found in DB)
         for (const studentId of Object.keys(enrollmentMap)) {
+            if (inactiveIds.has(studentId)) continue;
             if (!byId.has(studentId)) {
                 byId.set(studentId, {
                     userId: studentId,

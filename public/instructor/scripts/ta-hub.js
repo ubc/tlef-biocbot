@@ -160,10 +160,18 @@ async function loadCurrentTAs() {
         const coursesResult = await coursesResponse.json();
         let courses = coursesResult.data?.courses || [];
         
-        // Filter to only selected course if one is selected
+        // Filter to only selected course if one is selected — but only when the
+        // saved/URL course actually matches a course the instructor owns. A
+        // stale selectedCourseId (e.g. left over from another role/session)
+        // should not blank out the TA list.
         if (selectedCourseId) {
-            courses = courses.filter(course => course.courseId === selectedCourseId);
-            console.log('Filtering TAs to selected course:', selectedCourseId);
+            const filtered = courses.filter(course => course.courseId === selectedCourseId);
+            if (filtered.length > 0) {
+                courses = filtered;
+                console.log('Filtering TAs to selected course:', selectedCourseId);
+            } else {
+                console.log('Ignoring stale selectedCourseId (no matching instructor course):', selectedCourseId);
+            }
         }
         
         if (courses.length === 0) {

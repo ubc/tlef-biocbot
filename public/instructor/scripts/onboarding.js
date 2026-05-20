@@ -721,12 +721,29 @@ async function checkOnboardingStatus() {
                     // Store the course ID and resume onboarding
                     onboardingState.createdCourseId = incompleteCourse.courseId;
                     onboardingState.existingCourseId = incompleteCourse.courseId;
-                    
+
                     // Check if Unit 1 has the required content to determine which step to resume at
                     const unit1 = incompleteCourse.lectures?.find(lecture => lecture.name === 'Unit 1');
                     const hasObjectives = unit1?.learningObjectives && unit1.learningObjectives.length > 0;
-                    const hasDocuments = unit1?.documents && unit1.documents.length > 0;
-                    
+                    const documentTypes = new Set((unit1?.documents || []).map(d => d.documentType));
+                    // "Materials substep complete" means BOTH required uploads exist —
+                    // a single lecture-notes upload on its own should still resume on
+                    // materials so the practice-quiz upload can finish.
+                    const hasDocuments = documentTypes.has('lecture-notes') && documentTypes.has('practice-quiz');
+
+                    // Restore previously-saved objectives and questions into the DOM so
+                    // that resuming onboarding doesn't visually erase the work the user
+                    // already did.
+                    if (hasObjectives) {
+                        repopulateObjectivesList(unit1.learningObjectives);
+                    }
+                    if (unit1?.assessmentQuestions && unit1.assessmentQuestions.length > 0) {
+                        repopulateOnboardingAssessmentQuestions(unit1.assessmentQuestions);
+                    }
+                    if (unit1?.documents && unit1.documents.length > 0) {
+                        repopulateMaterialStatuses(unit1.documents);
+                    }
+
                     if (!hasObjectives) {
                         // Resume at Step 3, substep 1 (Learning Objectives)
                         console.log('📝 [ONBOARDING] Resuming at Step 3: Learning Objectives');
@@ -1753,6 +1770,74 @@ function showStep(stepNumber) {
 /**
  * Show specific substep
  */
+/**
+ * Re-render the learning-objectives list from a server-provided array.
+ * Used when resuming an in-progress onboarding so that a refresh preserves
+ * what the user already entered.
+ */
+function repopulateObjectivesList(objectives) {
+    const objectivesList = document.getElementById('objectives-list');
+    if (!objectivesList) return;
+    objectivesList.innerHTML = '';
+    (objectives || []).forEach((objective) => {
+        const objectiveItem = document.createElement('div');
+        objectiveItem.className = 'objective-display-item';
+        const span = document.createElement('span');
+        span.className = 'objective-text';
+        span.textContent = String(objective);
+        const btn = document.createElement('button');
+        btn.className = 'remove-objective';
+        btn.setAttribute('onclick', 'removeObjective(this)');
+        btn.textContent = '×';
+        objectiveItem.appendChild(span);
+        objectiveItem.appendChild(btn);
+        objectivesList.appendChild(objectiveItem);
+    });
+}
+
+/**
+ * Re-hydrate the onboarding `assessmentQuestions['Onboarding']` cache from
+ * server-stored questions (which use the structured wire shape: TF=boolean,
+ * MCQ options=array, MCQ correctAnswer=numeric index) and re-render so a
+ * refresh on the questions substep preserves prior work.
+ */
+function repopulateOnboardingAssessmentQuestions(serverQuestions) {
+    const restored = (serverQuestions || []).map((q) => ({
+        id: q.questionId || q.id || Date.now() + Math.random(),
+        questionId: q.questionId,
+        type: q.questionType || q.type,
+        question: q.question,
+        options: q.options,
+        correctAnswer: q.correctAnswer,
+        learningObjective: q.learningObjective || '',
+        saved: true, // already in DB — completeUnit1Setup must not re-POST
+    }));
+    assessmentQuestions['Onboarding'] = restored;
+    try {
+        displayAssessmentQuestions('Onboarding');
+    } catch (_) { /* container may not be in DOM yet */ }
+}
+
+/**
+ * Flip the lecture-notes / practice-questions status badges to "Uploaded"
+ * when documents of those types already exist on the resumed course.
+ */
+function repopulateMaterialStatuses(documents) {
+    const types = new Set((documents || []).map(d => d.documentType));
+    const lectureStatus = document.getElementById('lecture-status');
+    if (lectureStatus && types.has('lecture-notes')) {
+        lectureStatus.textContent = 'Uploaded';
+        lectureStatus.classList.remove('not-uploaded');
+        lectureStatus.classList.add('uploaded');
+    }
+    const practiceStatus = document.getElementById('practice-status');
+    if (practiceStatus && types.has('practice-quiz')) {
+        practiceStatus.textContent = 'Uploaded';
+        practiceStatus.classList.remove('not-uploaded');
+        practiceStatus.classList.add('uploaded');
+    }
+}
+
 function showSubstep(substepName) {
     // Hide all substeps
     const substeps = document.querySelectorAll('.guided-substep');
@@ -1786,12 +1871,30 @@ function showSubstep(substepName) {
 /**
  * Navigate to next substep
  */
-function nextSubstep(substepName) {
+async function nextSubstep(substepName) {
     if (substepName === 'materials') {
         const objectiveCount = document.querySelectorAll('#objectives-list .objective-display-item').length;
         if (objectiveCount === 0) {
             showNotification('Please add at least one learning objective before continuing.', 'error');
             return;
+        }
+
+        // Persist objectives as soon as the user moves on, so a refresh
+        // before final completion resumes at materials (not back at
+        // objectives) and the entered objectives survive.
+        try {
+            const courseId = onboardingState.createdCourseId || onboardingState.existingCourseId;
+            const instructorId = typeof getCurrentInstructorId === 'function' ? getCurrentInstructorId() : null;
+            if (courseId && instructorId) {
+                const objectives = Array.from(
+                    document.querySelectorAll('#objectives-list .objective-display-item .objective-text')
+                ).map(el => el.textContent.trim()).filter(Boolean);
+                if (objectives.length > 0) {
+                    await saveUnit1LearningObjectives(courseId, 'Unit 1', objectives, instructorId);
+                }
+            }
+        } catch (err) {
+            console.error('Failed to persist learning objectives before advancing:', err);
         }
     }
 
@@ -2224,7 +2327,7 @@ function setupMCQValidation() {
 /**
  * Save the question from the modal
  */
-function saveQuestion() {
+async function saveQuestion() {
     const questionType = document.getElementById('question-type').value;
     const questionText = document.getElementById('question-text').value.trim();
     const learningObjective = document.getElementById('learning-objective-select')?.value?.trim() || '';
@@ -2301,19 +2404,35 @@ function saveQuestion() {
     }
     
     assessmentQuestions[weekKey].push(question);
-    
+
     console.log(`Question added to assessmentQuestions['${weekKey}']:`, question);
     console.log(`Total questions for ${weekKey}:`, assessmentQuestions[weekKey].length);
-    
+
     // Update the display
     displayAssessmentQuestions(weekKey);
-    
+
     // Close modal and show success
     closeQuestionModal();
     const learningObjectiveMessage = question.learningObjective
         ? ` Linked to "${question.learningObjective}".`
         : '';
     showNotification(`Question added successfully!${learningObjectiveMessage}`, 'success');
+
+    // Persist immediately so an in-progress onboarding survives refresh /
+    // browser-back. completeUnit1Setup skips already-saved questions.
+    try {
+        const courseId = onboardingState.createdCourseId || onboardingState.existingCourseId;
+        const instructorId = typeof getCurrentInstructorId === 'function' ? getCurrentInstructorId() : null;
+        if (courseId && instructorId) {
+            const result = await saveUnit1AssessmentQuestion(courseId, 'Unit 1', question, instructorId);
+            question.saved = true;
+            if (result && result.data && result.data.questionId) {
+                question.questionId = result.data.questionId;
+            }
+        }
+    } catch (err) {
+        console.error('Failed to persist new assessment question immediately:', err);
+    }
 }
 
 
@@ -2540,22 +2659,44 @@ async function autoLinkQuestionsToLearningObjectives(week, buttonElement = null)
 /**
  * Delete assessment question
  */
-function deleteAssessmentQuestion(week, questionId) {
-    if (confirm('Are you sure you want to delete this question?')) {
-        // During onboarding, we're always working with 'Onboarding' as the week
-        const weekKey = week || 'Onboarding';
-        
-        if (assessmentQuestions[weekKey]) {
-            assessmentQuestions[weekKey] = assessmentQuestions[weekKey].filter(q => q.id !== questionId);
-            console.log(`Question ${questionId} deleted from assessmentQuestions['${weekKey}']`);
-            console.log(`Remaining questions for ${weekKey}:`, assessmentQuestions[weekKey].length);
-            displayAssessmentQuestions(weekKey);
-            showNotification('Question deleted successfully!', 'success');
-        } else {
-            console.error(`No assessment questions found for week '${weekKey}'`);
-            showNotification('No questions found to delete.', 'error');
+async function deleteAssessmentQuestion(week, questionId) {
+    if (!confirm('Are you sure you want to delete this question?')) {
+        return;
+    }
+    // During onboarding, we're always working with 'Onboarding' as the week
+    const weekKey = week || 'Onboarding';
+
+    if (!assessmentQuestions[weekKey]) {
+        console.error(`No assessment questions found for week '${weekKey}'`);
+        showNotification('No questions found to delete.', 'error');
+        return;
+    }
+
+    const matching = assessmentQuestions[weekKey].find(q => q.id === questionId);
+    assessmentQuestions[weekKey] = assessmentQuestions[weekKey].filter(q => q.id !== questionId);
+    console.log(`Question ${questionId} deleted from assessmentQuestions['${weekKey}']`);
+    console.log(`Remaining questions for ${weekKey}:`, assessmentQuestions[weekKey].length);
+    displayAssessmentQuestions(weekKey);
+
+    // If we already persisted this question, remove it from the DB too so a
+    // mid-onboarding refresh doesn't bring the deleted question back.
+    if (matching && matching.questionId && matching.saved) {
+        try {
+            const courseId = onboardingState.createdCourseId || onboardingState.existingCourseId;
+            const instructorId = typeof getCurrentInstructorId === 'function' ? getCurrentInstructorId() : null;
+            if (courseId && instructorId) {
+                await fetch(`/api/questions/${matching.questionId}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ courseId, lectureName: 'Unit 1', instructorId })
+                });
+            }
+        } catch (err) {
+            console.error('Failed to remove persisted question on delete:', err);
         }
     }
+
+    showNotification('Question deleted successfully!', 'success');
 }
 
 /**
@@ -2753,7 +2894,17 @@ async function completeUnit1Setup() {
         onboardingState.isSubmitting = false;
         return;
     }
-    
+
+    const passThresholdInput = document.getElementById('pass-threshold-onboarding');
+    if (passThresholdInput) {
+        const passThreshold = parseInt(passThresholdInput.value, 10);
+        if (Number.isFinite(passThreshold) && passThreshold > questions.length) {
+            showNotification('Pass threshold cannot exceed the number of assessment questions.', 'error');
+            onboardingState.isSubmitting = false;
+            return;
+        }
+    }
+
     try {
         // Save onboarding data to database before redirecting
         console.log('Step 1: Calling saveOnboardingData...');
