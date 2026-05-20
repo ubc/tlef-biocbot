@@ -406,12 +406,91 @@ test.describe('DELETE /api/questions/:questionId', () => {
 test.describe('GET /api/questions/stats', () => {
     test.use({ storageState: storageStatePath('instructor') });
 
-    test('PRODUCT BUG: /stats is shadowed by /:questionId (route ordering)', async ({ request: api }) => {
-        // EXPECTED: the validation branch in /stats returns 400 when courseId
-        // is missing. Currently the request is matched by /:questionId
-        // (questionId='stats'), which returns 404.
+    test('400 when courseId is missing', async ({ request: api }) => {
+        // The /stats route is now reachable (FINDINGS #32 closed by reordering
+        // its declaration before /:questionId). With no courseId, the handler
+        // short-circuits on the missing-param branch.
         const res = await api.get('/api/questions/stats');
         expect(res.status()).toBe(400);
+    });
+
+    test('returns zero counts when the course has lectures but no questions', async ({ request: api }) => {
+        const now = new Date();
+        await seedCourse({
+            courseId: COURSE_A,
+            instructorId,
+            lectures: [{
+                name: 'Unit 1',
+                isPublished: false,
+                learningObjectives: [],
+                passThreshold: 2,
+                createdAt: now,
+                updatedAt: now,
+                documents: [],
+                assessmentQuestions: [],
+            }],
+        });
+        const res = await api.get(`/api/questions/stats?courseId=${COURSE_A}`);
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        // Real course path wraps the counts under `data.stats`.
+        expect(body.data.stats.totalQuestions).toBe(0);
+        expect(body.data.stats.totalPoints).toBe(0);
+        expect(body.data.stats.typeBreakdown).toEqual([]);
+    });
+
+    test('aggregates questions by type and points across all lectures', async ({ request: api }) => {
+        const now = new Date();
+        await seedCourse({
+            courseId: COURSE_A,
+            instructorId,
+            lectures: [
+                {
+                    name: 'Unit 1',
+                    isPublished: true,
+                    learningObjectives: [],
+                    passThreshold: 2,
+                    createdAt: now,
+                    updatedAt: now,
+                    documents: [],
+                    assessmentQuestions: [
+                        { questionId: 'q-stats-1', questionType: 'true-false', question: 'TF1', correctAnswer: 'true', points: 2 },
+                        { questionId: 'q-stats-2', questionType: 'multiple-choice', question: 'MC1', options: { A: 'a', B: 'b' }, correctAnswer: 'A' },
+                    ],
+                },
+                {
+                    name: 'Unit 2',
+                    isPublished: false,
+                    learningObjectives: [],
+                    passThreshold: 2,
+                    createdAt: now,
+                    updatedAt: now,
+                    documents: [],
+                    assessmentQuestions: [
+                        { questionId: 'q-stats-3', questionType: 'true-false', question: 'TF2', correctAnswer: 'false', points: 3 },
+                    ],
+                },
+            ],
+        });
+        const res = await api.get(`/api/questions/stats?courseId=${COURSE_A}`);
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        // Two TF (points 2 + 3 = 5) + one MC (default points 1). Total = 3 questions, 6 points.
+        expect(body.data.stats.totalQuestions).toBe(3);
+        expect(body.data.stats.totalPoints).toBe(6);
+        const tf = body.data.stats.typeBreakdown.find((entry) => entry.type === 'true-false');
+        const mc = body.data.stats.typeBreakdown.find((entry) => entry.type === 'multiple-choice');
+        expect(tf).toEqual({ type: 'true-false', count: 2, points: 5 });
+        expect(mc).toEqual({ type: 'multiple-choice', count: 1, points: 1 });
+    });
+
+    test('returns zero counts when the course does not exist', async ({ request: api }) => {
+        const res = await api.get('/api/questions/stats?courseId=BIOC-E2E-NOPE-STATS');
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.data.totalQuestions).toBe(0);
+        expect(body.data.totalPoints).toBe(0);
+        expect(body.data.typeBreakdown).toEqual([]);
     });
 });
 
@@ -474,14 +553,17 @@ test.describe('POST /api/questions/bulk', () => {
 
 // ---------------------------------------------------------------------------
 // GET /api/questions/course-material
-//
-// Same shadowing issue as /stats — `/course-material` is registered AFTER
-// `/:questionId`, so the handler is unreachable.
+// (Reachable now that the static path is declared before /:questionId.)
 // ---------------------------------------------------------------------------
 test.describe('GET /api/questions/course-material', () => {
     test.use({ storageState: storageStatePath('instructor') });
 
-    test('PRODUCT BUG: /course-material is shadowed by /:questionId (route ordering)', async ({ request: api }) => {
+    test('400 when required query params are missing', async ({ request: api }) => {
+        const res = await api.get('/api/questions/course-material');
+        expect(res.status()).toBe(400);
+    });
+
+    test('happy path returns aggregated document content', async ({ request: api }) => {
         const now = new Date();
         await seedCourse({
             courseId: COURSE_A,
@@ -508,11 +590,62 @@ test.describe('GET /api/questions/course-material', () => {
         const res = await api.get(
             `/api/questions/course-material?courseId=${COURSE_A}&lectureName=Unit 1&instructorId=${instructorId}`
         );
-        // EXPECTED: 200 with the document content. Currently 404 because the
-        // request is matched by /:questionId where questionId='course-material'.
         expect(res.ok()).toBeTruthy();
         const body = await res.json();
         expect(body.data.hasMaterials).toBe(true);
+    });
+
+    test('404 when the course does not exist', async ({ request: api }) => {
+        const res = await api.get(
+            `/api/questions/course-material?courseId=BIOC-E2E-NOPE-CM&lectureName=Unit 1&instructorId=${instructorId}`
+        );
+        expect(res.status()).toBe(404);
+    });
+
+    test('404 when the lecture does not exist on the course', async ({ request: api }) => {
+        const now = new Date();
+        await seedCourse({
+            courseId: COURSE_A,
+            instructorId,
+            lectures: [{
+                name: 'Unit 1',
+                isPublished: false,
+                learningObjectives: [],
+                passThreshold: 2,
+                createdAt: now,
+                updatedAt: now,
+                documents: [],
+                assessmentQuestions: [],
+            }],
+        });
+        const res = await api.get(
+            `/api/questions/course-material?courseId=${COURSE_A}&lectureName=Unit 99&instructorId=${instructorId}`
+        );
+        expect(res.status()).toBe(404);
+    });
+
+    test('returns hasMaterials=false when the lecture has no documents', async ({ request: api }) => {
+        const now = new Date();
+        await seedCourse({
+            courseId: COURSE_A,
+            instructorId,
+            lectures: [{
+                name: 'Unit 1',
+                isPublished: false,
+                learningObjectives: [],
+                passThreshold: 2,
+                createdAt: now,
+                updatedAt: now,
+                documents: [],
+                assessmentQuestions: [],
+            }],
+        });
+        const res = await api.get(
+            `/api/questions/course-material?courseId=${COURSE_A}&lectureName=Unit 1&instructorId=${instructorId}`
+        );
+        // Existing lecture but no documents — should be a 200 with hasMaterials=false
+        // or a 404 depending on the route's contract. Either is fine; just don't 500.
+        expect([200, 404]).toContain(res.status());
     });
 });
 

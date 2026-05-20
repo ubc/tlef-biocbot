@@ -453,24 +453,32 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **Fix:** Default to an empty object — `const { instructorId } = req.body || {};` —
   or read the querystring first.
 
-### 32. `/stats` and `/course-material` handlers in `routes/questions.js` are shadowed by `/:questionId`
+### 32. ✅ FIXED — `/stats` and `/course-material` handlers in `routes/questions.js` were shadowed by `/:questionId`
 
-- **Where:** `src/routes/questions.js` — `/:questionId` is registered at line
-  452, well before `/stats` (line 646) and `/course-material` (line 839).
-- **Symptom:** Express matches the dynamic `/:questionId` first for any
-  single-segment GET, so `GET /api/questions/stats` and
-  `GET /api/questions/course-material` are treated as questionId lookups,
-  return 404, and the actual handlers never run.
-- **Why it matters:** Two documented endpoints are completely unreachable.
-  The course-material content fetch is required for AI question generation
-  diagnostics; the stats endpoint is wired into the instructor dashboard.
-- **Failing tests:** `tests/e2e/routes-questions-api.spec.js` ›
-  "PRODUCT BUG: /stats is shadowed by /:questionId" and
-  "PRODUCT BUG: /course-material is shadowed by /:questionId".
-- **Fix:** Reorder the `router.get` calls so the static paths are registered
-  before the parameterised one — mirroring the comment already in
-  `routes/courses.js` ("must come before /:courseId to avoid route matching
-  issues").
+- **Was:** `/:questionId` was registered at line 452 (before `/stats` at line
+  646 and `/course-material` at line 839). Express matched the dynamic
+  `/:questionId` first for any single-segment GET, so requests to
+  `/api/questions/stats` and `/api/questions/course-material` were treated as
+  questionId lookups and 404'd.
+- **Now:** Routes are reordered so the static paths (`/stats`,
+  `/course-material`, `/lecture`, `/bulk`, `/auto-link-learning-objectives`,
+  `/check-answer`, `/generate-ai`) are declared **before** the parameterised
+  `/:questionId`. The previously-unreachable handlers now run.
+- **Failing tests (now green):** `tests/e2e/routes-questions-api.spec.js` ›
+  "GET /api/questions/stats" suite (400 missing, zero-count, aggregation,
+  course-not-found) and the `/course-material` happy path.
+
+### 32a. `/stats` response shape is inconsistent between course-found and course-missing paths
+
+- **Where:** `src/routes/questions.js` `GET /stats` — lines ~607–656.
+- **Symptom:** When the course doesn't exist or has no lectures the response
+  returns the counts at `data.totalQuestions` / `data.totalPoints` /
+  `data.typeBreakdown`. When the course exists the same counts are returned
+  one level deeper at `data.stats.totalQuestions` etc.
+- **Why it matters:** Frontend or downstream tooling has to guess which shape
+  to read; any consumer that picks one shape silently misreads the other.
+- **Fix:** Pick one shape (probably `data.stats.*`) and use it in both
+  branches.
 
 ### 33. `/stats` in `routes/onboarding.js` is shadowed by `/:courseId`
 

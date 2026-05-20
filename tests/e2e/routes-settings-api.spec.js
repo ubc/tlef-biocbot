@@ -108,6 +108,18 @@ test.describe('prompts (course-level)', () => {
         expect(res.status()).toBe(400);
     });
 
+    test('POST /prompts 400 with "Invalid prompt format" when course exists but prompt is non-string', async ({ request: api }) => {
+        // Seed the course so the route reaches the type-validation branch
+        // instead of short-circuiting on the access check's "Course not found".
+        await seedCourse({ courseId: COURSE_A, instructorId });
+        const res = await api.post('/api/settings/prompts', {
+            data: { courseId: COURSE_A, base: 1, protege: 'b', tutor: 'c', explain: 'd', directive: 'e' },
+        });
+        expect(res.status()).toBe(400);
+        const body = await res.json();
+        expect(body.message).toMatch(/Invalid prompt format/i);
+    });
+
     test('POST /prompts 400 when studentIdleTimeout out of range', async ({ request: api }) => {
         const res = await api.post('/api/settings/prompts', {
             data: {
@@ -117,6 +129,48 @@ test.describe('prompts (course-level)', () => {
             },
         });
         expect(res.status()).toBe(400);
+    });
+
+    test('POST /prompts 400 with "Invalid idle timeout value" when course exists but timeout is too low', async ({ request: api }) => {
+        await seedCourse({ courseId: COURSE_A, instructorId });
+        const res = await api.post('/api/settings/prompts', {
+            data: {
+                courseId: COURSE_A,
+                base: 'a', protege: 'b', tutor: 'c', explain: 'd', directive: 'e',
+                studentIdleTimeout: 10,
+            },
+        });
+        expect(res.status()).toBe(400);
+        const body = await res.json();
+        expect(body.message).toMatch(/Invalid idle timeout value/i);
+    });
+
+    test('POST /prompts 400 when studentIdleTimeout is above the 1200s ceiling', async ({ request: api }) => {
+        await seedCourse({ courseId: COURSE_A, instructorId });
+        const res = await api.post('/api/settings/prompts', {
+            data: {
+                courseId: COURSE_A,
+                base: 'a', protege: 'b', tutor: 'c', explain: 'd', directive: 'e',
+                studentIdleTimeout: 9999,
+            },
+        });
+        expect(res.status()).toBe(400);
+        const body = await res.json();
+        expect(body.message).toMatch(/Invalid idle timeout value/i);
+    });
+
+    test('POST /prompts 400 when studentIdleTimeout is not a number', async ({ request: api }) => {
+        await seedCourse({ courseId: COURSE_A, instructorId });
+        const res = await api.post('/api/settings/prompts', {
+            data: {
+                courseId: COURSE_A,
+                base: 'a', protege: 'b', tutor: 'c', explain: 'd', directive: 'e',
+                studentIdleTimeout: 'definitely not a number',
+            },
+        });
+        expect(res.status()).toBe(400);
+        const body = await res.json();
+        expect(body.message).toMatch(/Invalid idle timeout value/i);
     });
 
     test('POST /prompts happy path persists course-specific prompts', async ({ request: api }) => {
