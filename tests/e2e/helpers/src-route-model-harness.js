@@ -270,13 +270,36 @@ function applyMode(mode) {
         state.session = { userId: 'harness-user' };
         state.passportForLocals = { ubcShibHelpers: { logout: (_req, cb) => cb(new Error('helper failed')) } };
     }
-    if (state.mode === 'questions-no-db') state.db = null;
-    if (state.mode === 'questions-no-llm') state.llm = null;
+    if (state.mode === 'questions-no-db') {
+        // /api/questions auth-checks `req.user` before the db-missing 503,
+        // so the harness must supply an instructor user for that branch to be
+        // reachable. The userId matches the body `instructorId: 'inst'` the
+        // spec sends, so the same-instructor check passes.
+        state.user = { ...baseUser, userId: 'inst', role: 'instructor' };
+        state.db = null;
+    }
+    if (state.mode === 'questions-no-llm') {
+        state.user = { ...baseUser, userId: 'inst', role: 'instructor' };
+        state.llm = null;
+    }
     if (state.mode === 'questions-course-throws') {
+        state.user = { ...baseUser, userId: 'inst', role: 'instructor' };
+        // The new course-access pre-check would otherwise turn this into a
+        // 403 before we ever hit the dependency-throw branch under test.
+        CourseModel.userHasCourseAccess = async () => true;
+        // GET /api/questions/lecture early-returns 200 when the course isn't
+        // present; seed BIOC-H so we reach the throwing model call.
+        state.db = memoryDb({
+            users: new MemoryCollection([{ ...baseUser }]),
+            documents: new MemoryCollection([{ _id: 'valid-doc', documentId: 'valid-doc', courseId: 'BIOC-H' }]),
+            courses: new MemoryCollection([{ _id: 'BIOC-H', courseId: 'BIOC-H', instructorId: 'inst', instructors: ['inst'] }]),
+        });
         CourseModel.updateAssessmentQuestions = async () => { throw new Error('harness question failure'); };
         CourseModel.getAssessmentQuestions = async () => { throw new Error('harness question fetch failure'); };
     }
     if (state.mode === 'questions-llm-throws') {
+        state.user = { ...baseUser, userId: 'inst', role: 'instructor' };
+        CourseModel.userHasCourseAccess = async () => true;
         state.llm = { evaluateStudentAnswer: async () => { throw new Error('harness eval failure'); } };
     }
     if (state.mode === 'qdrant-admin' || state.mode === 'qdrant-delete-all-qdrant-fails') {

@@ -515,7 +515,16 @@ test.describe('home.css harness coverage', () => {
         await expect(page.locator('.table-controls')).toHaveCSS('justify-content', 'space-between');
         await expect(page.locator('.live-struggle-table td').first()).toHaveCSS('font-size', '14.4px');
         await expect(page.locator('.weekly-struggle-chart-container .chart-header')).toHaveCSS('flex-direction', 'column');
-        await expect(page.locator('.chart-nav-controls')).toHaveCSS('width', '100%');
+        // getComputedStyle returns the resolved pixel value for `width`, not the
+        // declared "100%". Validate the mobile @media rule by checking that the
+        // nav controls actually fill their flex-column parent.
+        const navMatchesParent = await page.evaluate(() => {
+            const nav = document.querySelector('.chart-nav-controls');
+            const parent = nav?.parentElement;
+            if (!nav || !parent) return false;
+            return Math.abs(nav.getBoundingClientRect().width - parent.getBoundingClientRect().width) < 1;
+        });
+        expect(navMatchesParent).toBe(true);
         await expect(page.locator('.chart-canvas-wrapper')).toHaveCSS('height', '250px');
         await expect(page.locator('.approved-topics-add-row')).toHaveCSS('grid-template-columns', /430px|1fr/);
     });

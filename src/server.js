@@ -276,6 +276,13 @@ function setupProtectedRoutes() {
         res.sendFile(path.join(__dirname, '../public/instructor/downloads.html'));
     });
 
+    // Must be declared before the /instructor static mount, which would
+    // otherwise serve student-hub.html to TAs (the mount only requires
+    // instructor OR TA, not instructor exclusively).
+    app.get('/instructor/student-hub.html', authMiddleware.requireInstructor, (req, res) => {
+        res.sendFile(path.join(__dirname, '../public/instructor/student-hub.html'));
+    });
+
     // Protected static files
     app.use('/student', authMiddleware.requireStudent, express.static(path.join(__dirname, '../public/student')));
     app.use('/instructor', authMiddleware.requireInstructorOrTA, express.static(path.join(__dirname, '../public/instructor')));

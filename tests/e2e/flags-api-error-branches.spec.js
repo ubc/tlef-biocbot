@@ -273,13 +273,14 @@ test.describe('GET /api/flags/course/:courseId additional branches', () => {
     });
 
     test('TA can read flags for the course (no role gate on this route)', async ({ baseURL }) => {
-        // Add TA to course so requireStudentEnrolled-style middleware never
-        // blocks. (The TA bypasses requireStudentEnrolled because role !=
-        // student; this is just to make the fixture realistic.)
+        // Add TA to course so userHasCourseAccess (role=ta) finds them.
+        // Canonical shape for the `tas` array is a list of user-id strings —
+        // the model's access query is `{ tas: userId }`, which only matches
+        // when the array contains the bare ID.
         await withDb((db) =>
             db.collection('courses').updateOne(
                 { courseId: COURSE_A },
-                { $set: { tas: [{ userId: taId, email: TEST_USERS.ta.email }] } }
+                { $set: { tas: [taId] } }
             )
         );
         await seedFlagDoc({ flagId: 'eb-ta-read-1' });

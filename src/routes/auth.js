@@ -948,10 +948,33 @@ router.post('/promote-to-ta', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
-        
+
+        // If a courseId is supplied, the requesting instructor must own it —
+        // otherwise an instructor of course A could invite anyone into course B.
+        if (courseId) {
+            const course = await db.collection('courses').findOne(
+                { courseId, status: { $ne: 'deleted' } },
+                { projection: { instructorId: 1, instructors: 1 } }
+            );
+            if (!course) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Course not found'
+                });
+            }
+            const owns = course.instructorId === user.userId
+                || (Array.isArray(course.instructors) && course.instructors.includes(user.userId));
+            if (!owns) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'You can only promote TAs into courses you own.'
+                });
+            }
+        }
+
         // Prepare update operations
         const updateOps = {
-            $set: { 
+            $set: {
                 role: 'ta',
                 updatedAt: new Date()
             }

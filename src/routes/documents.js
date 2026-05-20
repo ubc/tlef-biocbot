@@ -341,6 +341,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         const courseResult = await CourseModel.addDocumentToUnit(db, courseId, lectureName, {
             documentId: result.documentId,
             documentType: documentType,
+            title: req.body.title || documentData.filename,
             filename: documentData.filename, // Use the same filename as stored in DocumentModel
             originalName: file.originalname,
             mimeType: file.mimetype,

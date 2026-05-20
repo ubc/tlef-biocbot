@@ -779,6 +779,13 @@ test.describe('instructor onboarding', () => {
         test.setTimeout(90_000);
 
         async function expectInvalidQuestionSubmission(setupForm, expectedMessage) {
+            // Dismiss any lingering error notifications from a prior iteration —
+            // they share text with later iterations (e.g. "Please select the
+            // correct answer." fires for both MCQ-no-correct and TF-no-selection).
+            await page.evaluate(() => {
+                document.querySelectorAll('.notification.error').forEach((n) => n.remove());
+            });
+
             await page.locator('.add-question-btn').click();
             await expect(page.locator('#question-modal')).toBeVisible();
             await setupForm();
@@ -786,7 +793,7 @@ test.describe('instructor onboarding', () => {
 
             // Product requirement: invalid question submissions stay editable and add no question.
             await expect(page.locator('#question-modal')).toBeVisible();
-            await expect(page.getByText(expectedMessage)).toBeVisible();
+            await expect(page.locator('.notification.error', { hasText: expectedMessage })).toBeVisible();
             await expect(page.locator('#assessment-questions-onboarding .question-item')).toHaveCount(0);
             await page.locator('#question-modal .modal-close').click();
             await expect(page.locator('#question-modal')).toBeHidden();

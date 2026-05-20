@@ -197,7 +197,7 @@ function renderStudents(courseId) {
                             onclick="saveEnrollment('${courseId}','${s.userId}')">Save</button>
                     
                     ${isTA ? `
-                        <button class="btn-small btn-danger" onclick="demoteFromTA('${s.userId}', '${escapeHTML(s.displayName || s.username)}')">
+                        <button class="btn-small btn-danger" onclick="demoteFromTA('${s.userId}', '${escapeHTML(s.displayName || s.username)}', '${courseId}')">
                             Demote from TA
                         </button>
                     ` : hasPendingTAInvite ? `
@@ -258,8 +258,14 @@ window.promoteToTA = async function(studentId, studentName, courseId) {
     }
 };
 
-window.demoteFromTA = async function(studentId, studentName) {
-    const selectedCourseId = localStorage.getItem('selectedCourseId');
+window.demoteFromTA = async function(studentId, studentName, courseId) {
+    // Prefer the courseId passed in from the rendered card (matches the
+    // visible URL course), then fall back to URL ?courseId=, then to storage.
+    let selectedCourseId = courseId;
+    if (!selectedCourseId) {
+        const urlParams = new URLSearchParams(window.location.search);
+        selectedCourseId = urlParams.get('courseId') || localStorage.getItem('selectedCourseId');
+    }
 
     if (!selectedCourseId) {
         showNotification('No course selected. Please select a course first.', 'error');
@@ -281,11 +287,8 @@ window.demoteFromTA = async function(studentId, studentName) {
         }
 
         showNotification(`Successfully removed ${studentName} as TA from this course`, 'success');
-        
-        // Reload students list
-        if (selectedCourseId) {
-            await loadStudents(selectedCourseId);
-        }
+
+        await loadStudents(selectedCourseId);
 
     } catch (err) {
         console.error('Error demoting from TA:', err);

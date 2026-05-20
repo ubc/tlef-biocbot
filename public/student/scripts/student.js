@@ -911,6 +911,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         chatMessages.appendChild(typingDiv);
         applyCurrentLLMTagClasses(typingDiv);
 
+        // Lock the chat controls while we wait — prevents the student from
+        // submitting another message before the prior LLM round-trip returns.
+        const chatInput = document.getElementById('chat-input');
+        if (chatInput) chatInput.disabled = true;
+        const sendButton = document.getElementById('send-button');
+        if (sendButton) sendButton.disabled = true;
+
         // Scroll to bottom
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
@@ -920,6 +927,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         const typingIndicator = document.getElementById('typing-indicator');
         if (typingIndicator) {
             typingIndicator.remove();
+        }
+        // Restore the chat controls only when no other "permanent" disable
+        // (cap reached, no published units) is in effect. Those paths add a
+        // disabled-input/disabled-button class which we check for here.
+        const chatInput = document.getElementById('chat-input');
+        if (chatInput && !chatInput.classList.contains('disabled-input')) {
+            chatInput.disabled = false;
+        }
+        const sendButton = document.getElementById('send-button');
+        if (sendButton && !sendButton.classList.contains('disabled-button')) {
+            sendButton.disabled = false;
         }
     }
 
@@ -6222,9 +6240,18 @@ function getChatById(chatId) {
  */
 function deleteChatFromHistory(chatId) {
     try {
+        const studentId = getCurrentStudentId();
+        if (!studentId) {
+            console.error('No student ID found - cannot delete chat history entry');
+            return false;
+        }
         const history = getChatHistory();
         const filteredHistory = history.filter(chat => chat.id !== chatId);
-        localStorage.setItem('biocbot_chat_history', JSON.stringify(filteredHistory));
+        // Must write to the same per-student namespaced key that
+        // saveChatToHistory and getChatHistory use, otherwise the entry
+        // stays in the student's actual history and the UI deletes nothing.
+        const historyKey = `biocbot_chat_history_${studentId}`;
+        localStorage.setItem(historyKey, JSON.stringify(filteredHistory));
         return true;
     } catch (error) {
         console.error('Error deleting chat from history:', error);
