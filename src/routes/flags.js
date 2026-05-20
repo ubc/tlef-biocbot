@@ -46,7 +46,45 @@ async function loadFlagAndAssertCourseAccess(req, res, flagId) {
         res.status(403).json({ success: false, message: 'No access to this course' });
         return null;
     }
+    if (user.role === 'ta') {
+        const hasFlagPermission = await CourseModel.checkTAPermission(db, flag.courseId, user.userId, 'flags');
+        if (!hasFlagPermission) {
+            res.status(403).json({ success: false, message: 'No access to flagged content for this course' });
+            return null;
+        }
+    }
     return flag;
+}
+
+async function canReadCourseFlags(db, user, courseId) {
+    if (!user) return false;
+    if (user.role !== 'instructor' && user.role !== 'ta') return false;
+
+    const hasCourseAccess = await CourseModel.userHasCourseAccess(db, courseId, user.userId, user.role);
+    if (!hasCourseAccess) return false;
+
+    if (user.role === 'ta') {
+        return CourseModel.checkTAPermission(db, courseId, user.userId, 'flags');
+    }
+
+    return true;
+}
+
+async function filterFlagsByReadableCourse(db, user, flags) {
+    const allowedByCourse = new Map();
+    const filtered = [];
+
+    for (const flag of flags) {
+        if (!allowedByCourse.has(flag.courseId)) {
+            allowedByCourse.set(flag.courseId, await canReadCourseFlags(db, user, flag.courseId));
+        }
+
+        if (allowedByCourse.get(flag.courseId)) {
+            filtered.push(flag);
+        }
+    }
+
+    return filtered;
 }
 
 /**
@@ -67,13 +105,40 @@ router.get('/my', async (req, res) => {
         if (!db) {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
+        if (courseId) {
+            const hasAccess = await CourseModel.userHasCourseAccess(db, courseId, user.userId, 'student');
+            if (!hasAccess) {
+                return res.status(403).json({ success: false, message: 'No access to this course' });
+            }
+        }
+
         const flags = await FlaggedQuestionModel.getFlaggedQuestionsForStudent(db, user.userId, courseId || null);
-        return res.json({ success: true, data: { flags, count: flags.length } });
+        const visibleFlags = courseId
+            ? flags
+            : await filterStudentFlagsByEnrollment(db, user.userId, flags);
+        return res.json({ success: true, data: { flags: visibleFlags, count: visibleFlags.length } });
     } catch (error) {
         console.error('Error retrieving student flags:', error);
         return res.status(500).json({ success: false, message: 'Internal server error while retrieving flags' });
     }
 });
+
+async function filterStudentFlagsByEnrollment(db, studentId, flags) {
+    const allowedByCourse = new Map();
+    const filtered = [];
+
+    for (const flag of flags) {
+        if (!allowedByCourse.has(flag.courseId)) {
+            allowedByCourse.set(flag.courseId, await CourseModel.userHasCourseAccess(db, flag.courseId, studentId, 'student'));
+        }
+
+        if (allowedByCourse.get(flag.courseId)) {
+            filtered.push(flag);
+        }
+    }
+
+    return filtered;
+}
 
 /**
  * POST /api/flags
@@ -198,6 +263,15 @@ router.get('/course/:courseId', async (req, res) => {
             });
         }
         
+        const user = req.user;
+        const hasAccess = await canReadCourseFlags(db, user, courseId);
+        if (!hasAccess) {
+            return res.status(403).json({
+                success: false,
+                message: 'No access to flagged content for this course'
+            });
+        }
+
         // Get flagged questions for the course
         const flags = await FlaggedQuestionModel.getFlaggedQuestionsForCourse(db, courseId, status);
         
@@ -245,8 +319,24 @@ router.get('/status/:status', async (req, res) => {
             });
         }
         
-        // Get flagged questions by status
-        const flags = await FlaggedQuestionModel.getFlaggedQuestionsByStatus(db, status);
+        const user = req.user;
+        if (!user || (user.role !== 'instructor' && user.role !== 'ta')) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only instructors and TAs can view flags by status'
+            });
+        }
+
+        // Get flagged questions by status, then scope to courses the caller can review.
+        const allFlags = await FlaggedQuestionModel.getFlaggedQuestionsByStatus(db, status);
+        const flags = await filterFlagsByReadableCourse(db, user, allFlags);
+
+        if (user.role === 'ta' && allFlags.length > 0 && flags.length === 0) {
+            return res.status(403).json({
+                success: false,
+                message: 'No access to flagged content for these courses'
+            });
+        }
         
         console.log(`Retrieved ${flags.length} flagged questions with status ${status}`);
         
@@ -470,6 +560,15 @@ router.get('/stats/:courseId', async (req, res) => {
             });
         }
         
+        const user = req.user;
+        const hasAccess = await canReadCourseFlags(db, user, courseId);
+        if (!hasAccess) {
+            return res.status(403).json({
+                success: false,
+                message: 'No access to flagged content for this course'
+            });
+        }
+
         // Get flag statistics
         const stats = await FlaggedQuestionModel.getFlagStatistics(db, courseId);
         
@@ -548,4 +647,4 @@ router.delete('/:flagId', async (req, res) => {
     }
 });
 
-module.exports = router; 
+module.exports = router;

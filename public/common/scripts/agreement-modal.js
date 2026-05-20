@@ -23,6 +23,8 @@ class AgreementModal {
      * Create the modal HTML structure
      */
     createModal() {
+        const copy = this.getCopyForCurrentContext();
+
         // Create modal overlay
         const overlay = document.createElement('div');
         overlay.className = 'agreement-modal-overlay';
@@ -33,14 +35,14 @@ class AgreementModal {
         overlay.innerHTML = `
             <div class="agreement-modal" id="agreement-modal" tabindex="-1">
                 <div class="agreement-modal-header">
-                    <h2>Welcome to BiocBot</h2>
-                    <p class="subtitle">Your AI-Powered Study Assistant</p>
+                    <h2>${copy.title}</h2>
+                    <p class="subtitle">${copy.subtitle}</p>
                 </div>
                 
                 <div class="agreement-modal-body">
                     <div class="agreement-section">
                         <h3>What is BiocBot?</h3>
-                        <p>BiocBot is an AI-powered study assistant designed to help you learn biology concepts through interactive conversations. It can answer your questions, provide explanations, and guide you through course materials in a personalized way.</p>
+                        <p>${copy.intro}</p>
                     </div>
 
                     <div class="agreement-section">
@@ -91,6 +93,32 @@ class AgreementModal {
         // Add to document
         document.body.appendChild(overlay);
         this.modal = overlay;
+    }
+
+    getCopyForCurrentContext() {
+        const path = window.location.pathname;
+
+        if (path.includes('/instructor/')) {
+            return {
+                title: 'Welcome to BiocBot Instructor Tools',
+                subtitle: 'Your AI-Supported Course Management Workspace',
+                intro: 'BiocBot helps instructors manage course materials, review student activity, and support learning through AI-assisted course tools. It can organize content, surface student questions, and help you monitor course interactions.'
+            };
+        }
+
+        if (path.includes('/ta/')) {
+            return {
+                title: 'Welcome to BiocBot TA Tools',
+                subtitle: 'Your Teaching Assistant Support Workspace',
+                intro: 'BiocBot helps teaching assistants work with assigned course materials and student support workflows. It can help you review flagged content and access the course tools your instructor has enabled.'
+            };
+        }
+
+        return {
+            title: 'Welcome to BiocBot',
+            subtitle: 'Your AI-Powered Study Assistant',
+            intro: 'BiocBot is an AI-powered study assistant designed to help you learn biology concepts through interactive conversations. It can answer your questions, provide explanations, and guide you through course materials in a personalized way.'
+        };
     }
 
     /**

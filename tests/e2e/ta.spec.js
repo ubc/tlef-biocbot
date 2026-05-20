@@ -118,6 +118,15 @@ function buildCourseDoc({
 }
 
 async function resetTAUserState(db, taId) {
+    await db.collection('courses').updateMany(
+        { tas: taId },
+        {
+            $pull: { tas: taId },
+            $unset: { [`taPermissions.${taId}`]: '' },
+            $set: { updatedAt: new Date() },
+        }
+    );
+
     await db.collection('users').updateOne(
         { userId: taId },
         {
@@ -126,6 +135,9 @@ async function resetTAUserState(db, taId) {
                 isActive: true,
                 invitedCourses: [],
                 updatedAt: new Date(),
+            },
+            $unset: {
+                'preferences.courseId': '',
             },
         }
     );

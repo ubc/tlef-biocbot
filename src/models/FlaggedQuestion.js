@@ -204,6 +204,7 @@ async function updateFlagStatus(db, flagId, newStatus, instructorId) {
     
     const updateData = {
         flagStatus: newStatus,
+        instructorId,
         updatedAt: now
     };
     

@@ -25,6 +25,22 @@ function hasInstructorAccess(course, userId) {
         (Array.isArray(course.instructors) && course.instructors.includes(userId));
 }
 
+async function hasCourseManagementAccess(db, course, user) {
+    if (!course || !user) {
+        return false;
+    }
+
+    if (hasInstructorAccess(course, user.userId)) {
+        return true;
+    }
+
+    if (user.role === 'ta' && Array.isArray(course.tas) && course.tas.includes(user.userId)) {
+        return CourseModel.checkTAPermission(db, course.courseId, user.userId, 'courses');
+    }
+
+    return false;
+}
+
 function isInactiveCourse(course = {}) {
     return (course.status || 'active') === 'inactive';
 }
@@ -960,10 +976,11 @@ router.put('/:courseId/approved-topics', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Course not found' });
         }
 
-        if (!hasInstructorOrTAAccess(course, user.userId)) {
+        const hasAccess = await hasCourseManagementAccess(db, course, user);
+        if (!hasAccess) {
             return res.status(403).json({
                 success: false,
-                message: 'Only instructors/TAs with course access can update approved topics'
+                message: 'Only instructors/TAs with course management access can update approved topics'
             });
         }
 
@@ -1017,10 +1034,11 @@ router.patch('/:courseId/approved-topics/unit', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Course not found' });
         }
 
-        if (!hasInstructorOrTAAccess(course, user.userId)) {
+        const hasAccess = await hasCourseManagementAccess(db, course, user);
+        if (!hasAccess) {
             return res.status(403).json({
                 success: false,
-                message: 'Only instructors/TAs with course access can update approved topics'
+                message: 'Only instructors/TAs with course management access can update approved topics'
             });
         }
 
@@ -3185,10 +3203,13 @@ router.delete('/:courseId/units/:unitName', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
-        
-        // Check if instructor has access
-        const hasAccess = await CourseModel.userHasCourseAccess(db, courseId, effectiveInstructorId, 'instructor');
-        if (!hasAccess) {
+
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        if (effectiveInstructorId !== user.userId) {
             return res.status(403).json({
                 success: false,
                 message: 'You do not have permission to modify this course'
@@ -3202,6 +3223,14 @@ router.delete('/:courseId/units/:unitName', async (req, res) => {
             return res.status(404).json({
                 success: false,
                 message: 'Course not found'
+            });
+        }
+
+        const hasAccess = await hasCourseManagementAccess(db, course, user);
+        if (!hasAccess) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have permission to modify this course'
             });
         }
         
@@ -3300,9 +3329,28 @@ router.put('/:courseId/units/:unitName/rename', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        if (instructorId !== user.userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have permission to modify this course'
+            });
+        }
         
-        // Check if instructor has access to modify this course
-        const hasAccess = await CourseModel.userHasCourseAccess(db, courseId, instructorId, 'instructor');
+        const course = await CourseModel.getCourseById(db, courseId);
+        if (!course) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        const hasAccess = await hasCourseManagementAccess(db, course, user);
         if (!hasAccess) {
             return res.status(403).json({
                 success: false,
@@ -3316,7 +3364,7 @@ router.put('/:courseId/units/:unitName/rename', async (req, res) => {
             courseId, 
             decodeURIComponent(unitName), 
             displayName, 
-            instructorId
+            user.userId
         );
         
         if (!result.success) {

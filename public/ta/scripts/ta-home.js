@@ -72,10 +72,11 @@ function getInitialSelectedCourseId() {
     const candidates = [
         urlParams.get('courseId'),
         localStorage.getItem('selectedCourseId'),
+        taCourses[0]?.courseId,
         getCurrentUser()?.preferences?.courseId
     ];
 
-    return candidates.find(courseId => courseId && getAssignedCourseById(courseId)) || taCourses[0]?.courseId || null;
+    return candidates.find(courseId => courseId && getAssignedCourseById(courseId)) || null;
 }
 
 function buildCourseUrl(path, courseId) {

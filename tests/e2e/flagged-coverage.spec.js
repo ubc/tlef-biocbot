@@ -13,6 +13,8 @@
  */
 
 const { test, expect } = require('./fixtures/monocart');
+const fs = require('fs');
+const path = require('path');
 const { storageStatePath, TEST_USERS } = require('./helpers/users');
 
 const COURSE_ID = 'COVERAGE-FLAGGED';
@@ -20,6 +22,7 @@ const COURSE_ID_ALT = 'COVERAGE-FLAGGED-ALT';
 const INSTRUCTOR_ID = 'cov_inst_id';
 const TA_ID = 'cov_ta_id';
 const STUDENT_ID = 'cov_student_id';
+const FLAGGED_HTML = fs.readFileSync(path.join(__dirname, '../../public/instructor/flagged.html'), 'utf8');
 
 /**
  * @typedef {{
@@ -138,6 +141,12 @@ async function installFlaggedRoutes(page, options = {}) {
     const userId = options.userId ?? (role === 'ta' ? TA_ID : INSTRUCTOR_ID);
     const courseId = options.courseId !== undefined ? options.courseId : COURSE_ID;
     const courses = options.courses ?? (courseId ? [{ courseId, courseName: 'Cov Course' }] : []);
+
+    if (role === 'ta') {
+        await page.route(/\/instructor\/flagged(?:\?.*)?$/, async (route) => {
+            await route.fulfill({ contentType: 'text/html', body: FLAGGED_HTML });
+        });
+    }
 
     /**
      * @type {{
@@ -364,7 +373,7 @@ test.describe('flagged.js — instructor render & moderation', () => {
         await expect(list).toContainText('Incorrect');
         await expect(list).toContainText('priority: high');
         await expect(list).toContainText('Protégé mode'); // protege display
-        await expect(list).toContainText('tutor mode'); // default tutor
+        await expect(list).toContainText('Tutor mode'); // default tutor
 
         // Stats counters wired through updateStatsDisplay.
         await expect(page.locator('#total-flags')).toHaveText('7');
@@ -769,10 +778,13 @@ test.describe('flagged.js — TA sidebar wiring and navigation', () => {
         });
 
         await page.goto(`/instructor/flagged?courseId=${COURSE_ID}`);
+        await expect(page.locator('#ta-my-courses-link')).toBeHidden({ timeout: 15_000 });
         // Force visibility for click (updateTANavigationBasedOnPermissions hides
         // the link otherwise — but the handler is still wired up).
         await page.evaluate(() => {
+            const navItem = document.getElementById('ta-courses-nav');
             const link = document.getElementById('ta-my-courses-link');
+            if (navItem) navItem.style.display = 'block';
             if (link) link.style.display = 'block';
         });
 

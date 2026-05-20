@@ -25,6 +25,19 @@ let courseIdCache = null;
 let courseIdPromise = null;
 let redirectInProgress = false;
 
+function redirectToOnboardingForMissingCourse() {
+    if (redirectInProgress) {
+        return;
+    }
+
+    redirectInProgress = true;
+    console.error('No course ID found. Redirecting to onboarding...');
+    showNotification('No course found. Please complete onboarding first.', 'error');
+    setTimeout(() => {
+        window.location.href = '/instructor/onboarding';
+    }, 2000);
+}
+
 /**
  * Get the current course ID for the instructor
  * @returns {Promise<string>} Course ID
@@ -138,14 +151,7 @@ async function fetchCourseId() {
     }
     
     // If no course found, show an error and redirect to onboarding (only once)
-    if (!redirectInProgress) {
-        redirectInProgress = true;
-        console.error('No course ID found. Redirecting to onboarding...');
-        showNotification('No course found. Please complete onboarding first.', 'error');
-        setTimeout(() => {
-            window.location.href = '/instructor/onboarding';
-        }, 2000);
-    }
+    redirectToOnboardingForMissingCourse();
     
     // Return a placeholder (this should not be reached due to redirect)
     return null;
@@ -600,10 +606,7 @@ async function loadFlaggedContent() {
             appState.flags = [];
             applyFilters();
             renderFlaggedContent();
-            showNotification('No course found. Please complete onboarding first.', 'error');
-            setTimeout(() => {
-                window.location.href = '/instructor/onboarding';
-            }, 2000);
+            redirectToOnboardingForMissingCourse();
             return;
         }
         
@@ -1218,6 +1221,10 @@ function formatTimestamp(timestamp) {
     
     try {
         const date = new Date(timestamp);
+        if (Number.isNaN(date.getTime())) {
+            return 'Invalid date';
+        }
+
         const now = new Date();
         const diffMs = now - date;
         const diffMins = Math.floor(diffMs / 60000);

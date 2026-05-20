@@ -146,10 +146,35 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 ### 9. Quiz `/check-answer` and chat `/check-practice-answer` are parallel implementations with divergent contracts
 
 - **Where:**
-  - `src/routes/quiz.js` line 186 — requires `{ courseId, questionId, lectureName, studentAnswer }`. Looks up the question via `CourseModel.getAssessmentQuestions`.
+  - `src/routes/quiz.js` `POST /check-answer` — requires `{ courseId, questionId, lectureName, studentAnswer }`. Looks up the question via `CourseModel.getAssessmentQuestions`.
   - `src/routes/chat.js` line 1281 — requires `{ practiceId, studentAnswer }`. Looks up the question from an in-memory store keyed by `practiceId`.
 - **Symptom:** Same conceptual operation ("check this student's answer to this question") implemented two ways with different request shapes, different lookup mechanisms, different response payloads, and different error handling. They both have the (now-fixed) string-comparison logic; future bugs fixed in one won't propagate to the other.
 - **Fix:** Extract a shared `evaluateObjectiveAnswer(question, studentAnswer)` utility that both routes call. Keep the two endpoints (they serve different UIs / lookup paths) but the core logic should live in one place.
+
+### 9b. ✅ FIXED — 🔒 `/api/quiz/check-answer` bypassed quiz visibility gates
+
+- **Where:** `src/routes/quiz.js` `POST /check-answer`.
+- **Was:** The endpoint looked up `{ courseId, lectureName, questionId }`
+  directly and returned the answer verdict even when quiz practice was disabled,
+  the unit was unpublished, or the unit was outside `testableUnits`.
+- **Now:** `check-answer` uses the same quiz-enabled, published-unit, testable-unit,
+  and active-question checks as the student question list before evaluating.
+- **Failing tests (now green):** `tests/e2e/quiz-api.spec.js` ›
+  "PRODUCT BUG: /check-answer reveals answers even when the quiz is disabled"
+  and "PRODUCT BUG: /check-answer reveals answers for questions in unpublished
+  units".
+
+### 9c. ✅ FIXED — 🔒 `/api/quiz/attempt` trusted a student-supplied `correct` flag
+
+- **Where:** `src/routes/quiz.js` `POST /attempt`.
+- **Was:** The route persisted `Boolean(req.body.correct)` without checking the
+  submitted answer against the stored objective-question answer.
+- **Now:** Objective attempts are rejected when the submitted `correct` flag
+  contradicts the canonical answer, so fabricated correct attempts are not
+  stored or counted in history.
+- **Failing test (now green):** `tests/e2e/quiz-api.spec.js` ›
+  "PRODUCT BUG: /attempt trusts a student-supplied `correct` flag without
+  cross-checking".
 
 ### 10. Soft-delete invariant is enforced inconsistently across `getCourse*` helpers
 
@@ -728,6 +753,169 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   "Security — student-controlled inputs that bypass auth".
 - **Pattern:** Request body/path identity must be treated as the target record,
   not as authorization. See Redundancies R19.
+
+### 43. ✅ FIXED — 🔒 TA sessions could load instructor-only pages directly
+
+- **Where:** `src/server.js` protected page routes for `/instructor/home`,
+  `/instructor/settings`, and `/instructor/downloads`.
+- **Was:** The home/settings routes used `requireInstructorOrTA`, so direct
+  TA navigation loaded instructor-only pages. The downloads route failed the
+  system-admin check but redirected the TA to `/instructor/home`, which was
+  also reachable.
+- **Now:** TA direct navigation to instructor-only pages redirects to TA pages
+  before instructor HTML is served. Shared TA-enabled instructor pages, such as
+  course documents and flagged content, still use the existing TA permission
+  gates.
+- **Failing test (now green):** `tests/e2e/ta.spec.js` ›
+  "TA cannot access instructor home, settings, downloads, or student hub pages".
+- **Pattern:** Page route role guards must distinguish "shared instructor/TA
+  shell" routes from truly instructor-only pages. See Redundancies R20.
+
+### 44. ✅ FIXED — 🔒 Flag and TA course APIs did not consistently enforce course-scoped permissions
+
+- **Where:** `src/routes/flags.js`, `src/routes/courses.js`, and
+  `public/ta/scripts/ta-home.js`.
+- **Was:** Several direct APIs either trusted broad role checks or stale course
+  context. `/api/flags/my` could return a student's flags for courses they no
+  longer had access to; `/api/flags/status/:status` could leak flags from
+  courses outside the caller's review scope; TA flag read/write endpoints did
+  not consistently enforce `canAccessFlags`; and course content mutation
+  endpoints allowed TA/course access to be inferred too broadly or from
+  body-supplied instructor identity. The TA dashboard could also let a stale
+  persisted preference override the currently assigned course list.
+- **Now:** Flag reads are filtered to courses the caller may actually review,
+  student flag reads are filtered by current enrollment, flag mutations require
+  course-scoped `canAccessFlags` for TAs, and the affected course-content
+  mutation APIs require course-scoped management access tied to the session
+  user. TA dashboard initial course selection now prefers assigned course data
+  over stale profile preference data.
+- **Failing tests (now green):**
+  - `tests/e2e/flagging.spec.js` › "DESIRED: direct /my access does not return
+    flags from courses where the student is not enrolled"
+  - `tests/e2e/flagging.spec.js` › "DESIRED: scopes results to courses the
+    caller teaches — should NOT leak flags from an unrelated instructor's
+    course"
+  - `tests/e2e/ta.spec.js` › "TA with canAccessFlags=false is hidden from and
+    denied flagged-content access"
+  - `tests/e2e/ta.spec.js` › "TA with canAccessCourses=false cannot mutate
+    topics or unit structure by direct API"
+  - `tests/e2e/ta.spec.js` › "TA with canAccessFlags=false cannot respond,
+    status-update, or delete flags by direct API"
+  - `tests/e2e/ta.spec.js` › "TA permissions are scoped to the requested
+    course, not any course with that permission"
+  - `tests/e2e/ta.spec.js` › "TA with canAccessFlags=false cannot use
+    non-course-scoped flag APIs"
+- **Pattern:** Course-scoped permissions must be checked against the requested
+  resource and the session user, not inferred from any matching role or
+  client-supplied course/instructor context. See Redundancies R10.
+
+### 45. ✅ FIXED — 🔒 TA settings and flag-status flows used the wrong course/actor context
+
+- **Where:** `public/ta/scripts/ta-settings.js`,
+  `src/routes/settings.js`, and `src/models/FlaggedQuestion.js`.
+- **Was:** TA settings UI checked permissions across all assigned courses, so
+  `?courseId=...` could show and navigate with permissions from another
+  selected or stale course. Direct course settings mutation APIs accepted TA
+  sessions with course upload access and wrote instructor-only settings.
+  Status-only flag moderation changed the flag status but did not persist the
+  acting TA/instructor id for audit.
+- **Now:** TA settings permission display/navigation is evaluated against the
+  URL-selected course context, settings writes require an instructor who owns
+  the requested course, and status-only flag moderation records
+  `instructorId`.
+- **Failing tests (now green):**
+  - `tests/e2e/ta.spec.js` › "TA with flag permission can review and dismiss
+    a seeded flag"
+  - `tests/e2e/ta.spec.js` › "TA settings displays account details and
+    permission status"
+  - `tests/e2e/ta.spec.js` › "TA settings navigation respects the selected
+    course permission context"
+  - `tests/e2e/ta.spec.js` › "TA cannot mutate instructor settings APIs even
+    when course upload permission is allowed"
+- **Pattern:** UI and API permission checks must use the requested course
+  context, and instructor-only settings writes must not be inferred from TA
+  course feature permissions. See Redundancies R10.
+
+### 46. ✅ FIXED — 🧪 TA spec setup left stale assignments from other tests
+
+- **Where:** `tests/e2e/ta.spec.js` `resetTAUserState()`.
+- **Was:** Several TA dashboard tests claimed to seed zero or one assigned
+  course, but the helper only deleted that file's known course ids. If another
+  spec had previously assigned the same TA to a different course, `/api/courses/ta/:taId`
+  correctly returned that stale assignment and the tests failed against valid
+  product behavior.
+- **Now:** The TA spec setup removes the test TA from all existing course
+  assignments, unsets per-course TA permissions, and clears stale selected
+  course preference before seeding the scenario under test.
+- **Failing tests (now green):**
+  - `tests/e2e/ta.spec.js` › "TA dashboard marks an assigned inactive course
+    while preserving permitted actions"
+  - `tests/e2e/ta.spec.js` › "TA with no assigned courses sees an empty
+    dashboard state and no course actions"
+  - `tests/e2e/ta.spec.js` › "TA assignment revocation blocks stale
+    selected-course access"
+- **Pattern:** This was a test fixture isolation issue, not a production
+  behavior bug.
+
+### 47. ✅ FIXED — 🚩 Flagged-content page duplicate no-course redirect and browser-only TA coverage drift
+
+- **Where:** `public/instructor/scripts/flagged.js` and
+  `tests/e2e/flagged-coverage.spec.js`.
+- **Was:** When no course could be resolved, `getCurrentCourseId()` scheduled
+  an onboarding redirect and `loadFlaggedContent()` showed the same error
+  notification and redirect again. The browser-only flagged coverage spec also
+  tried to exercise TA sidebar branches while navigating through the real
+  server page guard, so the mocked API state never loaded the HTML for TA
+  scenarios. Two assertions also contradicted the page helpers by expecting
+  lowercase `tutor mode` / platform-specific invalid-date output.
+- **Now:** The no-course redirect path is guarded by one shared in-flight flag,
+  invalid timestamps return the intended fallback text, and the TA browser
+  harness serves the page HTML directly while mocking the API surface it is
+  designed to cover.
+- **Failing tests (now green):**
+  - `tests/e2e/flagged-coverage.spec.js` › "renders multiple flag cards
+    (reasons, priorities, resolved response, status text) and updates stats"
+  - `tests/e2e/flagged-coverage.spec.js` › "redirect-on-missing-course path:
+    API returns no courses, page shows notification and navigates to onboarding"
+  - `tests/e2e/flagged-coverage.spec.js` › "TA sees TA nav rows, instructor
+    rows are hidden, and \"My Courses\" link navigates when permitted"
+  - `tests/e2e/flagged-coverage.spec.js` › "TA cannot navigate when the
+    selected course denies that feature — shows a notification and stays put"
+  - `tests/e2e/flagged-coverage.spec.js` › "TA with zero assigned courses gets
+    a warning notification on navigation attempts"
+  - `tests/e2e/flagged-coverage.spec.js` › "display helpers cover every reason
+    / bot mode / status mapping"
+- **Pattern:** Mixed product and test-harness cleanup; no shared redundancy
+  entry applies.
+
+### 48. ✅ FIXED — 🔒 Student flag notifications trusted foreign flag rows from `/api/flags/my`
+
+- **Where:** `public/student/scripts/flag-notifications.js`.
+- **Was:** The notification poller fetched `/api/flags/my` without the
+  selected course context and then compared/stored every returned flag. If the
+  API ever returned a flag for another course or another student, the client
+  could show a notification for data outside the active student/course.
+- **Now:** The poller includes `courseId` when a selected course exists,
+  persists `courseId`/`studentId` in its local snapshot, and filters current
+  plus stored flags against the active student and selected course before
+  detecting changes or saving state.
+- **Failing test (now green):** `tests/e2e/flag-notifications.spec.js` ›
+  "DESIRED: ignores cross-student or non-selected-course flags if the API
+  response contains them".
+- **Pattern:** Client-side context checks mirror the server-side course/user
+  scoping work tracked in Redundancies R10.
+
+### 49. ✅ FIXED — 📝 Agreement modal reused student copy for instructor and TA contexts
+
+- **Where:** `public/common/scripts/agreement-modal.js`.
+- **Was:** The shared agreement modal always rendered student-oriented copy
+  (`Your AI-Powered Study Assistant`) even when opened from instructor or TA
+  paths. The modal is shared and can be displayed in all three contexts.
+- **Now:** The modal chooses static copy from the current path: student copy is
+  unchanged, instructor paths render instructor-tool copy, and TA paths render
+  TA-tool copy.
+- **Failing test (now green):** `tests/e2e/agreement-modal-branches.spec.js`
+  › "student, instructor, and TA contexts render distinct copy".
 
 ## Duplicate top-level declarations in `public/instructor/scripts/instructor.js`
 

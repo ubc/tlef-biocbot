@@ -265,7 +265,14 @@ app.get('/test-qdrant', async (req, res) => {
  * Set up protected routes after authentication middleware is initialized
  */
 function setupProtectedRoutes() {
-    app.get('/instructor/downloads.html', authMiddleware.requireInstructorOrTA, authMiddleware.requireSystemAdmin, (req, res) => {
+    const redirectTATo = (targetPath) => (req, res, next) => {
+        if (req.user && req.user.role === 'ta') {
+            return res.redirect(targetPath);
+        }
+        next();
+    };
+
+    app.get('/instructor/downloads.html', authMiddleware.requireInstructorOrTA, redirectTATo('/ta'), authMiddleware.requireSystemAdmin, (req, res) => {
         res.sendFile(path.join(__dirname, '../public/instructor/downloads.html'));
     });
 
@@ -364,11 +371,11 @@ function setupProtectedRoutes() {
         }
     });
 
-    app.get('/instructor/settings', authMiddleware.requireInstructorOrTA, (req, res) => {
+    app.get('/instructor/settings', authMiddleware.requireInstructorOrTA, redirectTATo('/ta/settings'), (req, res) => {
         res.sendFile(path.join(__dirname, '../public/instructor/settings.html'));
     });
 
-    app.get('/instructor/home', authMiddleware.requireInstructorOrTA, (req, res) => {
+    app.get('/instructor/home', authMiddleware.requireInstructorOrTA, redirectTATo('/ta'), (req, res) => {
         res.sendFile(path.join(__dirname, '../public/instructor/home.html'));
     });
 
@@ -380,7 +387,7 @@ function setupProtectedRoutes() {
         res.sendFile(path.join(__dirname, '../public/instructor/flagged.html'));
     });
 
-    app.get('/instructor/downloads', authMiddleware.requireInstructorOrTA, authMiddleware.requireSystemAdmin, (req, res) => {
+    app.get('/instructor/downloads', authMiddleware.requireInstructorOrTA, redirectTATo('/ta'), authMiddleware.requireSystemAdmin, (req, res) => {
         res.sendFile(path.join(__dirname, '../public/instructor/downloads.html'));
     });
 

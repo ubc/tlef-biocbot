@@ -134,7 +134,7 @@ async function loadHarness(page, options = {}) {
         body: JSON.stringify({ success: true, data: { sessions: [] } }),
     }));
 
-    await page.route('**/api/flags/my', async (route) => {
+    await page.route('**/api/flags/my**', async (route) => {
         apiRequests.push({
             url: route.request().url(),
             headers: route.request().headers(),

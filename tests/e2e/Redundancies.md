@@ -140,9 +140,9 @@ Status legend: 🟥 open · 🟡 partial · ✅ fixed · ⏸ deferred
 
 ## Parallel implementations of the same operation
 
-### R5. Answer-checking endpoint exists twice 🟥 open
+### R5. Answer-checking endpoint exists twice 🟡 partial
 
-- **Where:** `POST /api/quiz/check-answer` (`src/routes/quiz.js:186`) and
+- **Where:** `POST /api/quiz/check-answer` (`src/routes/quiz.js`) and
   `POST /api/chat/check-practice-answer` (`src/routes/chat.js:1281`).
 - **Why it duplicates:** Different request shapes, different question lookup
   paths, different response payloads — but the core comparison logic is the
@@ -150,6 +150,10 @@ Status legend: 🟥 open · 🟡 partial · ✅ fixed · ⏸ deferred
 - **Fix direction:** Extract `evaluateObjectiveAnswer(question, studentAnswer)`
   used by both endpoints. Endpoints stay (different UIs hit them), shared
   logic lives in one place.
+- **Progress:** `src/routes/quiz.js` now has one local objective-answer
+  evaluator and gates `/check-answer`/`/attempt` through quiz visibility before
+  exposing or persisting results; the chat endpoint still needs the shared
+  utility extraction.
 - **Source:** [FINDINGS #9](FINDINGS.md).
 
 ### R6. Document ingest split across two endpoints 🟥 open
@@ -222,7 +226,19 @@ Status legend: 🟥 open · 🟡 partial · ✅ fixed · ⏸ deferred
     `src/routes/qdrant.js`: direct document/vector APIs now reject students,
     check requested-course access for instructors/TAs, and do not trust
     body-supplied `instructorId` for document mutations.
-- **Source:** [FINDINGS #18, #23, #24, #34, #34b, #40, #41](FINDINGS.md).
+  - FINDING #44 fixed a flags/course-content slice: flag reads and mutations
+    now enforce requested-course access and TA `canAccessFlags`, student flag
+    reads are filtered by current enrollment, course content mutations check
+    session-user course management access, and TA dashboard selection no
+    longer prefers stale profile course context over assigned course data.
+  - FINDING #45 fixed TA settings and course-settings writes: TA settings UI
+    now evaluates the URL-selected course permissions, direct settings writes
+    require instructor ownership, and status-only flag moderation records the
+    acting user id.
+  - FINDING #48 fixed student flag notifications: the client now requests
+    flags for the selected course and ignores any returned rows whose
+    `courseId` or `studentId` do not match the active student context.
+- **Source:** [FINDINGS #18, #23, #24, #34, #34b, #40, #41, #44, #45, #48](FINDINGS.md).
 
 ### R19. Student/user identity accepted from body or path ✅ fixed for chat/history cluster
 
@@ -237,6 +253,19 @@ Status legend: 🟥 open · 🟡 partial · ✅ fixed · ⏸ deferred
   - `GET /api/struggle-activity/student/:userId` rejects student attempts to
     read another student's activity history.
 - **Source:** [FINDING #42](FINDINGS.md).
+
+### R20. Shared TA/instructor page guard reused for instructor-only pages 🟡 partial
+
+- **Pattern:** `requireInstructorOrTA` is correct for shared operational pages
+  but too broad for instructor-only pages. When reused there, direct URL
+  navigation bypasses the frontend sidebar hiding.
+- **Progress:** `src/server.js` now redirects TA requests away from
+  `/instructor/home`, `/instructor/settings`, and `/instructor/downloads`
+  before serving instructor HTML.
+- **Still open:** audit any `.html` static aliases and future instructor page
+  routes so they choose either a shared TA permission gate or instructor-only
+  role gate explicitly.
+- **Source:** [FINDING #43](FINDINGS.md).
 
 ### R11. Soft-delete / inactive filtering: enforced inconsistently 🟡 partial
 
