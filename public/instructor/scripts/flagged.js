@@ -1409,63 +1409,6 @@ async function waitForAuth() {
 }
 
 /**
- * Show notification message
- * @param {string} message - Message to display
- * @param {string} type - Type of notification (success, error, info)
- */
-function showNotification(message, type = 'info') {
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.className = `notification notification-${type}`;
-    notification.textContent = message;
-    
-    // Style the notification
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 12px 20px;
-        border-radius: 4px;
-        color: white;
-        font-weight: 500;
-        z-index: 10000;
-        max-width: 400px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        animation: slideIn 0.3s ease-out;
-    `;
-    
-    // Set background color based on type
-    switch (type) {
-        case 'success':
-            notification.style.backgroundColor = '#10b981';
-            break;
-        case 'error':
-            notification.style.backgroundColor = '#ef4444';
-            break;
-        case 'warning':
-            notification.style.backgroundColor = '#f59e0b';
-            break;
-        default:
-            notification.style.backgroundColor = '#3b82f6';
-    }
-    
-    // Add to page
-    document.body.appendChild(notification);
-    
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-        if (notification.parentNode) {
-            notification.style.animation = 'slideOut 0.3s ease-in';
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.remove();
-                }
-            }, 300);
-        }
-    }, 5000);
-}
-
-/**
  * Load TA permissions for all courses
  */
 async function loadTAPermissions() {

@@ -116,15 +116,17 @@ Status legend: 🟥 open · 🟡 partial · ✅ fixed · ⏸ deferred
 - **Source:** student-dashboard-branches.spec.js
   `uses the page Auth shim for auth checks and logout handling` (now green).
 
-### R2. `instructor.js` declares `showNotification` twice 🟥 open
+### R2. ✅ FIXED — `instructor.js` declared `showNotification` twice
 
-- **Where:** `public/instructor/scripts/instructor.js` lines 344 and 6753.
-- **Effect:** JS hoisting makes the later declaration win; the earlier one is
+- **Where:** Was `public/instructor/scripts/instructor.js` lines 344 and 6753.
+- **Effect:** JS hoisting made the later declaration win; the earlier one was
   dead code that still shows up in coverage as uncovered.
 - **Source:** [FINDINGS #13, #26](FINDINGS.md).
-- **Fix direction:** Delete one. Better — extract to
-  `public/common/scripts/notifications.js` so `onboarding.js`, `student.js`
-  etc. share one implementation.
+- **Fix:** Added `public/common/scripts/notifications.js`, loaded it before
+  the affected page scripts, and removed the simple duplicate
+  `showNotification(message, type)` implementations from instructor/TA pages.
+  `public/student/scripts/flag-notifications.js` remains separate because it
+  has a different object-based API.
 
 ### R3. `instructor.js` declares `waitForAuth` twice 🟥 open
 
