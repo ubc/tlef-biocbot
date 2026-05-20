@@ -5,6 +5,11 @@
 
 let anonymizeStudentsEnabled = false;
 let canBypassInstructorCourseCodes = false;
+// Pinned courseId during a setSelectedCourse cascade. Subroutines call
+// getSelectedCourseId() which would otherwise re-read localStorage on every
+// invocation — and a concurrent test (or another tab) can mutate that storage
+// mid-cascade, causing per-course fetches to fire against a stale course.
+let _pinnedCourseId = null;
 
 document.addEventListener('DOMContentLoaded', function() {
     // Wait for auth to be ready before initializing
@@ -42,8 +47,16 @@ document.addEventListener('DOMContentLoaded', function() {
  */
 async function initializeHomePage() {
     console.log('Home page initialized');
-    
+
     try {
+        // VERY FIRST: if localStorage holds a selectedCourseId that the
+        // current user no longer owns (different role/session, revoked
+        // access, etc.), strip it before ANY other code path can use it.
+        // Otherwise loadFlaggedContent / loadStatistics / checkMissingContent
+        // can fire `/api/*` requests against the stale course inside
+        // setSelectedCourse's reload cascade.
+        await sanitizeStaleSelectedCourseStorage();
+
         // Check onboarding status first - if not complete, show prompt and hide other content
         const isOnboardingComplete = await checkOnboardingStatus();
         
@@ -113,6 +126,39 @@ async function initializeHomePage() {
  * Check if instructor has completed onboarding
  * @returns {Promise<boolean>} True if onboarding is complete, false otherwise
  */
+/**
+ * If localStorage has a selectedCourseId that the current user does not own
+ * (and the URL doesn't override it), remove it before any per-course request
+ * can fire against that stale course. Runs once at page bootstrap.
+ */
+async function sanitizeStaleSelectedCourseStorage() {
+    try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const courseIdFromUrl = urlParams.get('courseId');
+        const courseIdFromStorage = localStorage.getItem('selectedCourseId');
+        if (courseIdFromUrl || !courseIdFromStorage) return;
+
+        const userId = getCurrentInstructorId();
+        if (!userId) return;
+
+        const isTAUser = typeof isTA === 'function' && isTA();
+        const response = await authenticatedFetch(
+            isTAUser ? `/api/courses/ta/${userId}` : `/api/onboarding/instructor/${userId}`
+        );
+        if (!response.ok) return;
+
+        const result = await response.json();
+        const owned = isTAUser ? (result.data || []) : (result.data?.courses || []);
+        const ownsCourse = owned.some((c) => c.courseId === courseIdFromStorage);
+        if (!ownsCourse) {
+            console.log(`Clearing stale selectedCourseId ${courseIdFromStorage} (not in instructor's courses)`);
+            try { localStorage.removeItem('selectedCourseId'); } catch (_) {}
+        }
+    } catch (error) {
+        console.warn('sanitizeStaleSelectedCourseStorage failed:', error);
+    }
+}
+
 async function checkOnboardingStatus() {
     try {
         const instructorId = getCurrentInstructorId();
@@ -1678,6 +1724,41 @@ async function loadCurrentCourse() {
         const courseIdFromStorage = localStorage.getItem('selectedCourseId');
         let courseId = courseIdFromUrl || courseIdFromStorage;
 
+        // When the candidate came only from localStorage (no URL override),
+        // verify it against the user's owned courses BEFORE issuing any
+        // per-course API request. A stale storage value (e.g. from a different
+        // role or revoked access) must not drive requests to that course's
+        // endpoints — those would leak the existence of the course and might
+        // bypass authorization checks downstream.
+        if (!courseIdFromUrl && courseIdFromStorage) {
+            const userId = getCurrentInstructorId();
+            if (userId) {
+                const isTAUser = typeof isTA === 'function' && isTA();
+                const response = await authenticatedFetch(
+                    isTAUser ? `/api/courses/ta/${userId}` : `/api/onboarding/instructor/${userId}`
+                );
+                if (response.ok) {
+                    const result = await response.json();
+                    const ownedCourses = dedupeCourses(
+                        isTAUser ? (result.data || []) : (result.data?.courses || [])
+                    );
+                    if (!ownedCourses.some((c) => c.courseId === courseId)) {
+                        console.log(`Ignoring unauthorized selectedCourseId ${courseId} (not in instructor's courses)`);
+                        if (ownedCourses.length > 0) {
+                            const firstCourse = ownedCourses[0];
+                            await setSelectedCourse(firstCourse.courseId, getCourseDisplayName(firstCourse));
+                            return;
+                        }
+                        // No owned courses at all — clear the stale value so
+                        // the rest of the flow falls through to the empty
+                        // selector instead of fetching the stale courseId.
+                        try { localStorage.removeItem('selectedCourseId'); } catch (_) {}
+                        courseId = null;
+                    }
+                }
+            }
+        }
+
         if (!courseId) {
             // Try to get the first course from the user's courses
             const userId = getCurrentInstructorId();
@@ -1737,6 +1818,11 @@ async function loadCurrentCourse() {
  */
 async function setSelectedCourse(courseId, courseName, courseData = null) {
     let resolvedCourseData = courseData;
+    // Pin the courseId for the duration of this cascade so child loaders
+    // (loadStatistics, loadFlaggedContent, loadStruggleTopics, ...) all see
+    // the same value, even if localStorage gets mutated externally before
+    // the async tail finishes.
+    _pinnedCourseId = courseId;
 
     // Store in localStorage
     localStorage.setItem('selectedCourseId', courseId);
@@ -1820,6 +1906,12 @@ async function setSelectedCourse(courseId, courseName, courseData = null) {
     // Reset and load weekly struggle chart
     weeklyChartOffset = 0;
     await loadWeeklyStruggleChart();
+
+    // Only release the pin once every dependent loader has run. After this
+    // point getSelectedCourseId() falls back to localStorage/URL as usual.
+    if (_pinnedCourseId === courseId) {
+        _pinnedCourseId = null;
+    }
 }
 
 /**
@@ -1830,6 +1922,9 @@ function clearSelectedCourse() {
     const urlParams = new URLSearchParams(window.location.search);
     urlParams.delete('courseId');
     window.history.replaceState({}, '', window.location.pathname);
+    // Drop any pinned course so subsequent getSelectedCourseId() calls
+    // reflect the cleared state immediately.
+    _pinnedCourseId = null;
 }
 
 /**
@@ -2078,6 +2173,10 @@ async function handleJoinCourse() {
  * @returns {string|null} Current course ID or null
  */
 function getSelectedCourseId() {
+    // During a setSelectedCourse(courseId) cascade we pin the courseId so
+    // dependent loaders all use the same value even if localStorage gets
+    // mutated mid-flight.
+    if (_pinnedCourseId) return _pinnedCourseId;
     const urlParams = new URLSearchParams(window.location.search);
     const courseIdFromUrl = urlParams.get('courseId');
     const courseIdFromStorage = localStorage.getItem('selectedCourseId');

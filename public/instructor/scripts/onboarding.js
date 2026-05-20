@@ -2732,12 +2732,20 @@ async function saveAssessment(week) {
         
         console.log(`Saving ${questions.length} questions for course ${courseId}...`);
         
-        // Save each question individually to the backend
+        // Save each question individually to the backend, but skip ones that
+        // were already persisted by the per-add fast path so the same question
+        // doesn't get POSTed twice (and counted twice as a "save").
         const savedQuestions = [];
+        let skippedCount = 0;
         for (let i = 0; i < questions.length; i++) {
             const question = questions[i];
+            if (question.saved) {
+                skippedCount++;
+                console.log(`Skipping question ${i + 1}/${questions.length} (already saved)`);
+                continue;
+            }
             console.log(`Saving question ${i + 1}/${questions.length}:`, question);
-            
+
             try {
                 // Pass the full question object instead of just the question text
                 const result = await saveUnit1AssessmentQuestion(courseId, 'Unit 1', question, instructorId);
