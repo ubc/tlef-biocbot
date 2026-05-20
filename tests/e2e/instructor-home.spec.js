@@ -58,8 +58,11 @@ function completeLecture(name) {
     };
 }
 
-function courseDoc(base, instructorId) {
-    const now = new Date();
+function courseDoc(base, instructorId, fixedNow) {
+    // Caller may pass a shared timestamp so Alpha and Beta land on identical
+    // createdAt/updatedAt — the server's sortCoursesWithInactiveLast tie-breaks
+    // by courseName, giving Alpha the deterministic first slot the tests rely on.
+    const now = fixedNow instanceof Date ? fixedNow : new Date();
     return {
         ...base,
         instructorId,
@@ -118,8 +121,9 @@ async function seedInstructorHomeCourses() {
             { userId: instructor.userId },
             { $set: { 'preferences.courseId': null } }
         );
+        const seedTime = new Date();
         await db.collection('courses').insertMany(
-            INSTRUCTOR_COURSES.map((course) => courseDoc(course, instructor.userId))
+            INSTRUCTOR_COURSES.map((course) => courseDoc(course, instructor.userId, seedTime))
         );
         await db.collection('chat_sessions').insertMany([
             chatSession('HOME-E2E-ALPHA', 'home-alpha-1', 'alpha-student', 'tutor', now, oneMinuteLater),
@@ -758,9 +762,14 @@ test.describe('Instructor home dashboard', () => {
             const testWindow = /** @type {any} */ (window);
             return testWindow.loadCurrentCourse();
         });
-        await expect(page.locator('#course-selector')).toBeVisible();
+        // After the instructor-home stale-course fix, an unowned storage
+        // courseId is intercepted by the owned-courses pre-check instead of
+        // by a 403 from /api/courses/:id. The instructor still has Alpha &
+        // Beta seeded, so loadCurrentCourse falls back to the first owned
+        // course rather than dropping back to the course selector.
+        await expect(page.locator('#course-name-display')).toHaveText('Alpha Home Biology', { timeout: 15_000 });
         await expect.poll(() => page.evaluate(() => window.localStorage.getItem('selectedCourseId')))
-            .toBeNull();
+            .toBe('HOME-E2E-ALPHA');
 
         const taOnboarding = await page.evaluate(async () => {
             const testWindow = /** @type {any} */ (window);

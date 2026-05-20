@@ -377,15 +377,34 @@ test.describe('promote-to-ta + DELETE /tas/:taId', () => {
     });
 
     test('happy path promotes a student to TA and assigns invitedCourses', async ({ request: api }) => {
-        const res = await api.post('/api/auth/promote-to-ta', {
-            data: { userId: promotedUserId, courseId: 'BIOC-E2E-API-AUTH-X' },
-        });
-        expect(res.ok()).toBeTruthy();
-        const doc = await withDb((db) =>
-            db.collection('users').findOne({ userId: promotedUserId })
+        // promote-to-ta now verifies the instructor owns the course before
+        // attaching it to the new TA's invitedCourses, so the course must
+        // exist with this instructor as owner for the happy-path assertion.
+        await withDb((db) =>
+            db.collection('courses').insertOne({
+                courseId: 'BIOC-E2E-API-AUTH-X',
+                courseName: 'Auth Promote Target',
+                instructorId,
+                instructors: [instructorId],
+                status: 'active',
+                lectures: [],
+            })
         );
-        expect(doc.role).toBe('ta');
-        expect(doc.invitedCourses).toContain('BIOC-E2E-API-AUTH-X');
+        try {
+            const res = await api.post('/api/auth/promote-to-ta', {
+                data: { userId: promotedUserId, courseId: 'BIOC-E2E-API-AUTH-X' },
+            });
+            expect(res.ok()).toBeTruthy();
+            const doc = await withDb((db) =>
+                db.collection('users').findOne({ userId: promotedUserId })
+            );
+            expect(doc.role).toBe('ta');
+            expect(doc.invitedCourses).toContain('BIOC-E2E-API-AUTH-X');
+        } finally {
+            await withDb((db) =>
+                db.collection('courses').deleteOne({ courseId: 'BIOC-E2E-API-AUTH-X' })
+            );
+        }
     });
 
     test('DELETE /tas/:taId demotes a TA back to student and pulls them from courses', async ({ request: api }) => {

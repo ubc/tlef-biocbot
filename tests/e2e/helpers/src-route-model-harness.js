@@ -309,7 +309,29 @@ function applyMode(mode) {
         state.user = { ...baseUser, role: 'instructor', permissions: { systemAdmin: true } };
         state.db = null;
     }
-    if (state.mode === 'qdrant-cleanup-no-db') state.db = null;
+    if (state.mode === 'qdrant-cleanup-no-db') {
+        // requireDirectQdrantAccess returns 401 if no user, before the
+        // db-missing 503 branch is reachable.
+        state.user = { ...baseUser, userId: 'inst', role: 'instructor' };
+        CourseModel.userHasCourseAccess = async () => true;
+        state.db = null;
+    }
+    // The remaining qdrant-* modes hit routes guarded by
+    // requireDirectQdrantAccess. Without a user they'd return 401 long before
+    // reaching the service-failure / collection-failure branches under test.
+    if (
+        state.mode === 'qdrant-process-fails'
+        || state.mode === 'qdrant-process-throws'
+        || state.mode === 'qdrant-search-throws'
+        || state.mode === 'qdrant-delete-throws'
+        || state.mode === 'qdrant-delete-fails'
+        || state.mode === 'qdrant-collection-throws'
+        || state.mode === 'qdrant-collection-fails'
+        || state.mode === 'qdrant-stats-throws'
+    ) {
+        state.user = { ...baseUser, userId: 'inst', role: 'instructor' };
+        CourseModel.userHasCourseAccess = async () => true;
+    }
 }
 
 applyMode('');

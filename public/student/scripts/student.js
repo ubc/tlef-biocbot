@@ -4004,9 +4004,15 @@ function showNoQuestionsMessage() {
     // Set a global flag to prevent chat functionality
     window.noPublishedUnits = true;
 
-    // Set default mode to tutor
-    localStorage.setItem('studentMode', 'tutor');
-    updateModeToggleUI('tutor');
+    // Default mode to tutor only when the student has never explicitly toggled
+    // (lastModeChange is only set by the mode-toggle handler). Otherwise we
+    // overwrite the user's deliberate selection every time this branch runs.
+    if (!localStorage.getItem('lastModeChange')) {
+        localStorage.setItem('studentMode', 'tutor');
+        updateModeToggleUI('tutor');
+    } else {
+        updateModeToggleUI(localStorage.getItem('studentMode') || 'tutor');
+    }
 
     // Show chat input container but disable the input
     const chatInputContainer = document.querySelector('.chat-input-container');
@@ -4484,9 +4490,13 @@ async function loadQuestionsForSelectedUnit(unitName) {
 function showNoQuestionsForUnitMessage(unitName) {
 
 
-    // Set default mode to tutor
-    localStorage.setItem('studentMode', 'tutor');
-    updateModeToggleUI('tutor');
+    // Default mode to tutor only if the student hasn't explicitly toggled.
+    if (!localStorage.getItem('lastModeChange')) {
+        localStorage.setItem('studentMode', 'tutor');
+        updateModeToggleUI('tutor');
+    } else {
+        updateModeToggleUI(localStorage.getItem('studentMode') || 'tutor');
+    }
 
     // Enable chat since questions are available for this unit
     enableChatInput();

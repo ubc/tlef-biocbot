@@ -453,24 +453,32 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **Fix:** Default to an empty object — `const { instructorId } = req.body || {};` —
   or read the querystring first.
 
-### 32. `/stats` and `/course-material` handlers in `routes/questions.js` are shadowed by `/:questionId`
+### 32. ✅ FIXED — `/stats` and `/course-material` handlers in `routes/questions.js` were shadowed by `/:questionId`
 
-- **Where:** `src/routes/questions.js` — `/:questionId` is registered at line
-  452, well before `/stats` (line 646) and `/course-material` (line 839).
-- **Symptom:** Express matches the dynamic `/:questionId` first for any
-  single-segment GET, so `GET /api/questions/stats` and
-  `GET /api/questions/course-material` are treated as questionId lookups,
-  return 404, and the actual handlers never run.
-- **Why it matters:** Two documented endpoints are completely unreachable.
-  The course-material content fetch is required for AI question generation
-  diagnostics; the stats endpoint is wired into the instructor dashboard.
-- **Failing tests:** `tests/e2e/routes-questions-api.spec.js` ›
-  "PRODUCT BUG: /stats is shadowed by /:questionId" and
-  "PRODUCT BUG: /course-material is shadowed by /:questionId".
-- **Fix:** Reorder the `router.get` calls so the static paths are registered
-  before the parameterised one — mirroring the comment already in
-  `routes/courses.js` ("must come before /:courseId to avoid route matching
-  issues").
+- **Was:** `/:questionId` was registered at line 452 (before `/stats` at line
+  646 and `/course-material` at line 839). Express matched the dynamic
+  `/:questionId` first for any single-segment GET, so requests to
+  `/api/questions/stats` and `/api/questions/course-material` were treated as
+  questionId lookups and 404'd.
+- **Now:** Routes are reordered so the static paths (`/stats`,
+  `/course-material`, `/lecture`, `/bulk`, `/auto-link-learning-objectives`,
+  `/check-answer`, `/generate-ai`) are declared **before** the parameterised
+  `/:questionId`. The previously-unreachable handlers now run.
+- **Failing tests (now green):** `tests/e2e/routes-questions-api.spec.js` ›
+  "GET /api/questions/stats" suite (400 missing, zero-count, aggregation,
+  course-not-found) and the `/course-material` happy path.
+
+### 32a. `/stats` response shape is inconsistent between course-found and course-missing paths
+
+- **Where:** `src/routes/questions.js` `GET /stats` — lines ~607–656.
+- **Symptom:** When the course doesn't exist or has no lectures the response
+  returns the counts at `data.totalQuestions` / `data.totalPoints` /
+  `data.typeBreakdown`. When the course exists the same counts are returned
+  one level deeper at `data.stats.totalQuestions` etc.
+- **Why it matters:** Frontend or downstream tooling has to guess which shape
+  to read; any consumer that picks one shape silently misreads the other.
+- **Fix:** Pick one shape (probably `data.stats.*`) and use it in both
+  branches.
 
 ### 33. `/stats` in `routes/onboarding.js` is shadowed by `/:courseId`
 
@@ -982,3 +990,89 @@ covered by fake harness markup:
 
 These should be deleted or moved to a page-specific stylesheet if the product
 no longer renders the corresponding UI.
+
+### ✅ FIXED — `home.js` setSelectedCourse cascade read localStorage on every step
+
+- **Where:** `public/instructor/scripts/home.js` `setSelectedCourse()` and the
+  subroutines it awaits (`loadStatistics`, `loadFlaggedContent`,
+  `checkMissingContent`, `loadStruggleTopics`, `loadApprovedGlobalTopics`,
+  `loadPersistenceTopics`, `loadInitialStruggleActivity`,
+  `loadWeeklyStruggleChart`).
+- **Was:** Each subroutine called `getSelectedCourseId()` which re-reads
+  `localStorage`. The cascade is interruptible — between the DOM update and
+  the tail of background loaders, anything else (a Playwright `page.evaluate`,
+  another tab, a stale event handler) could flip `localStorage.selectedCourseId`
+  to a different value, and the loaders would suddenly fire `/api/*` requests
+  against that other course.
+- **Now:** `setSelectedCourse(courseId)` pins the active courseId in a
+  module-level `_pinnedCourseId` for the duration of the cascade.
+  `getSelectedCourseId()` returns the pin first, so dependent loaders always
+  see the same value. The pin is cleared once the cascade ends, and also when
+  `clearSelectedCourse()` runs.
+- **Failing test (now green):** `tests/e2e/instructor-home.spec.js` › "does
+  not use a stale unauthorized selected course from localStorage".
+
+### ✅ FIXED — instructor home didn't validate localStorage course against owned courses
+
+- **Where:** `public/instructor/scripts/home.js`.
+- **Was:** A stale `selectedCourseId` left over from a different role/session
+  drove `setSelectedCourse(staleCourse)` and triggered per-course fetches
+  against a course the instructor doesn't own.
+- **Now:** New `sanitizeStaleSelectedCourseStorage()` runs at the top of
+  `initializeHomePage()` and strips any `selectedCourseId` that isn't in the
+  instructor's owned courses list (URL `?courseId=` always wins). The
+  pre-validation is also mirrored inside `loadCurrentCourse()` for direct
+  callers.
+- **Failing test (now green):** same as above.
+
+### ✅ FIXED — onboarding `saveAssessment` double-saved already-persisted questions
+
+- **Where:** `public/instructor/scripts/onboarding.js` `saveAssessment()`.
+- **Was:** `saveAssessment()` iterated all questions and unconditionally POSTed
+  each one to `/api/questions`, even ones that the earlier "persist on add"
+  fast path had already saved (`question.saved === true`). E2E coverage that
+  counted POSTs saw two saves per question.
+- **Now:** `saveAssessment()` skips entries with `question.saved === true`, the
+  same guard `saveAllUnit1Data()` already uses.
+- **Failing tests (now green):**
+  `tests/e2e/instructor-onboarding-save-upload-modal-branches.spec.js` ›
+  "skips already saved questions when saving all Unit 1 data" and
+  `tests/e2e/instructor-onboarding-focused.spec.js` ›
+  "covers final onboarding serialization, save-assessment paths, and AI
+  fallback content".
+
+### ✅ FIXED — student-chat mode toggle was overwritten on every "no questions" branch
+
+- **Where:** `public/student/scripts/student.js` `showNoQuestionsMessage()`
+  and `showNoQuestionsForUnitMessage()`.
+- **Was:** Both helpers unconditionally wrote `localStorage.studentMode =
+  'tutor'`, which clobbered an explicit student toggle on every render. After
+  the mode toggle's change handler set `'protege'`, the next paint of those
+  messages reset it back to `'tutor'`.
+- **Now:** Both helpers only seed `'tutor'` when the student has not toggled
+  yet — they check the `lastModeChange` timestamp the toggle handler writes,
+  and otherwise call `updateModeToggleUI(localStorage.studentMode || 'tutor')`.
+- **Failing test (now green):** `tests/e2e/student-chat.spec.js` › "mode
+  toggle defaults to Tutor and persists changes to localStorage".
+
+### ✅ FIXED — qdrant harness branches reached 401 before exercising the failure under test
+
+- **Where:** `tests/e2e/helpers/src-route-model-harness.js`.
+- **Was:** The harness modes for `qdrant-process-fails`, `qdrant-search-throws`,
+  `qdrant-delete-fails`, `qdrant-collection-fails`, `qdrant-cleanup-no-db`,
+  etc. did not set `state.user`. `requireDirectQdrantAccess` then short-circuits
+  on `!req.user` with a 401, so the qdrant route's actual failure branch was
+  unreachable from the harness.
+- **Now:** Each of those modes installs an instructor user (and stubs
+  `CourseModel.userHasCourseAccess` where needed) so the request reaches the
+  service-layer failure the spec is targeting.
+
+### ✅ FIXED — promote-to-ta happy-path test relied on no course check
+
+- **Where:** `tests/e2e/routes-auth-api.spec.js` › "happy path promotes a
+  student to TA and assigns invitedCourses".
+- **Was:** Test POSTed `courseId: 'BIOC-E2E-API-AUTH-X'` without seeding it.
+  After the FINDINGS course-ownership check landed on `POST
+  /api/auth/promote-to-ta`, the route correctly 404'd and the test failed.
+- **Now:** Test seeds the course owned by the test instructor before promoting,
+  asserts the happy path, then cleans up the course.
