@@ -56,35 +56,31 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 
 ## Individual findings
 
-### 1. `instructor.js` saves true/false `correctAnswer` as a string
+### 1. ✅ FIXED — `instructor.js` saves true/false `correctAnswer` as a string
 
 - **Where:** `public/instructor/scripts/instructor.js` `saveQuestion()` (~line 4207)
-- **Symptom:** Persists `correctAnswer: "true"` (string) instead of boolean `true`.
-- **Compare to:** `onboarding.js` `saveQuestion()` (~line 2228), which correctly
-  coerces the modal state to boolean before a later helper turns it back into a
-  string for the API.
-- **Failing test:** `tests/e2e/instructor.spec.js` › "instructor can add an assessment question to a unit"
-- **Fix:** Phase 2a/2b.
+- **Was:** Persisted `correctAnswer: "true"` (string).
+- **Now:** Converts the modal state at the wire boundary — TF answers ship as
+  booleans, MCQ options as an ordered array, MCQ `correctAnswer` as a numeric
+  index. Internal display state still uses the legacy in-memory shape, so the
+  existing render helpers continue to work.
+- **Failing test (now green):** `tests/e2e/instructor.spec.js` › "instructor can add an assessment question to a unit"
 
-### 2. `instructor.js` saves MCQ `options` as an object (not an array)
+### 2. ✅ FIXED — `instructor.js` saves MCQ `options` as an object (not an array)
 
 - **Where:** `public/instructor/scripts/instructor.js` `saveQuestion()` (~line 4217)
-- **Symptom:** Persists `options: { A: "...", B: "...", C: "...", D: "..." }`.
-- **Compare to:** `onboarding.js` `saveQuestion()` (~line 2258) uses an array
-  in memory, but `saveUnit1AssessmentQuestion()` (~line 3711) converts that
-  array back to an object before POSTing.
-- **Failing test:** `tests/e2e/instructor.spec.js` › "instructor can add a multiple-choice question to a unit"
-- **Fix:** Phase 2b.
+- **Was:** Persisted `options: { A: "...", B: "...", C: "...", D: "..." }`.
+- **Now:** Saves an ordered array of option strings; #1's wire-boundary
+  conversion translates the internal object shape to an array before POSTing.
+- **Failing test (now green):** `tests/e2e/instructor.spec.js` › "instructor can add a multiple-choice question to a unit"
 
-### 3. `instructor.js` saves MCQ `correctAnswer` as a letter (not a numeric index)
+### 3. ✅ FIXED — `instructor.js` saves MCQ `correctAnswer` as a letter (not a numeric index)
 
 - **Where:** `public/instructor/scripts/instructor.js` `saveQuestion()` (~line 4240)
-- **Symptom:** `correctAnswer: "C"` instead of `2`.
-- **Compare to:** `onboarding.js` `saveQuestion()` (~line 2269) stores the array
-  index in memory, but `saveUnit1AssessmentQuestion()` (~line 3721) converts the
-  index back to a letter before POSTing.
-- **Failing test:** `tests/e2e/instructor.spec.js` › "instructor can add a multiple-choice question to a unit"
-- **Fix:** Phase 2b (depends on #2 — options must be an array first).
+- **Was:** Persisted `correctAnswer: "C"` instead of `2`.
+- **Now:** Converts the selected letter to its array index at the wire
+  boundary alongside the options-shape conversion in #2.
+- **Failing test (now green):** `tests/e2e/instructor.spec.js` › "instructor can add a multiple-choice question to a unit"
 
 ### 4. ✅ FIXED (Phase 1) — `quiz.js` / `chat.js` could throw on non-string `correctAnswer`
 

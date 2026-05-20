@@ -1676,8 +1676,8 @@ async function loadCurrentCourse() {
         const urlParams = new URLSearchParams(window.location.search);
         const courseIdFromUrl = urlParams.get('courseId');
         const courseIdFromStorage = localStorage.getItem('selectedCourseId');
-        const courseId = courseIdFromUrl || courseIdFromStorage;
-        
+        let courseId = courseIdFromUrl || courseIdFromStorage;
+
         if (!courseId) {
             // Try to get the first course from the user's courses
             const userId = getCurrentInstructorId();
@@ -1696,12 +1696,12 @@ async function loadCurrentCourse() {
                     }
                 }
             }
-            
+
             // No course found, show course selector
             showCourseSelector();
             return;
         }
-        
+
         // Fetch course details
         const response = await authenticatedFetch(`/api/courses/${courseId}`);
         if (response.ok) {
@@ -1722,7 +1722,7 @@ async function loadCurrentCourse() {
             clearSelectedCourse();
             showCourseSelector();
         }
-        
+
     } catch (error) {
         console.error('Error loading current course:', error);
         showCourseSelector();

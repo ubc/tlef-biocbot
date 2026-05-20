@@ -4291,6 +4291,29 @@ async function saveQuestion() {
             throw new Error('No lecture selected. Please select a lecture first.');
         }
         
+        // Convert modal state to the structured wire shape that matches what
+        // the rest of the stack now expects (FINDINGS #1-#3 / Phase 2b):
+        //   true-false:      correctAnswer is a boolean
+        //   multiple-choice: options is an ordered array of option strings,
+        //                    correctAnswer is the numeric index into that array
+        //   short-answer:    correctAnswer stays a string
+        let wireOptions = question.options || {};
+        let wireCorrectAnswer = question.correctAnswer;
+        if (question.questionType === 'true-false') {
+            wireCorrectAnswer = question.correctAnswer === true
+                || String(question.correctAnswer).toLowerCase() === 'true';
+        } else if (question.questionType === 'multiple-choice') {
+            const optionEntries = Object.entries(question.options || {})
+                .sort(([a], [b]) => a.localeCompare(b));
+            wireOptions = optionEntries.map(([, value]) => value);
+            const letterToIndex = new Map(optionEntries.map(([letter], idx) => [letter, idx]));
+            wireCorrectAnswer = typeof question.correctAnswer === 'number'
+                ? question.correctAnswer
+                : (letterToIndex.has(question.correctAnswer)
+                    ? letterToIndex.get(question.correctAnswer)
+                    : question.correctAnswer);
+        }
+
         const response = await fetch(`${API_BASE_URL}/api/questions`, {
             method: 'POST',
             headers: {
@@ -4302,8 +4325,8 @@ async function saveQuestion() {
                 instructorId: instructorId,
                 questionType: question.questionType,
                 question: question.question,
-                options: question.options || {},
-                correctAnswer: question.correctAnswer,
+                options: wireOptions,
+                correctAnswer: wireCorrectAnswer,
                 explanation: '',
                 difficulty: 'medium',
                 tags: [],

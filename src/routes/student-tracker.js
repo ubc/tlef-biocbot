@@ -19,11 +19,20 @@ router.get('/', async (req, res) => {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
 
-        const struggleState = user.struggleState || { topics: [] };
+        const rawState = user.struggleState || { topics: [] };
+        const requestedCourseId = req.query.courseId || null;
+
+        // Scope topics to the requested course when one is supplied. Topics
+        // saved without a courseId predate the per-course tracking and remain
+        // visible everywhere for backwards compatibility.
+        let topics = Array.isArray(rawState.topics) ? rawState.topics : [];
+        if (requestedCourseId) {
+            topics = topics.filter(t => !t.courseId || t.courseId === requestedCourseId);
+        }
 
         res.json({
             success: true,
-            struggleState
+            struggleState: { ...rawState, topics }
         });
 
     } catch (error) {
@@ -49,10 +58,30 @@ router.post('/reset', async (req, res) => {
         }
 
         const db = req.app.locals.db;
-        
+
         // Use courseId from request body (sent by frontend) or fallback to user preferences
         const courseId = requestCourseId || req.user.preferences?.courseId || null;
-        
+
+        // If we have a specific course, refuse the reset when the student's
+        // access to that course has been revoked. Otherwise a revoked student
+        // could still clear their struggle history for a course they're locked
+        // out of, which the dashboard UI no longer lets them do.
+        if (courseId) {
+            const courseDoc = await db.collection('courses').findOne(
+                { courseId },
+                { projection: { studentEnrollment: 1 } }
+            );
+            const enrollment = courseDoc && courseDoc.studentEnrollment
+                ? courseDoc.studentEnrollment[req.user.userId]
+                : null;
+            if (enrollment && enrollment.enrolled === false) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Your access to this course has been revoked.'
+                });
+            }
+        }
+
         console.log(`🔄 [TRACKER_API] Resetting struggle for user ${req.user.userId}, topic: ${topic}, courseId: ${courseId}`);
 
         const result = await User.resetUserStruggleState(db, req.user.userId, topic, courseId);

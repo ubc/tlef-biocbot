@@ -83,11 +83,37 @@ function applyMode(mode) {
             };
             return;
         case 'throw-getAssessmentQuestions':
+            // /check-answer now goes through the visibility gate before reaching
+            // getAssessmentQuestions, so we have to stub the gate as enabled.
+            CourseModel.getQuizSettings = async () => ({
+                enabled: true,
+                testableUnits: 'all',
+                allowLectureMaterialAccess: true,
+            });
+            CourseModel.getPublishedLectures = async () => ['U'];
             CourseModel.getAssessmentQuestions = async () => {
                 throw new Error('harness: getAssessmentQuestions');
             };
             return;
         case 'throw-saveAttempt':
+            // /attempt now runs the same visibility gate as /check-answer and
+            // cross-checks the submitted `correct` flag against the stored
+            // answer, so the stubbed question must match the test's request:
+            // questionId 'q', lectureName 'U', MCQ correctAnswer 'A' (matching
+            // studentAnswer 'A' so the gate accepts the attempt).
+            CourseModel.getQuizSettings = async () => ({
+                enabled: true,
+                testableUnits: 'all',
+                allowLectureMaterialAccess: true,
+            });
+            CourseModel.getPublishedLectures = async () => ['U'];
+            CourseModel.getAssessmentQuestions = async () => [{
+                questionId: 'q',
+                questionType: 'multiple-choice',
+                question: 'stub',
+                correctAnswer: 'A',
+                isActive: true,
+            }];
             QuizAttempt.saveAttempt = async () => {
                 throw new Error('harness: saveAttempt');
             };
@@ -119,11 +145,21 @@ function applyMode(mode) {
             };
             return;
         case 'check-answer-sa-no-llm':
+            // /check-answer's visibility gate runs before the LLM branch, so the
+            // course must look quiz-enabled and the lecture must be published &
+            // testable for the route to even reach the SA LLM call.
+            CourseModel.getQuizSettings = async () => ({
+                enabled: true,
+                testableUnits: 'all',
+                allowLectureMaterialAccess: true,
+            });
+            CourseModel.getPublishedLectures = async () => ['U'];
             CourseModel.getAssessmentQuestions = async () => [{
                 questionId: 'q-test-sa',
                 questionType: 'short-answer',
                 question: 'Stub short-answer',
                 correctAnswer: 'Stub correct answer',
+                isActive: true,
             }];
             state.llm = null;
             return;

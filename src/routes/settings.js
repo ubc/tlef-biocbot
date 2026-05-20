@@ -38,16 +38,21 @@ async function requireInstructorForCourseSettings(db, req, res, courseId) {
         return false;
     }
 
-    const course = await db.collection('courses').findOne({
-        courseId,
-        status: { $ne: 'deleted' },
-        $or: [
-            { instructorId: req.user.userId },
-            { instructors: req.user.userId }
-        ]
-    }, { projection: { _id: 1 } });
+    // Distinguish "course does not exist" (400) from "course exists but you can't touch it" (403).
+    const existing = await db.collection('courses').findOne(
+        { courseId, status: { $ne: 'deleted' } },
+        { projection: { instructorId: 1, instructors: 1 } }
+    );
 
-    if (!course) {
+    if (!existing) {
+        res.status(400).json({ success: false, message: 'Course not found' });
+        return false;
+    }
+
+    const owns = existing.instructorId === req.user.userId
+        || (Array.isArray(existing.instructors) && existing.instructors.includes(req.user.userId));
+
+    if (!owns) {
         res.status(403).json({ success: false, error: 'Access denied for this course' });
         return false;
     }
