@@ -24,6 +24,7 @@ function initMobileLayout() {
     const updateIcon = (isCollapsed) => {
         toggleBtn.innerHTML = `<span class="toggle-icon">${isCollapsed ? '▼' : '▲'}</span>`;
     };
+    updateIcon(document.body.classList.contains('mobile-collapsed'));
 
     // Toggle Handler
     toggleBtn.addEventListener('click', (e) => {

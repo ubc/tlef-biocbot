@@ -146,10 +146,35 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 ### 9. Quiz `/check-answer` and chat `/check-practice-answer` are parallel implementations with divergent contracts
 
 - **Where:**
-  - `src/routes/quiz.js` line 186 — requires `{ courseId, questionId, lectureName, studentAnswer }`. Looks up the question via `CourseModel.getAssessmentQuestions`.
+  - `src/routes/quiz.js` `POST /check-answer` — requires `{ courseId, questionId, lectureName, studentAnswer }`. Looks up the question via `CourseModel.getAssessmentQuestions`.
   - `src/routes/chat.js` line 1281 — requires `{ practiceId, studentAnswer }`. Looks up the question from an in-memory store keyed by `practiceId`.
 - **Symptom:** Same conceptual operation ("check this student's answer to this question") implemented two ways with different request shapes, different lookup mechanisms, different response payloads, and different error handling. They both have the (now-fixed) string-comparison logic; future bugs fixed in one won't propagate to the other.
 - **Fix:** Extract a shared `evaluateObjectiveAnswer(question, studentAnswer)` utility that both routes call. Keep the two endpoints (they serve different UIs / lookup paths) but the core logic should live in one place.
+
+### 9b. ✅ FIXED — 🔒 `/api/quiz/check-answer` bypassed quiz visibility gates
+
+- **Where:** `src/routes/quiz.js` `POST /check-answer`.
+- **Was:** The endpoint looked up `{ courseId, lectureName, questionId }`
+  directly and returned the answer verdict even when quiz practice was disabled,
+  the unit was unpublished, or the unit was outside `testableUnits`.
+- **Now:** `check-answer` uses the same quiz-enabled, published-unit, testable-unit,
+  and active-question checks as the student question list before evaluating.
+- **Failing tests (now green):** `tests/e2e/quiz-api.spec.js` ›
+  "PRODUCT BUG: /check-answer reveals answers even when the quiz is disabled"
+  and "PRODUCT BUG: /check-answer reveals answers for questions in unpublished
+  units".
+
+### 9c. ✅ FIXED — 🔒 `/api/quiz/attempt` trusted a student-supplied `correct` flag
+
+- **Where:** `src/routes/quiz.js` `POST /attempt`.
+- **Was:** The route persisted `Boolean(req.body.correct)` without checking the
+  submitted answer against the stored objective-question answer.
+- **Now:** Objective attempts are rejected when the submitted `correct` flag
+  contradicts the canonical answer, so fabricated correct attempts are not
+  stored or counted in history.
+- **Failing test (now green):** `tests/e2e/quiz-api.spec.js` ›
+  "PRODUCT BUG: /attempt trusts a student-supplied `correct` flag without
+  cross-checking".
 
 ### 10. Soft-delete invariant is enforced inconsistently across `getCourse*` helpers
 
@@ -157,13 +182,21 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **Pattern:** Some routes filter `status !== 'deleted'` directly in the route (defensive), some helpers do, some don't. Closely related to #6 and #7.
 - **Fix:** Audit every read path that resolves a `courseId` → course doc; standardize on either always filtering or having one canonical "active courses only" helper.
 
-### 11. 🔒 `/api/lectures/publish-status` trusts an `instructorId` query param with no auth check
+### 11. ✅ FIXED — 🔒 `/api/lectures/publish-status` trusts an `instructorId` query param with no auth check
 
 - **Where:** `src/routes/lectures.js` lines 81–121.
 - **Symptom:** Route accepts `instructorId` and `courseId` from query string and calls `CourseModel.getLecturePublishStatus(db, courseId)` directly. **There is no check that `req.user.userId === instructorId` or that the requester has any access to the course.** A logged-in student (or any authenticated user) hitting `GET /api/lectures/publish-status?instructorId=anybody&courseId=anycourse` gets back the publish state of every unit.
 - **Compare to:** Other `lectures.js` routes (e.g. `/publish` at line 14) check `userHasCourseAccess()` before mutating.
 - **Why it matters:** Information leak — students could enumerate course publish states, including units the instructor hasn't released.
-- **Fix:** Drop the `instructorId` query param (use `req.user.userId` only). Add `userHasCourseAccess(db, courseId, req.user.userId)` check before responding.
+- **Fix landed:** Added the same `req.user` + `CourseModel.userHasCourseAccess`
+  gate that sister route `POST /publish` already uses. The `instructorId`
+  query param is still accepted (kept for the existing 400-when-missing
+  contract) but is now informational only — authorization is from the
+  session. Students hitting the route get 403; the legitimate instructor
+  dashboard still works (only caller is `instructor.js:2137`).
+- **Failing test (now green):** `tests/e2e/routes-lectures-api.spec.js` ›
+  "PRODUCT BUG (FINDINGS #11): a student can read the publish state of any
+  course".
 
 ### 11a. TA Hub renders a missing TA display name as `undefined`
 
@@ -277,7 +310,7 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **Fix:** Normalize question objects at the page boundary, then render from one
   shape.
 
-### 23. Question routes trust body `instructorId` and do not check course access
+### 23. ✅ FIXED — Question routes trust body `instructorId` and do not check course access
 
 - **Where:** `src/routes/questions.js` lines 159-220, 519-551, 585-613, and
   734-803.
@@ -292,8 +325,18 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   proving authorization.
 - **Fix:** Use `req.user.userId`, ignore body `instructorId` except where a
   migration absolutely needs it, and call the canonical course-access helper.
+- **Now:** `POST /api/questions`, `PUT /api/questions/:questionId`,
+  `DELETE /api/questions/:questionId`, `POST /api/questions/bulk`, and
+  `POST /api/questions/auto-link-learning-objectives` authorize from
+  `req.user`, require real course access, and use the session user as the
+  mutation actor. Legacy `instructorId` input is still accepted for caller
+  compatibility, but a mismatched instructor body no longer authorizes a write.
+- **Failing tests (now green):** `tests/e2e/routes-questions-api.spec.js` ›
+  the FINDINGS #23 POST tests, and
+  `tests/e2e/questions-api-ownership-branches.spec.js` › cross-instructor
+  mutation tests.
 
-### 24. `GET /api/questions/:questionId` searches globally with no access check
+### 24. ✅ FIXED — `GET /api/questions/:questionId` searches globally with no access check
 
 - **Where:** `src/routes/questions.js` lines 452-503.
 - **Symptom:** The endpoint finds a question by ID across all courses and returns
@@ -303,6 +346,13 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   content across courses.
 - **Fix:** Include course context in the request, or derive the containing course
   and check `userHasCourseAccess()` before responding.
+- **Now:** After locating the containing course, the route requires the
+  authenticated user to have access to that course before returning the
+  question record. Inaccessible questions return a denial instead of raw
+  assessment content.
+- **Failing tests (now green):** `tests/e2e/routes-questions-api.spec.js` ›
+  FINDINGS #24 direct question fetch, plus
+  `tests/e2e/questions-api-ownership-branches.spec.js` read-leak coverage.
 
 ### 25. `instructor.js` runs document-page side effects on pages that only wanted settings
 
@@ -381,6 +431,16 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **Fix:** Pass `projection` as the second argument to `findOne`:
   `usersCollection.findOne({ userId }, { projection: { userId: 1, ... } })`.
 
+### 31b. ✅ FIXED — `POST /api/user-agreement/agree` 500s when no body sent
+
+- **Where:** `src/routes/user-agreement.js:59`.
+- **Was:** `const { agreementVersion = '1.0' } = req.body;` threw a TypeError
+  when Playwright (or any client) sent a POST with no body, because Express 5
+  leaves `req.body` undefined in that case. Same pattern as FINDING #31.
+- **Now:** `req.body || {}` — the default value path is reachable.
+- **Failing test (now green):** `tests/e2e/routes-user-agreement-api.spec.js` ›
+  "POST /agree › an empty request body (no data field) still records the default".
+
 ### 31. `DELETE /api/courses/:courseId/units/:unitName` 500s when no body sent
 
 - **Where:** `src/routes/courses.js` line 3140.
@@ -426,7 +486,7 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   "PRODUCT BUG: /stats is shadowed by /:courseId".
 - **Fix:** Move `router.get('/stats', ...)` above `router.get('/:courseId', ...)`.
 
-### 34. 🔒 `src/routes/questions.js` has no role gate or per-course access check on most verbs
+### 34. ✅ FIXED — 🔒 `src/routes/questions.js` has no role gate or per-course access check on most verbs
 
 - **Where:** Every endpoint in `src/routes/questions.js` *except*
   `POST /generate-ai` (lines 1121-1139). The router is mounted at
@@ -455,6 +515,55 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   (e.g. `requireCourseInstructorOrTA(courseId)` driven off `req.user`), drop
   body `instructorId`, and add the same access check to `GET /lecture` and
   `GET /:questionId` (already noted in FINDINGS #24).
+- **Now:** `src/routes/questions.js` uses one local helper for question-route
+  read/write course checks. Students cannot mutate questions, instructors
+  cannot mutate or list another instructor's course questions, and TAs must
+  have the course permission before direct assessment-question mutations.
+  Missing-course write requests from legitimate staff still fall through to
+  the existing model-level 400/404 behavior.
+- **Failing tests (now green):** `tests/e2e/questions-api-ownership-branches.spec.js`
+  all 15 tests; `tests/e2e/ta.spec.js` › "TA with canAccessCourses=false
+  cannot create, update, or delete assessment questions by direct API".
+
+### 34b. ✅ FIXED — 🔒 `courses.js` PUT and POST units accepted spoofed `instructorId` from body
+
+- **Where:** `src/routes/courses.js` — `PUT /api/courses/:courseId` (course
+  settings) and `POST /api/courses/:courseId/units` (add a unit). Both routes
+  accepted `instructorId` from the request and used it for authorization
+  instead of comparing to `req.user.userId`.
+- **Was:** A TA with `canAccessCourses: false` (or any authenticated
+  user who knows a courseId and the real instructor's id) can:
+  - rename the course (e.g. to "TA Spoofed Course Name"),
+  - change the course's `status` (e.g. flip 'active' → 'inactive'),
+  - add new units / lectures.
+  All return **200**, all mutations land in the database.
+- **Now:** The routes still accept legacy `instructorId` input for existing
+  caller compatibility, but it must match the authenticated session user. The
+  actual course-access check and mutation query use `req.user.userId`, so a TA
+  or mismatched instructorId gets 403 before any write.
+- **Failing test (now green):** `tests/e2e/ta.spec.js:1468` ›
+  "TA cannot spoof an instructorId to mutate instructor-only course
+  settings or units".
+- **Why it matters:** Course settings and unit structure are
+  instructor-only operations. Bypassing them lets a TA (or any session
+  with a guessed instructorId) silently sabotage a course.
+- **Pattern:** Same shape as FINDING #34 — request-body identity must not be
+  trusted for course mutations. See Redundancies R10.
+
+### 35b. ✅ FIXED — `deleteAssessmentQuestion` returns `deletedCount: 1` even when `$pull` matched nothing
+
+- **Where:** `src/models/Course.js` `deleteAssessmentQuestion` (~line 622).
+- **Was:** The update used `$pull` to remove the question and `$set` to bump
+  `updatedAt`. Because `$set` always changes the doc, `result.modifiedCount`
+  was `1` regardless of whether `$pull` actually matched. The route reported
+  `deletedCount: 1` for a no-op DELETE on an unknown questionId, and also
+  spuriously bumped the course's `updatedAt`.
+- **Now:** Existence-check the questionId in the lecture's
+  `assessmentQuestions` first. If absent, return `{ success: true,
+  deletedCount: 0 }` without touching the doc.
+- **Failing test (now green):** `tests/e2e/questions-api-ownership-branches.spec.js` ›
+  "DELETE on existing course/lecture but unknown questionId → success with
+  deletedCount=0".
 
 ### 35. `PUT /api/questions/:questionId` silently creates when the question does not exist
 
@@ -478,7 +587,7 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   surface `created` truthy and reject it on the PUT path) and return 404 when
   the question does not exist. Bulk insertion / create stays the POST path.
 
-### 36. 🔒 `DELETE /api/flags/:flagId` has no role gate or ownership check
+### 36. ✅ FIXED — 🔒 `DELETE /api/flags/:flagId` has no role gate or ownership check
 
 - **Where:** `src/routes/flags.js` lines 490-538. The router is mounted at
   `src/server.js:492` with `requireAuth` + `requireActiveCourseForNonInstructors`
@@ -494,12 +603,17 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   can erase flags raised against questions on courses they don't own.
 - **Failing test:** `tests/e2e/flags-api-error-branches.spec.js` ›
   "PRODUCT BUG: a student can delete any flag (no role gate)".
-- **Fix:** Restrict the route to `requireInstructorOrTA` (or whoever owns
-  the cleanup workflow) and enforce per-course access — load the flag,
-  resolve its `courseId`, and confirm `req.user` is the course instructor /
-  on its `tas` array.
+- **Fix landed:** Extracted `loadFlagAndAssertCourseAccess(req, res, flagId)`
+  in `src/routes/flags.js` (top of file). It (1) requires authentication,
+  (2) requires `role === 'instructor' || 'ta'`, (3) loads the flag and 400s
+  if missing (preserving the legacy "from model" contract), (4) calls
+  `CourseModel.userHasCourseAccess(db, flag.courseId, user.userId, user.role)`
+  and 403s if not on the course. The DELETE route (and the two PUT routes
+  in FINDING #37) now call this helper.
+- **Failing test (now green):** `tests/e2e/flags-api-error-branches.spec.js` ›
+  "PRODUCT BUG: a student can delete any flag (no role gate)".
 
-### 37. 🔒 Flag instructor/TA response endpoints don't verify course membership
+### 37. ✅ FIXED — 🔒 Flag instructor/TA response endpoints don't verify course membership
 
 - **Where:** `src/routes/flags.js` PUT `/:flagId/response` (lines 288-364)
   and PUT `/:flagId/status` (lines 370-438). Both endpoints only check
@@ -517,10 +631,20 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   "PRODUCT BUG: an instructor not on the flag's course can still update the
   response" and "PRODUCT BUG: a TA not on the flag's course can still
   update the status".
-- **Fix:** After resolving the flag, look up its `courseId` and confirm the
-  caller is the course's `instructorId`, in `instructors`, or in `tas`
-  before updating. Mirrors the access pattern called out in FINDING #34
-  for questions.
+- **Fix landed:** Both PUT routes now call the same
+  `loadFlagAndAssertCourseAccess` helper introduced in FINDING #36's fix.
+  Cross-instructor / cross-course writes return 403.
+- **Failing tests (now green):**
+  - `tests/e2e/flags-api-error-branches.spec.js` ›
+    "PRODUCT BUG: an instructor not on the flag's course can still update
+    the response"
+  - same file › "PRODUCT BUG: a TA not on the flag's course can still
+    update the status".
+- **Test-side cleanup:** Two seeds in `flags-api-error-branches.spec.js`
+  and `flags-api-coverage.spec.js` were storing `tas` as
+  `[{ userId, email }]` objects, which `userHasCourseAccess` doesn't match
+  (it queries `tas: userId` against bare strings, per `Course.js:1219`
+  and the schema comment at L18). Seeds updated to `tas: [taId]`.
 
 ### 38. `updateInstructorResponse` defaults `flagStatus` to "resolved" but does not stamp `resolvedAt`
 
@@ -541,6 +665,257 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   `const finalStatus = responseData.flagStatus || 'resolved'; if
   (finalStatus === 'resolved') updateData.resolvedAt = now;`.
 
+### 39. ✅ FIXED — auth middleware always redirected API requests instead of returning 401 JSON
+
+- **Where:** `src/middleware/auth.js` — `requireAuth` and ~15 other role/
+  permission gates all used `if (req.path.startsWith('/api/'))` to decide
+  between JSON 401 and HTML redirect.
+- **Symptom:** When a request comes in through a mounted router
+  (`app.use('/api/foo', router)`), Express strips the mount prefix from
+  `req.path` inside the middleware — so `req.path` is `/agree`, not
+  `/api/user-agreement/agree`. The startsWith check is always false for
+  any mounted API route, so every unauthenticated API call returned a
+  302 to `/login` instead of a 401 JSON. Playwright (and any fetch())
+  auto-follows the redirect and ends up with a 200 + HTML body, masking
+  the real auth failure.
+- **Impact pre-fix:** Frontend `fetch()` that tried `await response.json()`
+  on an expired-session API call would silently throw on the HTML body;
+  users saw generic error toasts instead of a clear "session expired"
+  signal. Hid every auth-required failure behind a fake 200.
+- **Failing tests that surfaced it:**
+  - `tests/e2e/routes-user-agreement-api.spec.js` › "unauthenticated GET /status returns 401"
+  - `tests/e2e/routes-user-agreement-api.spec.js` › "unauthenticated POST /agree returns 401"
+  - `tests/e2e/routes-mental-health-flags-api.spec.js` › "unauthenticated GET /course/:courseId returns 401"
+  - `tests/e2e/routes-mental-health-flags-api.spec.js` › "unauthenticated PUT /escalate returns 401"
+  - `tests/e2e/routes-struggle-activity-api.spec.js` › "unauthenticated request returns 401 with JSON body"
+- **Fix landed:** Replaced `req.path.startsWith('/api/')` with
+  `req.originalUrl.startsWith('/api/')` in all 16 occurrences across
+  the middleware file. `req.originalUrl` keeps the full client URL
+  regardless of router mount depth. Page-route behavior (redirect to
+  `/login` for unauthenticated `/student/dashboard` etc.) is unchanged.
+- **Follow-up — not done:** The frontend has only one explicit 401 handler
+  (`public/instructor/scripts/instructor.js:4324`). Now that the server
+  emits clean JSON 401s on session expiry, a global handler in
+  `public/common/scripts/auth.js` could intercept any API 401 and
+  redirect the user to `/login`, instead of leaving them stuck on the
+  current page with a generic error. See Redundancies.md → R0.
+
+### 40. ✅ FIXED — 🔒 Document APIs trusted direct student access and body `instructorId`
+
+- **Where:** `src/routes/documents.js` — direct document creation, listing,
+  stats, fetch, delete, and cleanup routes.
+- **Was:** A student could call document APIs directly and either read course
+  material metadata or mutate course document state. Some mutation routes also
+  accepted body-supplied `instructorId`, so the request body could be used as
+  the authorization identity instead of the authenticated session.
+- **Now:** Document routes authorize from `req.user`, restrict direct document
+  management/read APIs to course staff, require real course access, and reject
+  instructor-body identity mismatches before writes. TA access is still
+  supported when the TA has the course permission.
+- **Failing tests (now green):** `tests/e2e/chat-rag-documents.spec.js` ›
+  "Document API permission boundaries for students", and `tests/e2e/ta.spec.js`
+  › "TA with canAccessCourses=false cannot create, upload, or delete course
+  documents by direct API".
+- **Pattern:** Same root cause as FINDINGS #23/#34/#34b: route handlers must
+  authorize from `req.user` and course membership, not request-body identity.
+  See Redundancies R10.
+
+### 41. ✅ FIXED — 🔒 Direct Qdrant APIs were reachable by students
+
+- **Where:** `src/routes/qdrant.js` — `POST /process-document`, `POST /search`,
+  `POST /cleanup-vectors`, `GET /collection-stats`, and
+  `DELETE /document/:documentId`.
+- **Was:** Direct vector-processing/search/cleanup routes had validation and
+  service-level logic but no role gate. A student session could reach them
+  through direct API calls, and course-scoped routes did not consistently
+  verify that staff access matched the requested course.
+- **Now:** Direct Qdrant routes require an authenticated instructor, TA with the
+  course permission, or system admin. Course-scoped requests check access to the
+  requested course before processing/searching/cleanup; students receive 403
+  before validation/service work.
+- **Failing tests (now green):** `tests/e2e/chat-rag-documents.spec.js` ›
+  "Qdrant API permission boundaries for students".
+- **Pattern:** Same route-level course-access gap as FINDING #40. See
+  Redundancies R10.
+
+### 42. ✅ FIXED — 🔒 Student chat/history routes trusted body or path `studentId`
+
+- **Where:** `src/routes/chat.js` `POST /api/chat/save`,
+  `src/routes/students.js` `DELETE /api/students/:courseId/:studentId/sessions/:sessionId`,
+  and `src/routes/struggle-activity.js` `GET /api/struggle-activity/student/:userId`.
+- **Was:** A logged-in student could supply another student's id in the body or
+  URL and save a chat row under that account, delete another student's session
+  through the instructor delete path, or read another student's struggle
+  activity history.
+- **Now:** Student sessions can only save/read/delete under their own user id;
+  the non-`/own` session delete route is instructor-only.
+- **Failing tests (now green):** `tests/e2e/student-chat.spec.js` ›
+  "Security — student-controlled inputs that bypass auth".
+- **Pattern:** Request body/path identity must be treated as the target record,
+  not as authorization. See Redundancies R19.
+
+### 43. ✅ FIXED — 🔒 TA sessions could load instructor-only pages directly
+
+- **Where:** `src/server.js` protected page routes for `/instructor/home`,
+  `/instructor/settings`, and `/instructor/downloads`.
+- **Was:** The home/settings routes used `requireInstructorOrTA`, so direct
+  TA navigation loaded instructor-only pages. The downloads route failed the
+  system-admin check but redirected the TA to `/instructor/home`, which was
+  also reachable.
+- **Now:** TA direct navigation to instructor-only pages redirects to TA pages
+  before instructor HTML is served. Shared TA-enabled instructor pages, such as
+  course documents and flagged content, still use the existing TA permission
+  gates.
+- **Failing test (now green):** `tests/e2e/ta.spec.js` ›
+  "TA cannot access instructor home, settings, downloads, or student hub pages".
+- **Pattern:** Page route role guards must distinguish "shared instructor/TA
+  shell" routes from truly instructor-only pages. See Redundancies R20.
+
+### 44. ✅ FIXED — 🔒 Flag and TA course APIs did not consistently enforce course-scoped permissions
+
+- **Where:** `src/routes/flags.js`, `src/routes/courses.js`, and
+  `public/ta/scripts/ta-home.js`.
+- **Was:** Several direct APIs either trusted broad role checks or stale course
+  context. `/api/flags/my` could return a student's flags for courses they no
+  longer had access to; `/api/flags/status/:status` could leak flags from
+  courses outside the caller's review scope; TA flag read/write endpoints did
+  not consistently enforce `canAccessFlags`; and course content mutation
+  endpoints allowed TA/course access to be inferred too broadly or from
+  body-supplied instructor identity. The TA dashboard could also let a stale
+  persisted preference override the currently assigned course list.
+- **Now:** Flag reads are filtered to courses the caller may actually review,
+  student flag reads are filtered by current enrollment, flag mutations require
+  course-scoped `canAccessFlags` for TAs, and the affected course-content
+  mutation APIs require course-scoped management access tied to the session
+  user. TA dashboard initial course selection now prefers assigned course data
+  over stale profile preference data.
+- **Failing tests (now green):**
+  - `tests/e2e/flagging.spec.js` › "DESIRED: direct /my access does not return
+    flags from courses where the student is not enrolled"
+  - `tests/e2e/flagging.spec.js` › "DESIRED: scopes results to courses the
+    caller teaches — should NOT leak flags from an unrelated instructor's
+    course"
+  - `tests/e2e/ta.spec.js` › "TA with canAccessFlags=false is hidden from and
+    denied flagged-content access"
+  - `tests/e2e/ta.spec.js` › "TA with canAccessCourses=false cannot mutate
+    topics or unit structure by direct API"
+  - `tests/e2e/ta.spec.js` › "TA with canAccessFlags=false cannot respond,
+    status-update, or delete flags by direct API"
+  - `tests/e2e/ta.spec.js` › "TA permissions are scoped to the requested
+    course, not any course with that permission"
+  - `tests/e2e/ta.spec.js` › "TA with canAccessFlags=false cannot use
+    non-course-scoped flag APIs"
+- **Pattern:** Course-scoped permissions must be checked against the requested
+  resource and the session user, not inferred from any matching role or
+  client-supplied course/instructor context. See Redundancies R10.
+
+### 45. ✅ FIXED — 🔒 TA settings and flag-status flows used the wrong course/actor context
+
+- **Where:** `public/ta/scripts/ta-settings.js`,
+  `src/routes/settings.js`, and `src/models/FlaggedQuestion.js`.
+- **Was:** TA settings UI checked permissions across all assigned courses, so
+  `?courseId=...` could show and navigate with permissions from another
+  selected or stale course. Direct course settings mutation APIs accepted TA
+  sessions with course upload access and wrote instructor-only settings.
+  Status-only flag moderation changed the flag status but did not persist the
+  acting TA/instructor id for audit.
+- **Now:** TA settings permission display/navigation is evaluated against the
+  URL-selected course context, settings writes require an instructor who owns
+  the requested course, and status-only flag moderation records
+  `instructorId`.
+- **Failing tests (now green):**
+  - `tests/e2e/ta.spec.js` › "TA with flag permission can review and dismiss
+    a seeded flag"
+  - `tests/e2e/ta.spec.js` › "TA settings displays account details and
+    permission status"
+  - `tests/e2e/ta.spec.js` › "TA settings navigation respects the selected
+    course permission context"
+  - `tests/e2e/ta.spec.js` › "TA cannot mutate instructor settings APIs even
+    when course upload permission is allowed"
+- **Pattern:** UI and API permission checks must use the requested course
+  context, and instructor-only settings writes must not be inferred from TA
+  course feature permissions. See Redundancies R10.
+
+### 46. ✅ FIXED — 🧪 TA spec setup left stale assignments from other tests
+
+- **Where:** `tests/e2e/ta.spec.js` `resetTAUserState()`.
+- **Was:** Several TA dashboard tests claimed to seed zero or one assigned
+  course, but the helper only deleted that file's known course ids. If another
+  spec had previously assigned the same TA to a different course, `/api/courses/ta/:taId`
+  correctly returned that stale assignment and the tests failed against valid
+  product behavior.
+- **Now:** The TA spec setup removes the test TA from all existing course
+  assignments, unsets per-course TA permissions, and clears stale selected
+  course preference before seeding the scenario under test.
+- **Failing tests (now green):**
+  - `tests/e2e/ta.spec.js` › "TA dashboard marks an assigned inactive course
+    while preserving permitted actions"
+  - `tests/e2e/ta.spec.js` › "TA with no assigned courses sees an empty
+    dashboard state and no course actions"
+  - `tests/e2e/ta.spec.js` › "TA assignment revocation blocks stale
+    selected-course access"
+- **Pattern:** This was a test fixture isolation issue, not a production
+  behavior bug.
+
+### 47. ✅ FIXED — 🚩 Flagged-content page duplicate no-course redirect and browser-only TA coverage drift
+
+- **Where:** `public/instructor/scripts/flagged.js` and
+  `tests/e2e/flagged-coverage.spec.js`.
+- **Was:** When no course could be resolved, `getCurrentCourseId()` scheduled
+  an onboarding redirect and `loadFlaggedContent()` showed the same error
+  notification and redirect again. The browser-only flagged coverage spec also
+  tried to exercise TA sidebar branches while navigating through the real
+  server page guard, so the mocked API state never loaded the HTML for TA
+  scenarios. Two assertions also contradicted the page helpers by expecting
+  lowercase `tutor mode` / platform-specific invalid-date output.
+- **Now:** The no-course redirect path is guarded by one shared in-flight flag,
+  invalid timestamps return the intended fallback text, and the TA browser
+  harness serves the page HTML directly while mocking the API surface it is
+  designed to cover.
+- **Failing tests (now green):**
+  - `tests/e2e/flagged-coverage.spec.js` › "renders multiple flag cards
+    (reasons, priorities, resolved response, status text) and updates stats"
+  - `tests/e2e/flagged-coverage.spec.js` › "redirect-on-missing-course path:
+    API returns no courses, page shows notification and navigates to onboarding"
+  - `tests/e2e/flagged-coverage.spec.js` › "TA sees TA nav rows, instructor
+    rows are hidden, and \"My Courses\" link navigates when permitted"
+  - `tests/e2e/flagged-coverage.spec.js` › "TA cannot navigate when the
+    selected course denies that feature — shows a notification and stays put"
+  - `tests/e2e/flagged-coverage.spec.js` › "TA with zero assigned courses gets
+    a warning notification on navigation attempts"
+  - `tests/e2e/flagged-coverage.spec.js` › "display helpers cover every reason
+    / bot mode / status mapping"
+- **Pattern:** Mixed product and test-harness cleanup; no shared redundancy
+  entry applies.
+
+### 48. ✅ FIXED — 🔒 Student flag notifications trusted foreign flag rows from `/api/flags/my`
+
+- **Where:** `public/student/scripts/flag-notifications.js`.
+- **Was:** The notification poller fetched `/api/flags/my` without the
+  selected course context and then compared/stored every returned flag. If the
+  API ever returned a flag for another course or another student, the client
+  could show a notification for data outside the active student/course.
+- **Now:** The poller includes `courseId` when a selected course exists,
+  persists `courseId`/`studentId` in its local snapshot, and filters current
+  plus stored flags against the active student and selected course before
+  detecting changes or saving state.
+- **Failing test (now green):** `tests/e2e/flag-notifications.spec.js` ›
+  "DESIRED: ignores cross-student or non-selected-course flags if the API
+  response contains them".
+- **Pattern:** Client-side context checks mirror the server-side course/user
+  scoping work tracked in Redundancies R10.
+
+### 49. ✅ FIXED — 📝 Agreement modal reused student copy for instructor and TA contexts
+
+- **Where:** `public/common/scripts/agreement-modal.js`.
+- **Was:** The shared agreement modal always rendered student-oriented copy
+  (`Your AI-Powered Study Assistant`) even when opened from instructor or TA
+  paths. The modal is shared and can be displayed in all three contexts.
+- **Now:** The modal chooses static copy from the current path: student copy is
+  unchanged, instructor paths render instructor-tool copy, and TA paths render
+  TA-tool copy.
+- **Failing test (now green):** `tests/e2e/agreement-modal-branches.spec.js`
+  › "student, instructor, and TA contexts render distinct copy".
 
 ## Duplicate top-level declarations in `public/instructor/scripts/instructor.js`
 
@@ -551,9 +926,36 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 
 - `removeObjective`: the declaration at lines 1590-1605 is shadowed by the later declaration at lines 1868-1872. Coverage marks the shadowed copy as uncovered.
 
-## History page auth-helper fallback in `public/student/scripts/history.js`
+## History page auth-helper fallback in `public/student/scripts/history.js` ✅ FIXED
 
-- `getCurrentUser`: the branch at lines 183-185 intends to call the `auth.js` helper when `window.getCurrentUser` is a different function, but `history.js` declares its own top-level `getCurrentUser`, replacing the global name on the page. A page-driven test that installs an external helper after load still returns `null`, leaving this fallback branch effectively unreachable/dead under the real script load order.
+- **Was:** The branch at lines 183-185 intended to call the `auth.js` helper
+  when `window.getCurrentUser` had been replaced by an external helper.
+  But `history.js` declares its own top-level `function getCurrentUser()`,
+  and in a non-strict global script that lexical name *aliases*
+  `window.getCurrentUser` — so the check
+  `window.getCurrentUser !== getCurrentUser` was always false once
+  `window.getCurrentUser` got reassigned. A page-driven test that installed
+  an external helper after load returned `null`.
+- **Now:** the function captures itself into a separately-named
+  module-private const (`_historyGetCurrentUserSelf`) immediately after the
+  declaration. The check is against that const, which doesn't share
+  storage with the window property, so the fallback branch is reachable.
+- **Failing test (now green):**
+  `tests/e2e/student-history-storage-branches.spec.js` ›
+  "current user resolves through an external auth helper".
+- **Pattern:** see Redundancies R1c — this is a class of footgun that will
+  recur until page scripts are wrapped in IIFEs or migrated to modules.
+
+## Mobile layout initial collapsed icon ✅ FIXED
+
+- **Was:** `public/common/scripts/mobile-layout.js` always initialized the
+  toggle button icon to `▲`, even if another script or server-rendered markup
+  had already put `mobile-collapsed` on `body`.
+- **Now:** the icon is initialized from the actual `body.mobile-collapsed`
+  state before click handlers run, so the first render matches the visible
+  layout.
+- **Failing test (now green):** `tests/e2e/mobile-layout-coverage.spec.js` ›
+  "PRODUCT BUG: initial icon ignores body already in mobile-collapsed state".
 
 ## Qdrant service coverage notes
 

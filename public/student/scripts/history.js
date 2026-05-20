@@ -178,12 +178,16 @@ function getCurrentUser() {
     if (window.currentUser) {
         return window.currentUser;
     }
-    
-    // This function should be available from auth.js
-    if (typeof window.getCurrentUser === 'function' && window.getCurrentUser !== getCurrentUser) {
+
+    // Delegate to an external helper (e.g. auth.js) when present. The
+    // self-reference is captured below in a separate binding because in a
+    // non-strict global script the lexical name `getCurrentUser` aliases
+    // `window.getCurrentUser`, so a direct `!==` would always be false once
+    // window.getCurrentUser is reassigned.
+    if (typeof window.getCurrentUser === 'function' && window.getCurrentUser !== _historyGetCurrentUserSelf) {
         return window.getCurrentUser();
     }
-    
+
     // Fallback: try to get from localStorage
     try {
         const storedUser = localStorage.getItem('currentUser');
@@ -193,9 +197,10 @@ function getCurrentUser() {
     } catch (error) {
         console.error('Error parsing stored user:', error);
     }
-    
+
     return null;
 }
+const _historyGetCurrentUserSelf = getCurrentUser;
 
 /**
  * Get current student ID

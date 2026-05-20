@@ -62,6 +62,53 @@ function setAttachmentHeaders(res, filename) {
     );
 }
 
+function isUnitTestable(settings, lectureName) {
+    return settings.testableUnits === 'all'
+        || (Array.isArray(settings.testableUnits) && settings.testableUnits.includes(lectureName));
+}
+
+async function getVisibleQuizQuestion(db, courseId, lectureName, questionId) {
+    const settings = await CourseModel.getQuizSettings(db, courseId);
+    if (!settings.enabled) {
+        return {
+            status: 403,
+            body: { success: false, message: 'Quiz practice is not enabled for this course' }
+        };
+    }
+
+    const publishedNames = await CourseModel.getPublishedLectures(db, courseId);
+    if (!publishedNames.includes(lectureName) || !isUnitTestable(settings, lectureName)) {
+        return {
+            status: 403,
+            body: { success: false, message: 'Quiz question is not available' }
+        };
+    }
+
+    const questions = await CourseModel.getAssessmentQuestions(db, courseId, lectureName);
+    const question = questions.find(q => q.questionId === questionId && q.isActive !== false);
+    if (!question) {
+        return {
+            status: 404,
+            body: { success: false, message: 'Question not found' }
+        };
+    }
+
+    return { question };
+}
+
+function isObjectiveQuestion(question) {
+    return question.questionType === 'multiple-choice' || question.questionType === 'true-false';
+}
+
+function evaluateObjectiveAnswer(question, studentAnswer) {
+    const correct = String(studentAnswer).toLowerCase() === String(question.correctAnswer).toLowerCase();
+    const feedback = correct
+        ? 'Correct! Well done.'
+        : `Incorrect. The correct answer is ${question.correctAnswer}.`;
+
+    return { correct, feedback, correctAnswer: question.correctAnswer };
+}
+
 /**
  * GET /api/quiz/status
  * Lightweight check: is the quiz page enabled for this course?
@@ -199,22 +246,17 @@ router.post('/check-answer', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        // Look up the question to get the correct answer server-side
-        const questions = await CourseModel.getAssessmentQuestions(db, courseId, lectureName);
-        const question = questions.find(q => q.questionId === questionId);
-        if (!question) {
-            return res.status(404).json({ success: false, message: 'Question not found' });
+        const lookup = await getVisibleQuizQuestion(db, courseId, lectureName, questionId);
+        if (lookup.status) {
+            return res.status(lookup.status).json(lookup.body);
         }
+        const { question } = lookup;
 
         // MC and TF: direct comparison, no LLM needed
-        if (question.questionType === 'multiple-choice' || question.questionType === 'true-false') {
-            const correct = studentAnswer.toLowerCase() === question.correctAnswer.toLowerCase();
-            const feedback = correct
-                ? 'Correct! Well done.'
-                : `Incorrect. The correct answer is ${question.correctAnswer}.`;
+        if (isObjectiveQuestion(question)) {
             return res.json({
                 success: true,
-                data: { correct, feedback, correctAnswer: question.correctAnswer }
+                data: evaluateObjectiveAnswer(question, studentAnswer)
             });
         }
 
@@ -259,6 +301,22 @@ router.post('/attempt', async (req, res) => {
         const studentId = req.user ? req.user.userId : null;
         if (!studentId) {
             return res.status(401).json({ success: false, message: 'User not authenticated' });
+        }
+
+        const lookup = await getVisibleQuizQuestion(db, courseId, lectureName, questionId);
+        if (lookup.status) {
+            return res.status(lookup.status).json(lookup.body);
+        }
+
+        const { question } = lookup;
+        if (isObjectiveQuestion(question)) {
+            const evaluated = evaluateObjectiveAnswer(question, studentAnswer);
+            if (evaluated.correct !== Boolean(correct)) {
+                return res.status(409).json({
+                    success: false,
+                    message: 'Submitted correctness does not match the stored answer'
+                });
+            }
         }
 
         const result = await QuizAttempt.saveAttempt(db, {

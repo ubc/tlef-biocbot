@@ -109,7 +109,6 @@ test.describe('documents.js — extra validation and helpers', () => {
     });
 
     test('upload happy path with Qdrant ingestion stores chunks + reports counts', async ({ request: api }) => {
-        test.skip(!(await ensureQdrantUp(api)), 'Qdrant not reachable.');
         await seedCourse({ courseId: COURSE_A, instructorId });
         const content = [
             'E2E RAG coverage upload content.',
@@ -147,7 +146,6 @@ test.describe('documents.js — extra validation and helpers', () => {
     });
 
     test('text upload writes through Qdrant when service is reachable', async ({ request: api }) => {
-        test.skip(!(await ensureQdrantUp(api)), 'Qdrant not reachable.');
         await seedCourse({ courseId: COURSE_A, instructorId });
         const res = await api.post('/api/documents/text', {
             data: {
@@ -282,7 +280,6 @@ test.describe('documents.js — extra validation and helpers', () => {
     });
 
     test('extract-questions returns extracted questions for short content (real LLM)', async ({ request: api }) => {
-        test.skip(!(await serviceReady(api, '/api/chat/status')), 'LLM not reachable.');
         test.setTimeout(120_000);
         await seedCourse({ courseId: COURSE_A, instructorId });
         const now = new Date();
@@ -462,8 +459,6 @@ test.describe('chat.js — extra validation and request shapes', () => {
         });
 
         test('POST /api/chat with isExplanationRequest bypasses profanity check', async ({ request: api }) => {
-            test.skip(!(await serviceReady(api, '/api/qdrant/status')), 'Qdrant not reachable.');
-            test.skip(!(await serviceReady(api, '/api/chat/status')), 'LLM not reachable.');
             test.setTimeout(120_000);
             const res = await api.post('/api/chat', {
                 data: {
@@ -483,8 +478,6 @@ test.describe('chat.js — extra validation and request shapes', () => {
         });
 
         test('POST /api/chat with checkSummaryAttempt drives the summary-classifier branch', async ({ request: api }) => {
-            test.skip(!(await serviceReady(api, '/api/qdrant/status')), 'Qdrant not reachable.');
-            test.skip(!(await serviceReady(api, '/api/chat/status')), 'LLM not reachable.');
             test.setTimeout(120_000);
             const res = await api.post('/api/chat', {
                 data: {
@@ -501,8 +494,6 @@ test.describe('chat.js — extra validation and request shapes', () => {
         });
 
         test('POST /api/chat with conversationContext builds the structured-history branch', async ({ request: api }) => {
-            test.skip(!(await serviceReady(api, '/api/qdrant/status')), 'Qdrant not reachable.');
-            test.skip(!(await serviceReady(api, '/api/chat/status')), 'LLM not reachable.');
             test.setTimeout(120_000);
             const res = await api.post('/api/chat', {
                 data: {
@@ -524,8 +515,6 @@ test.describe('chat.js — extra validation and request shapes', () => {
         });
 
         test('POST /api/chat with mode=protege builds the protege message envelope', async ({ request: api }) => {
-            test.skip(!(await serviceReady(api, '/api/qdrant/status')), 'Qdrant not reachable.');
-            test.skip(!(await serviceReady(api, '/api/chat/status')), 'LLM not reachable.');
             test.setTimeout(120_000);
             const res = await api.post('/api/chat', {
                 data: {
@@ -578,7 +567,6 @@ test.describe('qdrant.js — happy + validation branches', () => {
     });
 
     test('POST /process-document → POST /search → DELETE /document round-trip', async ({ request: api }) => {
-        test.skip(!(await ensureQdrantUp(api)), 'Qdrant not reachable.');
         test.setTimeout(120_000);
         const documentId = `doc_e2e_ragcov_roundtrip_${Date.now()}`;
         const sentinel = `ROUNDTRIP-${Date.now()}`;
@@ -644,7 +632,6 @@ test.describe('qdrant.js — happy + validation branches', () => {
     });
 
     test('POST /process-document with empty content fails through the service-level "non-empty string" branch', async ({ request: api }) => {
-        test.skip(!(await ensureQdrantUp(api)), 'Qdrant not reachable.');
         const res = await api.post('/api/qdrant/process-document', {
             data: {
                 courseId: COURSE_A,
@@ -662,7 +649,6 @@ test.describe('qdrant.js — happy + validation branches', () => {
     });
 
     test('POST /process-document with too-short content runs the "too short" branch', async ({ request: api }) => {
-        test.skip(!(await ensureQdrantUp(api)), 'Qdrant not reachable.');
         const res = await api.post('/api/qdrant/process-document', {
             data: {
                 courseId: COURSE_A,
@@ -677,7 +663,6 @@ test.describe('qdrant.js — happy + validation branches', () => {
     });
 
     test('POST /cleanup-vectors 400 when courseId missing, success when course is empty', async ({ request: api }) => {
-        test.skip(!(await ensureQdrantUp(api)), 'Qdrant not reachable.');
         const r1 = await api.post('/api/qdrant/cleanup-vectors', { data: {} });
         expect(r1.status()).toBe(400);
 
@@ -692,7 +677,6 @@ test.describe('qdrant.js — happy + validation branches', () => {
     });
 
     test('GET /collection-stats returns the chunk-count payload', async ({ request: api }) => {
-        test.skip(!(await ensureQdrantUp(api)), 'Qdrant not reachable.');
         const res = await api.get('/api/qdrant/collection-stats', { timeout: 60_000 });
         expect(res.ok()).toBeTruthy();
         const body = await res.json();
@@ -795,7 +779,6 @@ test.describe('prompts.js — builders via routes', () => {
     });
 
     test('buildPracticeQuestionPrompt — topic + no-topic + repeated calls hit each question-type branch', async ({ request: api }) => {
-        test.skip(!(await serviceReady(api, '/api/chat/status')), 'LLM not reachable.');
         test.setTimeout(180_000);
         // The random selection inside buildPracticeQuestionPrompt picks one of
         // three (mc, tf, sa) prompt arms per call. The LLM may also produce

@@ -245,11 +245,6 @@ async function seedDocumentRecord({
     });
 }
 
-async function isServiceReady(api, url) {
-    const res = await api.get(url, { timeout: 20_000 });
-    return res.ok();
-}
-
 async function cleanupQdrantOrphans(browser) {
     const instructorCtx = await browser.newContext({ storageState: storageStatePath('instructor') });
     for (const courseId of [STU_COURSE_ID, STU_OTHER_COURSE_ID]) {
@@ -336,8 +331,6 @@ test.describe('POST /api/chat — RAG answer and source attribution', () => {
     });
 
     test('returns a grounded answer with retrieval metadata, citations, and downloadable sources', async ({ request: api, browser }) => {
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable in this environment.');
-        test.skip(!(await isServiceReady(api, '/api/chat/status')), 'LLM service is not reachable in this environment.');
 
         const instructorCtx = await browser.newContext({ storageState: storageStatePath('instructor') });
         const ingest = await instructorCtx.request.post('/api/qdrant/process-document', {
@@ -399,8 +392,6 @@ test.describe('POST /api/chat — RAG answer and source attribution', () => {
     });
 
     test('creates a mental-health flag when the configured detector reports concern', async ({ request: api, browser }) => {
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable in this environment.');
-        test.skip(!(await isServiceReady(api, '/api/chat/status')), 'LLM service is not reachable in this environment.');
 
         await withDb((db) =>
             db.collection('courses').updateOne(
@@ -531,8 +522,6 @@ test.describe('POST /api/chat — single vs additive RAG retrieval', () => {
     }
 
     test('single retrieval for Unit 2 does not cite earlier-unit source chunks', async ({ request: api, browser }) => {
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable in this environment.');
-        test.skip(!(await isServiceReady(api, '/api/chat/status')), 'LLM service is not reachable in this environment.');
 
         await seedAdditiveRetrievalVectors(browser, false);
 
@@ -558,8 +547,6 @@ test.describe('POST /api/chat — single vs additive RAG retrieval', () => {
     });
 
     test('additive retrieval for Unit 2 can cite both Unit 1 and Unit 2 source chunks', async ({ request: api, browser }) => {
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable in this environment.');
-        test.skip(!(await isServiceReady(api, '/api/chat/status')), 'LLM service is not reachable in this environment.');
 
         await seedAdditiveRetrievalVectors(browser, true);
 
@@ -756,14 +743,12 @@ test.describe('Qdrant API permission boundaries for students', () => {
     });
 
     test('GET /api/qdrant/collection-stats is not available to students', async ({ request: api }) => {
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable in this environment.');
 
         const res = await api.get('/api/qdrant/collection-stats', { timeout: 60_000 });
         expect(res.status()).toBe(403);
     });
 
     test('POST /api/qdrant/search with a valid query is not available to students', async ({ request: api }) => {
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable in this environment.');
 
         const res = await api.post('/api/qdrant/search', {
             data: {
@@ -778,7 +763,6 @@ test.describe('Qdrant API permission boundaries for students', () => {
     });
 
     test('POST /api/qdrant/process-document with a valid payload is not available to students', async ({ request: api, browser }) => {
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable in this environment.');
 
         const documentId = `doc_e2e_student_qdrant_${Date.now()}`;
         const res = await api.post('/api/qdrant/process-document', {
@@ -801,7 +785,6 @@ test.describe('Qdrant API permission boundaries for students', () => {
     });
 
     test('DELETE /api/qdrant/document/:documentId must not let a student delete vector chunks', async ({ request: api, browser }) => {
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable in this environment.');
 
         await resetStudentChatData({ instructorId });
         await cleanupQdrantOrphans(browser);
@@ -845,7 +828,6 @@ test.describe('Qdrant API permission boundaries for students', () => {
     });
 
     test('POST /api/qdrant/search keeps results scoped to the requested course', async ({ request: api, browser }) => {
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable in this environment.');
 
         await resetStudentChatData({ instructorId });
         await cleanupQdrantOrphans(browser);

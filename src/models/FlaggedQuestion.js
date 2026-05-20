@@ -162,15 +162,17 @@ async function updateInstructorResponse(db, flagId, responseData) {
     
     const now = new Date();
     
+    const finalStatus = responseData.flagStatus || 'resolved';
+
     const updateData = {
         instructorResponse: responseData.response,
         instructorId: responseData.instructorId,
         instructorName: responseData.instructorName,
-        flagStatus: responseData.flagStatus || 'resolved',
+        flagStatus: finalStatus,
         updatedAt: now
     };
-    
-    if (responseData.flagStatus === 'resolved') {
+
+    if (finalStatus === 'resolved') {
         updateData.resolvedAt = now;
     }
     
@@ -202,6 +204,7 @@ async function updateFlagStatus(db, flagId, newStatus, instructorId) {
     
     const updateData = {
         flagStatus: newStatus,
+        instructorId,
         updatedAt: now
     };
     

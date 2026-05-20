@@ -94,6 +94,8 @@ function saveLastKnownFlags(flags) {
         // Store only essential data for comparison
         const flagsToStore = flags.map(flag => ({
             flagId: flag.flagId,
+            courseId: flag.courseId,
+            studentId: flag.studentId,
             flagStatus: flag.flagStatus,
             instructorResponse: flag.instructorResponse || null,
             updatedAt: flag.updatedAt || flag.createdAt,
@@ -104,6 +106,43 @@ function saveLastKnownFlags(flags) {
         flagNotificationState.lastKnownFlags = flagsToStore;
     } catch (error) {
     }
+}
+
+function getCurrentFlagNotificationContext() {
+    let currentUser = null;
+
+    if (typeof getCurrentUser === 'function') {
+        currentUser = getCurrentUser();
+    }
+
+    if (!currentUser) {
+        try {
+            currentUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
+        } catch (error) {
+            currentUser = null;
+        }
+    }
+
+    return {
+        courseId: localStorage.getItem('selectedCourseId'),
+        studentId: currentUser && currentUser.userId
+    };
+}
+
+function filterFlagsForCurrentContext(flags) {
+    const { courseId, studentId } = getCurrentFlagNotificationContext();
+
+    return (Array.isArray(flags) ? flags : []).filter(flag => {
+        if (courseId && flag.courseId && flag.courseId !== courseId) {
+            return false;
+        }
+
+        if (studentId && flag.studentId && flag.studentId !== studentId) {
+            return false;
+        }
+
+        return true;
+    });
 }
 
 /**
@@ -172,8 +211,13 @@ async function checkForFlagUpdates() {
         flagNotificationState.isChecking = true;
         
         
+        const selectedCourseId = localStorage.getItem('selectedCourseId');
+        const flagsUrl = selectedCourseId
+            ? `/api/flags/my?courseId=${encodeURIComponent(selectedCourseId)}`
+            : '/api/flags/my';
+
         // Fetch current flags
-        const response = await fetch('/api/flags/my', { credentials: 'include' });
+        const response = await fetch(flagsUrl, { credentials: 'include' });
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -185,12 +229,13 @@ async function checkForFlagUpdates() {
             throw new Error(result.message || 'Failed to fetch flags');
         }
         
-        const currentFlags = result.data.flags || [];
+        const currentFlags = filterFlagsForCurrentContext(result.data.flags || []);
+        const lastKnownFlags = filterFlagsForCurrentContext(flagNotificationState.lastKnownFlags);
 
         
         // Compare with last known flags
-        if (flagNotificationState.lastKnownFlags.length > 0) {
-            detectFlagChanges(flagNotificationState.lastKnownFlags, currentFlags);
+        if (lastKnownFlags.length > 0) {
+            detectFlagChanges(lastKnownFlags, currentFlags);
         } else {
             // first load
         }
@@ -477,4 +522,3 @@ function cleanupFlagNotifications() {
 
 // Cleanup on page unload
 window.addEventListener('beforeunload', cleanupFlagNotifications);
-

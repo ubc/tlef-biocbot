@@ -8,6 +8,7 @@ const path = require('path');
 const DocumentModel = require('../models/Document');
 const CourseModel = require('../models/Course');
 const QdrantService = require('../services/qdrantService');
+const { hasSystemAdminAccess } = require('../services/authorization');
 const { QUESTION_EXTRACTION_SYSTEM_PROMPT, buildQuestionExtractionPrompt } = require('../services/prompts');
 const { encodingForModel } = require('js-tiktoken');
 
@@ -58,6 +59,69 @@ function setAttachmentHeaders(res, filename) {
         'Content-Disposition',
         `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedName}`
     );
+}
+
+async function canManageCourseDocuments(db, courseId, user) {
+    if (!user) {
+        return false;
+    }
+
+    if (hasSystemAdminAccess(user)) {
+        return true;
+    }
+
+    if (user.role === 'instructor') {
+        return CourseModel.userHasCourseAccess(db, courseId, user.userId, 'instructor');
+    }
+
+    if (user.role === 'ta') {
+        return CourseModel.checkTAPermission(db, courseId, user.userId, 'courses');
+    }
+
+    return false;
+}
+
+async function requireCourseDocumentAccess(req, res, db, courseId, { instructorId } = {}) {
+    const user = req.user;
+    if (!user) {
+        res.status(401).json({ success: false, message: 'Authentication required' });
+        return null;
+    }
+
+    if (!hasSystemAdminAccess(user) && user.role !== 'instructor' && user.role !== 'ta') {
+        res.status(403).json({
+            success: false,
+            message: 'You do not have permission to manage course documents'
+        });
+        return null;
+    }
+
+    if (user.role === 'instructor' && instructorId && instructorId !== user.userId) {
+        res.status(403).json({
+            success: false,
+            message: 'You do not have permission to manage documents for this course'
+        });
+        return null;
+    }
+
+    const course = await db.collection('courses').findOne(
+        { courseId },
+        { projection: { _id: 1, instructorId: 1 } }
+    );
+
+    if (!course) {
+        return { user, course: null };
+    }
+
+    if (!(await canManageCourseDocuments(db, courseId, user))) {
+        res.status(403).json({
+            success: false,
+            message: 'You do not have permission to manage documents for this course'
+        });
+        return null;
+    }
+
+    return { user, course };
 }
 
 function getStoredFileBuffer(fileData) {
@@ -169,6 +233,12 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const access = await requireCourseDocumentAccess(req, res, db, courseId, { instructorId });
+        if (!access) return;
+        const storedInstructorId = access.user.role === 'instructor'
+            ? access.user.userId
+            : (access.course?.instructorId || instructorId);
         
         // Determine filename
         let filename = file.originalname;
@@ -188,7 +258,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             courseId,
             lectureName,
             documentType,
-            instructorId,
+            instructorId: storedInstructorId,
             contentType: 'file',
             filename: filename,       // Use the determined filename (strict title or original)
             originalName: file.originalname, // Keep the actual original filename for reference
@@ -277,7 +347,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             size: file.size,
             status: 'uploaded',
             metadata: documentData.metadata
-        }, instructorId);
+        }, storedInstructorId);
         
         if (!courseResult.success) {
             console.warn('Warning: Document uploaded but failed to link to course structure:', courseResult.error);
@@ -366,13 +436,19 @@ router.post('/text', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const access = await requireCourseDocumentAccess(req, res, db, courseId, { instructorId });
+        if (!access) return;
+        const storedInstructorId = access.user.role === 'instructor'
+            ? access.user.userId
+            : (access.course?.instructorId || instructorId);
         
         // Prepare document data
         const documentData = {
             courseId,
             lectureName,
             documentType,
-            instructorId,
+            instructorId: storedInstructorId,
             contentType: 'text',
             filename: `${title}.txt`,
             originalName: title,
@@ -399,7 +475,7 @@ router.post('/text', async (req, res) => {
             size: documentData.size,
             status: 'uploaded',
             metadata: documentData.metadata
-        }, instructorId);
+        }, storedInstructorId);
         
         if (!courseResult.success) {
             console.warn('Warning: Text document uploaded but failed to link to course structure:', courseResult.error);
@@ -484,6 +560,9 @@ router.get('/lecture', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const access = await requireCourseDocumentAccess(req, res, db, courseId);
+        if (!access) return;
         
         // Fetch documents from MongoDB
         const documents = await DocumentModel.getDocumentsForLecture(db, courseId, lectureName);
@@ -536,6 +615,9 @@ router.get('/stats', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const access = await requireCourseDocumentAccess(req, res, db, courseId);
+        if (!access) return;
         
         // Fetch document statistics from MongoDB
         const stats = await DocumentModel.getDocumentStats(db, courseId);
@@ -672,6 +754,9 @@ router.get('/:documentId', async (req, res) => {
                 message: 'Document not found'
             });
         }
+
+        const access = await requireCourseDocumentAccess(req, res, db, document.courseId);
+        if (!access) return;
         
         console.log(`Document retrieved: ${documentId}`);
         
@@ -724,15 +809,8 @@ router.delete('/:documentId', async (req, res) => {
             });
         }
         
-        // Check if instructor has access to the course (not just document ownership)
-        // This allows any instructor with course access to delete documents
-        const hasAccess = await CourseModel.userHasCourseAccess(db, document.courseId, instructorId, 'instructor');
-        if (!hasAccess) {
-            return res.status(403).json({
-                success: false,
-                message: 'You do not have permission to delete this document'
-            });
-        }
+        const access = await requireCourseDocumentAccess(req, res, db, document.courseId, { instructorId });
+        if (!access) return;
         
         // Delete the document from the documents collection
         const result = await DocumentModel.deleteDocument(db, documentId);
@@ -780,7 +858,7 @@ router.delete('/:documentId', async (req, res) => {
             console.log(`Document ${documentId} deleted from MongoDB documents, course structure, and Qdrant`);
         }
         
-        console.log(`Document deleted: ${documentId} by instructor ${instructorId}`);
+        console.log(`Document deleted: ${documentId} by user ${access.user.userId}`);
         
         res.json({
             success: true,
@@ -835,6 +913,9 @@ router.post('/cleanup-orphans', async (req, res) => {
                 message: 'Course not found'
             });
         }
+
+        const access = await requireCourseDocumentAccess(req, res, db, courseId, { instructorId });
+        if (!access) return;
         
         // Check each document reference and remove orphaned ones
         let totalOrphans = 0;

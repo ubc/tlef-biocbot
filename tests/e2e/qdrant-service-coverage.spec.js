@@ -115,7 +115,6 @@ test.describe('qdrantService.processAndStoreDocument — sanitization branches',
     test.use({ storageState: storageStatePath('instructor') });
 
     test('content with a long run of repeated characters is sanitised and still stored', async ({ request: api }) => {
-        test.skip(!(await ensureQdrantUp(api)), 'Qdrant not reachable.');
         test.setTimeout(120_000);
         await seedCourse({ courseId: SVC_COURSE_A, instructorId });
 
@@ -149,7 +148,6 @@ test.describe('qdrantService.processAndStoreDocument — sanitization branches',
     });
 
     test('content as a non-string (numeric body) triggers the type-validation branch', async ({ request: api }) => {
-        test.skip(!(await ensureQdrantUp(api)), 'Qdrant not reachable.');
         await seedCourse({ courseId: SVC_COURSE_A, instructorId });
 
         // The route validator only rejects falsy `content`. Passing a number
@@ -184,7 +182,6 @@ test.describe('qdrantService.cloneDocumentChunks — full clone with real chunks
     test.use({ storageState: storageStatePath('instructor') });
 
     test('course transfer clones every stored chunk for the source document', async ({ request: api }) => {
-        test.skip(!(await ensureQdrantUp(api)), 'Qdrant not reachable.');
         test.setTimeout(180_000);
 
         const sourceDocId = `doc_e2e_qdrsvc_xfer_${Date.now()}`;

@@ -51,11 +51,6 @@ async function loginAsStudent(page) {
     });
 }
 
-async function isChatServiceReady(api) {
-    const res = await api.get('/api/chat/status', { timeout: 20_000 });
-    return res.ok();
-}
-
 // ----------------------------------------------------------------------------
 // /api/user-agreement — agreement persistence
 // ----------------------------------------------------------------------------
@@ -884,8 +879,6 @@ test.describe('Practice question API (LLM-backed)', () => {
     });
 
     test('generates a practice question without leaking the correct answer, then checks an answer', async ({ request: api }) => {
-        test.skip(!(await isChatServiceReady(api)), 'LLM service is not reachable in this environment.');
-
         await withDb((db) =>
             db.collection('courses').updateOne(
                 { courseId: STU_COURSE_ID, 'lectures.name': 'Unit 1' },

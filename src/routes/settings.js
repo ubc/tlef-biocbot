@@ -27,6 +27,34 @@ function requireSystemAdmin(req, res) {
     return true;
 }
 
+async function requireInstructorForCourseSettings(db, req, res, courseId) {
+    if (!req.user) {
+        res.status(401).json({ success: false, error: 'Not authenticated' });
+        return false;
+    }
+
+    if (req.user.role !== 'instructor') {
+        res.status(403).json({ success: false, error: 'Instructor access required' });
+        return false;
+    }
+
+    const course = await db.collection('courses').findOne({
+        courseId,
+        status: { $ne: 'deleted' },
+        $or: [
+            { instructorId: req.user.userId },
+            { instructors: req.user.userId }
+        ]
+    }, { projection: { _id: 1 } });
+
+    if (!course) {
+        res.status(403).json({ success: false, error: 'Access denied for this course' });
+        return false;
+    }
+
+    return true;
+}
+
 /**
  * GET /api/settings/can-delete-all
  * Check if the current user has system admin access
@@ -226,6 +254,10 @@ router.post('/prompts', async (req, res) => {
             return res.status(400).json({ success: false, message: 'courseId is required to save settings' });
         }
 
+        if (!await requireInstructorForCourseSettings(db, req, res, courseId)) {
+            return;
+        }
+
         // Validation - ensure they are strings (prompts) and boolean (additiveRetrieval)
         if (typeof base !== 'string' || typeof protege !== 'string' || typeof tutor !== 'string' || typeof explain !== 'string' || typeof directive !== 'string') {
             return res.status(400).json({ success: false, message: 'Invalid prompt format' });
@@ -287,6 +319,10 @@ router.post('/prompts/reset', async (req, res) => {
         
         if (!courseId) {
             return res.status(400).json({ success: false, message: 'courseId is required to reset settings' });
+        }
+
+        if (!await requireInstructorForCourseSettings(db, req, res, courseId)) {
+            return;
         }
 
         // Unset the prompts field and isAdditiveRetrieval in the course document
@@ -757,6 +793,10 @@ router.post('/quiz', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
+        if (!await requireInstructorForCourseSettings(db, req, res, courseId)) {
+            return;
+        }
+
         const instructorId = req.user ? req.user.userId : null;
         const CourseModel = require('../models/Course');
         const result = await CourseModel.updateQuizSettings(db, courseId, {
@@ -814,6 +854,9 @@ router.post('/anonymize-students', async (req, res) => {
             return res.status(400).json({ success: false, error: 'courseId is required' });
         }
         const db = req.app.locals.db;
+        if (!await requireInstructorForCourseSettings(db, req, res, courseId)) {
+            return;
+        }
         const CourseModel = require('../models/Course');
         const result = await CourseModel.updateAnonymizeStudents(db, courseId, req.user.userId, !!enabled);
         if (result.success) {

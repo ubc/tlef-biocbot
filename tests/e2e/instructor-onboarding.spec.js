@@ -309,7 +309,9 @@ function findSavedQuestion(questions, questionText) {
 }
 
 test.describe('instructor onboarding', () => {
-    test.describe.configure({ mode: 'serial' });
+    // Diagnostic: serial mode dropped to surface every real failure in one run
+    // instead of cascade-skipping after the first failing test. Restore if
+    // tests are confirmed to depend on shared cross-test state.
 
     test.beforeEach(async () => {
         await cleanupSeededCourses();
@@ -467,26 +469,6 @@ test.describe('instructor onboarding', () => {
         } finally {
             await apiCtx.dispose();
         }
-    });
-
-    test('redirects completed instructors away from onboarding', async ({ page }) => {
-        test.setTimeout(30_000);
-
-        const completedCourse = await seedCourseFor(user.username, {
-            courseId: `${SEEDED_COURSE_ID_PREFIX}-complete-${Date.now()}`,
-            courseName: `${COURSE_NAME} Completed Redirect`,
-            isOnboardingComplete: true,
-            learningObjectives: [LEARNING_OBJECTIVE],
-        });
-
-        await loginViaUI(page);
-        await page.goto('/instructor/onboarding');
-
-        // Product requirement: instructors with completed onboarding cannot restart onboarding as a fresh flow.
-        await page.waitForURL(url =>
-            url.pathname === '/instructor/documents' &&
-            url.searchParams.get('courseId') === completedCourse.courseId,
-        { timeout: 10_000 });
     });
 
     test('resumes the requested incomplete course from a direct onboarding courseId URL', async ({ page }) => {
@@ -1062,5 +1044,40 @@ test.describe('instructor onboarding', () => {
         expect(approvedTopics.data.topicLabels.every(topic => topic.trim().length > 0)).toBe(true);
 
         await apiCtx.dispose();
+    });
+});
+
+// Lifted out of the serial-mode describe above so its (potentially real)
+// failure does not cascade-skip the rest of the suite. See FINDINGS if this
+// stays failing — it may indicate the completed-onboarding redirect is not
+// happening at /instructor/onboarding.
+test.describe('instructor onboarding — isolated redirects', () => {
+    test.beforeEach(async () => {
+        await cleanupSeededCourses();
+        await hardDeleteCoursesFor(user.username);
+    });
+
+    test.afterEach(async () => {
+        await cleanupSeededCourses();
+    });
+
+    test('redirects completed instructors away from onboarding', async ({ page }) => {
+        test.setTimeout(30_000);
+
+        const completedCourse = await seedCourseFor(user.username, {
+            courseId: `${SEEDED_COURSE_ID_PREFIX}-complete-${Date.now()}`,
+            courseName: `${COURSE_NAME} Completed Redirect`,
+            isOnboardingComplete: true,
+            learningObjectives: [LEARNING_OBJECTIVE],
+        });
+
+        await loginViaUI(page);
+        await page.goto('/instructor/onboarding');
+
+        // Product requirement: instructors with completed onboarding cannot restart onboarding as a fresh flow.
+        await page.waitForURL(url =>
+            url.pathname === '/instructor/documents' &&
+            url.searchParams.get('courseId') === completedCourse.courseId,
+        { timeout: 10_000 });
     });
 });

@@ -6,6 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const QdrantService = require('../services/qdrantService');
+const CourseModel = require('../models/Course');
 const { hasSystemAdminAccess } = require('../services/authorization');
 
 // Initialize Qdrant service
@@ -13,6 +14,78 @@ const qdrantService = new QdrantService();
 
 // Middleware to parse JSON bodies
 router.use(express.json());
+
+async function canUseQdrantForCourse(db, courseId, user) {
+    if (!user) {
+        return false;
+    }
+
+    if (hasSystemAdminAccess(user)) {
+        return true;
+    }
+
+    if (user.role === 'instructor') {
+        return CourseModel.userHasCourseAccess(db, courseId, user.userId, 'instructor');
+    }
+
+    if (user.role === 'ta') {
+        return CourseModel.checkTAPermission(db, courseId, user.userId, 'courses');
+    }
+
+    return false;
+}
+
+async function requireDirectQdrantAccess(req, res, { courseId } = {}) {
+    const user = req.user;
+    if (!user) {
+        res.status(401).json({ success: false, message: 'Authentication required' });
+        return null;
+    }
+
+    if (hasSystemAdminAccess(user)) {
+        return user;
+    }
+
+    if (user.role !== 'instructor' && user.role !== 'ta') {
+        res.status(403).json({
+            success: false,
+            message: 'Direct Qdrant access is restricted to course staff'
+        });
+        return null;
+    }
+
+    if (!courseId) {
+        return user;
+    }
+
+    const db = req.app.locals.db;
+    if (!db) {
+        res.status(503).json({
+            success: false,
+            message: 'Database connection not available'
+        });
+        return null;
+    }
+
+    const course = await db.collection('courses').findOne(
+        { courseId },
+        { projection: { _id: 1 } }
+    );
+
+    if (!course) {
+        return user;
+    }
+
+    if (!(await canUseQdrantForCourse(db, courseId, user))) {
+        res.status(403).json({
+            success: false,
+            message: 'You do not have permission to access vectors for this course'
+        });
+        return null;
+    }
+
+    return user;
+}
 
 /**
  * GET /api/qdrant/status
@@ -60,6 +133,9 @@ router.post('/process-document', async (req, res) => {
             fileName, 
             mimeType 
         } = req.body;
+
+        const user = await requireDirectQdrantAccess(req, res, { courseId });
+        if (!user) return;
 
         // Validate required fields
         if (!courseId || !lectureName || !documentId || !content || !fileName) {
@@ -122,6 +198,9 @@ router.post('/search', async (req, res) => {
     try {
         const { query, courseId, lectureName, limit = 10 } = req.body;
 
+        const user = await requireDirectQdrantAccess(req, res, { courseId });
+        if (!user) return;
+
         if (!query) {
             return res.status(400).json({
                 success: false,
@@ -169,6 +248,9 @@ router.post('/search', async (req, res) => {
 router.delete('/document/:documentId', async (req, res) => {
     try {
         const { documentId } = req.params;
+
+        const user = await requireDirectQdrantAccess(req, res);
+        if (!user) return;
 
         if (!documentId) {
             return res.status(400).json({
@@ -218,6 +300,9 @@ router.delete('/document/:documentId', async (req, res) => {
  */
 router.get('/collection-stats', async (req, res) => {
     try {
+        const user = await requireDirectQdrantAccess(req, res);
+        if (!user) return;
+
         // Ensure service is initialized
         if (!qdrantService.client) {
             await qdrantService.initialize();
@@ -383,6 +468,9 @@ router.delete('/delete-all-collections', async (req, res) => {
 router.post('/cleanup-vectors', async (req, res) => {
     try {
         const { courseId } = req.body;
+
+        const user = await requireDirectQdrantAccess(req, res, { courseId });
+        if (!user) return;
         
         if (!courseId) {
             return res.status(400).json({
@@ -510,6 +598,4 @@ router.post('/cleanup-vectors', async (req, res) => {
 });
 
 module.exports = router;
-
-
 

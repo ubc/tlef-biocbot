@@ -21,8 +21,8 @@ function settingsHarness(role = 'instructor') {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>${roleLabel} Settings CSS Coverage</title>
-    <link rel="stylesheet" href="/styles/style.css?settings-css-coverage=${role}">
-    <link rel="stylesheet" href="/styles/settings.css?settings-css-coverage=${role}">
+    <link rel="stylesheet" href="/styles/style.css">
+    <link rel="stylesheet" href="/styles/settings.css">
 </head>
 <body>
     <div class="app-container">

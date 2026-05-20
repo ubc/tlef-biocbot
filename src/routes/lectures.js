@@ -80,14 +80,14 @@ router.post('/publish', async (req, res) => {
  */
 router.get('/publish-status', async (req, res) => {
     const { instructorId, courseId } = req.query;
-    
+
     if (!instructorId || !courseId) {
         return res.status(400).json({
             success: false,
             message: 'Missing required parameters: instructorId, courseId'
         });
     }
-    
+
     try {
         // Get database instance from app.locals
         const db = req.app.locals.db;
@@ -97,10 +97,40 @@ router.get('/publish-status', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
-        
+
+        // Authorize from the session, not the body — the instructorId query
+        // param is informational only. Mirrors POST /publish above.
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        // Distinguish "course doesn't exist" (return empty map — matches the
+        // legacy contract that course-model-branch-coverage relies on) from
+        // "course exists but caller has no access" (403). Without this split,
+        // an instructor querying a nonexistent course id would get a
+        // misleading 403.
+        const course = await CourseModel.getCourseById(db, courseId);
+        if (!course) {
+            return res.json({
+                success: true,
+                data: {
+                    instructorId,
+                    courseId,
+                    publishStatus: {},
+                    lastUpdated: new Date().toISOString()
+                }
+            });
+        }
+
+        const hasAccess = await CourseModel.userHasCourseAccess(db, courseId, user.userId, user.role);
+        if (!hasAccess) {
+            return res.status(403).json({ success: false, message: 'No access to this course' });
+        }
+
         // Fetch publish status from MongoDB
         const publishStatus = await CourseModel.getLecturePublishStatus(db, courseId);
-        
+
         res.json({
             success: true,
             data: {

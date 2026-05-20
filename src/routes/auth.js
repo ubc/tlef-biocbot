@@ -607,17 +607,21 @@ router.get('/users/:userId', async (req, res) => {
 
         // Get user by ID
         const usersCollection = db.collection('users');
-        const userData = await usersCollection.findOne({ userId })
-            .project({
-                userId: 1,
-                username: 1,
-                email: 1,
-                displayName: 1,
-                role: 1,
-                isActive: 1,
-                createdAt: 1,
-                lastLogin: 1
-            });
+        const userData = await usersCollection.findOne(
+            { userId },
+            {
+                projection: {
+                    userId: 1,
+                    username: 1,
+                    email: 1,
+                    displayName: 1,
+                    role: 1,
+                    isActive: 1,
+                    createdAt: 1,
+                    lastLogin: 1
+                }
+            }
+        );
 
         if (!userData) {
             return res.status(404).json({

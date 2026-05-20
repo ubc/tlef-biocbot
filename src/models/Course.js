@@ -635,15 +635,24 @@ async function deleteAssessmentQuestion(db, courseId, lectureName, questionId, i
     const existingLecture = course.lectures ? course.lectures.find(l => l.name === lectureName) : null;
     
     if (existingLecture) {
-        // Remove the question from the assessmentQuestions array
-        const result = await collection.updateOne(
-            { 
+        // $set always bumps updatedAt, so result.modifiedCount is 1 even when
+        // $pull matched nothing. Check existence first so deletedCount is honest
+        // and we don't spuriously stamp updatedAt on a no-op delete.
+        const exists = (existingLecture.assessmentQuestions || []).some(
+            q => q.questionId === questionId
+        );
+        if (!exists) {
+            return { success: true, deletedCount: 0, questionId };
+        }
+
+        await collection.updateOne(
+            {
                 courseId,
-                'lectures.name': lectureName 
+                'lectures.name': lectureName
             },
             {
-                $pull: { 
-                    'lectures.$.assessmentQuestions': { questionId: questionId } 
+                $pull: {
+                    'lectures.$.assessmentQuestions': { questionId: questionId }
                 },
                 $set: {
                     'lectures.$.updatedAt': now,
@@ -652,9 +661,9 @@ async function deleteAssessmentQuestion(db, courseId, lectureName, questionId, i
                 }
             }
         );
-        
+
         console.log(`Deleted assessment question from ${lectureName}`);
-        return { success: true, deletedCount: result.modifiedCount, questionId };
+        return { success: true, deletedCount: 1, questionId };
     } else {
         console.error(`Lecture ${lectureName} not found in course ${courseId}`);
         return { success: false, error: 'Lecture not found' };
@@ -1577,6 +1586,14 @@ async function joinCourseAsInstructor(db, courseId, instructorId, code, options 
     const course = await collection.findOne({ courseId });
     if (!course) {
         return { success: false, error: 'Course not found' };
+    }
+
+    // Reject joins to courses the UI would not list (deleted or inactive).
+    // /api/courses/available/joinable already hides these; the direct-join path
+    // must not be a side door around that.
+    const courseStatus = course.status || 'active';
+    if (courseStatus === 'deleted' || courseStatus === 'inactive') {
+        return { success: false, error: 'Course is not available to join' };
     }
 
     const instructors = Array.isArray(course.instructors) ? course.instructors : [];

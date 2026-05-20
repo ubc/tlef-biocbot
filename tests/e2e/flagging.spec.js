@@ -1374,7 +1374,7 @@ test.describe('GET /api/flags/status/:status — read flags across courses by st
         await seedOtherCourse();
     });
 
-    test('returns all pending flags from every course (current behaviour: no course scoping)', async ({ request: api }) => {
+    test('returns pending flags only from courses the caller teaches', async ({ request: api }) => {
         const pendingA = await seedFlag({ flagId: 'e2e-status-a-pending', flagStatus: 'pending' });
         await seedFlag({ flagId: 'e2e-status-a-resolved', flagStatus: 'resolved' });
         const pendingB = await seedFlag({
@@ -1392,8 +1392,9 @@ test.describe('GET /api/flags/status/:status — read flags across courses by st
         expect(body.data.status).toBe('pending');
 
         const ids = body.data.flags.map((f) => f.flagId);
-        // Both pending flags surface here; the resolved one does not.
-        expect(ids).toEqual(expect.arrayContaining([pendingA, pendingB]));
+        // The instructor sees pending flags from their own courses only.
+        expect(ids).toContain(pendingA);
+        expect(ids).toContain(pendingB);
         expect(ids).not.toContain('e2e-status-a-resolved');
 
         // Every returned flag really is pending.

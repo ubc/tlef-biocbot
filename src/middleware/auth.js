@@ -45,7 +45,7 @@ function createAuthMiddleware(db) {
                 if (!user) {
                     req.session.destroy(() => {});
 
-                    if (req.path.startsWith('/api/')) {
+                    if (req.originalUrl.startsWith('/api/')) {
                         return res.status(401).json({
                             success: false,
                             error: 'User not found',
@@ -62,7 +62,7 @@ function createAuthMiddleware(db) {
             } catch (error) {
                 console.error('Error hydrating session user:', error);
 
-                if (req.path.startsWith('/api/')) {
+                if (req.originalUrl.startsWith('/api/')) {
                     return res.status(500).json({
                         success: false,
                         error: 'Authentication error'
@@ -77,7 +77,7 @@ function createAuthMiddleware(db) {
         console.log('🔐 [AUTH] Authentication failed - no user or session');
         
         // If it's an API request, return JSON error
-        if (req.path.startsWith('/api/')) {
+        if (req.originalUrl.startsWith('/api/')) {
             return res.status(401).json({
                 success: false,
                 error: 'Authentication required',
@@ -103,7 +103,7 @@ function createAuthMiddleware(db) {
                 // If Passport hasn't populated req.user, try to get from session
                 if (!user) {
                     if (!req.session || !req.session.userId) {
-                        if (req.path.startsWith('/api/')) {
+                        if (req.originalUrl.startsWith('/api/')) {
                             return res.status(401).json({
                                 success: false,
                                 error: 'Authentication required',
@@ -118,7 +118,7 @@ function createAuthMiddleware(db) {
                     if (!user) {
                         // User not found, clear session
                         req.session.destroy();
-                        if (req.path.startsWith('/api/')) {
+                        if (req.originalUrl.startsWith('/api/')) {
                             return res.status(401).json({
                                 success: false,
                                 error: 'User not found',
@@ -134,7 +134,7 @@ function createAuthMiddleware(db) {
 
                 // Check role
                 if (user.role !== requiredRole) {
-                    if (req.path.startsWith('/api/')) {
+                    if (req.originalUrl.startsWith('/api/')) {
                         return res.status(403).json({
                             success: false,
                             error: `Access denied. ${requiredRole} role required.`,
@@ -159,7 +159,7 @@ function createAuthMiddleware(db) {
 
             } catch (error) {
                 console.error('Error in requireRole middleware:', error);
-                if (req.path.startsWith('/api/')) {
+                if (req.originalUrl.startsWith('/api/')) {
                     return res.status(500).json({
                         success: false,
                         error: 'Authentication error'
@@ -214,7 +214,7 @@ function createAuthMiddleware(db) {
             // If Passport hasn't populated req.user, try to get from session
             if (!user) {
                 if (!req.session || !req.session.userId) {
-                    if (req.path.startsWith('/api/')) {
+                    if (req.originalUrl.startsWith('/api/')) {
                         return res.status(401).json({
                             success: false,
                             error: 'Authentication required',
@@ -229,7 +229,7 @@ function createAuthMiddleware(db) {
                 if (!user) {
                     // User not found, clear session
                     req.session.destroy();
-                    if (req.path.startsWith('/api/')) {
+                    if (req.originalUrl.startsWith('/api/')) {
                         return res.status(401).json({
                             success: false,
                             error: 'User not found',
@@ -245,7 +245,7 @@ function createAuthMiddleware(db) {
 
             // Check role - allow both instructor and TA
             if (user.role !== 'instructor' && user.role !== 'ta') {
-                if (req.path.startsWith('/api/')) {
+                if (req.originalUrl.startsWith('/api/')) {
                     return res.status(403).json({
                         success: false,
                         error: 'Access denied. Instructor or TA role required.',
@@ -270,7 +270,7 @@ function createAuthMiddleware(db) {
 
         } catch (error) {
             console.error('Error in requireInstructorOrTA middleware:', error);
-            if (req.path.startsWith('/api/')) {
+            if (req.originalUrl.startsWith('/api/')) {
                 return res.status(500).json({
                     success: false,
                     error: 'Authentication error'
@@ -289,7 +289,7 @@ function createAuthMiddleware(db) {
 
             if (!user) {
                 if (!req.session || !req.session.userId) {
-                    if (req.path.startsWith('/api/')) {
+                    if (req.originalUrl.startsWith('/api/')) {
                         return res.status(401).json({
                             success: false,
                             error: 'Authentication required',
@@ -302,7 +302,7 @@ function createAuthMiddleware(db) {
                 user = await authService.getUserById(req.session.userId);
                 if (!user) {
                     req.session.destroy();
-                    if (req.path.startsWith('/api/')) {
+                    if (req.originalUrl.startsWith('/api/')) {
                         return res.status(401).json({
                             success: false,
                             error: 'User not found',
@@ -316,7 +316,7 @@ function createAuthMiddleware(db) {
             }
 
             if (!hasSystemAdminAccess(user)) {
-                if (req.path.startsWith('/api/')) {
+                if (req.originalUrl.startsWith('/api/')) {
                     return res.status(403).json({
                         success: false,
                         error: 'Access denied. System admin access required.'
@@ -329,7 +329,7 @@ function createAuthMiddleware(db) {
             next();
         } catch (error) {
             console.error('Error in requireSystemAdmin middleware:', error);
-            if (req.path.startsWith('/api/')) {
+            if (req.originalUrl.startsWith('/api/')) {
                 return res.status(500).json({
                     success: false,
                     error: 'Authentication error'
@@ -452,7 +452,7 @@ function createAuthMiddleware(db) {
                 }
 
                 if (!courseId) {
-                    if (!req.path.startsWith('/api/')) {
+                    if (!req.originalUrl.startsWith('/api/')) {
                         return res.redirect('/ta');
                     }
 

@@ -28,6 +28,11 @@ function getSelectedOrFirstTACourseId() {
         || null;
 }
 
+function getSelectedTAPermissions() {
+    const courseId = getSelectedOrFirstTACourseId();
+    return courseId ? taPermissions[courseId] : null;
+}
+
 function navigateToTACourse(path) {
     const courseId = getSelectedOrFirstTACourseId();
 
@@ -219,7 +224,6 @@ function updatePermissionsStatus() {
         return;
     }
     
-    // Check overall permissions across all courses
     const canAccessCourses = hasPermissionForFeature('courses');
     const canAccessFlags = hasPermissionForFeature('flags');
     
@@ -240,25 +244,21 @@ function updatePermissionsStatus() {
 }
 
 /**
- * Check if TA has permission for a specific feature in any course
+ * Check if TA has permission for the selected course context.
  */
 function hasPermissionForFeature(feature) {
-    if (!taPermissions || Object.keys(taPermissions).length === 0) {
+    const permissions = getSelectedTAPermissions();
+    if (!permissions) {
         return false;
     }
-    
-    for (const courseId in taPermissions) {
-        const permissions = taPermissions[courseId];
-        if (permissions) {
-            if (feature === 'courses' && permissions.canAccessCourses) {
-                return true;
-            }
-            if (feature === 'flags' && permissions.canAccessFlags) {
-                return true;
-            }
-        }
+
+    if (feature === 'courses') {
+        return permissions.canAccessCourses !== false;
     }
-    
+    if (feature === 'flags') {
+        return permissions.canAccessFlags !== false;
+    }
+
     return false;
 }
 

@@ -44,15 +44,6 @@ const COURSE_ID = 'BIOC-E2E-CHAT-ERR';
 let instructorId;
 let studentId;
 
-async function isServiceReady(api, url) {
-    try {
-        const res = await api.get(url, { timeout: 20_000 });
-        return res.ok();
-    } catch {
-        return false;
-    }
-}
-
 async function seedDocumentRow({
     documentId,
     originalName,
@@ -290,8 +281,6 @@ test.describe('POST /api/chat — message-build and tracker branches', () => {
 
     test('mode=protege builds the protege messageToSend variant', async ({ request: api }) => {
         test.setTimeout(180_000);
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable.');
-        test.skip(!(await isServiceReady(api, '/api/chat/status')), 'LLM service is not reachable.');
 
         const res = await api.post('/api/chat', {
             data: {
@@ -312,8 +301,6 @@ test.describe('POST /api/chat — message-build and tracker branches', () => {
 
     test('conversationContext branch builds a structured history block', async ({ request: api }) => {
         test.setTimeout(180_000);
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable.');
-        test.skip(!(await isServiceReady(api, '/api/chat/status')), 'LLM service is not reachable.');
 
         const res = await api.post('/api/chat', {
             data: {
@@ -338,8 +325,6 @@ test.describe('POST /api/chat — message-build and tracker branches', () => {
 
     test('isExplanationRequest with an unapproved topic logs the skip branch', async ({ request: api }) => {
         test.setTimeout(180_000);
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable.');
-        test.skip(!(await isServiceReady(api, '/api/chat/status')), 'LLM service is not reachable.');
 
         const res = await api.post('/api/chat', {
             data: {
@@ -363,8 +348,6 @@ test.describe('POST /api/chat — message-build and tracker branches', () => {
 
     test('isExplanationRequest with approved topic + pre-existing count=2 triggers directive mode', async ({ request: api }) => {
         test.setTimeout(180_000);
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable.');
-        test.skip(!(await isServiceReady(api, '/api/chat/status')), 'LLM service is not reachable.');
 
         // Pre-seed the student with two struggles on the approved topic so the
         // third (this request) flips topicState.isActive → true. This
@@ -408,8 +391,6 @@ test.describe('POST /api/chat — message-build and tracker branches', () => {
 
     test('course.prompts override branch is taken when course has custom prompts', async ({ request: api }) => {
         test.setTimeout(180_000);
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable.');
-        test.skip(!(await isServiceReady(api, '/api/chat/status')), 'LLM service is not reachable.');
 
         await withDb((db) =>
             db.collection('courses').updateOne(
@@ -447,8 +428,6 @@ test.describe('POST /api/chat — message-build and tracker branches', () => {
 
     test('checkSummaryAttempt=true runs the extra summary-classifier LLM call', async ({ request: api }) => {
         test.setTimeout(180_000);
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable.');
-        test.skip(!(await isServiceReady(api, '/api/chat/status')), 'LLM service is not reachable.');
 
         const res = await api.post('/api/chat', {
             data: {
@@ -505,7 +484,6 @@ test.describe('POST /api/chat — generic 500 outer catch', () => {
 
     test('non-iterable conversationMessages triggers the default 500 branch', async ({ request: api }) => {
         test.setTimeout(60_000);
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable.');
 
         const res = await api.post('/api/chat', {
             data: {
@@ -577,8 +555,6 @@ test.describe('POST /api/chat — GPT source-attribution fallback on low relevan
 
     test('off-topic question against a single off-topic doc returns GPT-source attribution', async ({ request: api, browser }) => {
         test.setTimeout(180_000);
-        test.skip(!(await isServiceReady(api, '/api/qdrant/status')), 'Qdrant is not reachable.');
-        test.skip(!(await isServiceReady(api, '/api/chat/status')), 'LLM service is not reachable.');
 
         // Document is exclusively about a niche cooking technique; the chat
         // question is about an unrelated physics topic so cosine similarity
