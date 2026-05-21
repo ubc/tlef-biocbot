@@ -1076,3 +1076,37 @@ no longer renders the corresponding UI.
   /api/auth/promote-to-ta`, the route correctly 404'd and the test failed.
 - **Now:** Test seeds the course owned by the test instructor before promoting,
   asserts the happy path, then cleans up the course.
+
+### ⚠️ OPEN — `#course-select` lives inside `#chat-messages` and gets wiped by chat re-renders
+
+- **Where:** `public/student/scripts/student.js` `showCourseSelection()` at
+  ~line 3230. The function builds a `<select id="course-select">` wrapper and
+  appends it to `#chat-messages` (`chatMessages.appendChild(...)` at ~3266).
+- **Symptom:** Intermittent flake on
+  `tests/e2e/student-js-focused.spec.js` › "covers course-selection,
+  revoked-access, and enrollment-join browser branches". Playwright resolves
+  `#course-select`, starts clicking, then the element detaches mid-retry and
+  the click times out at 30s. Passes cleanly in isolation (~900ms), fails
+  occasionally under full-suite load.
+- **Root cause:** `#course-select` is a persistent interactive control, but
+  `#chat-messages` is a churned container. At least six call sites wipe it via
+  `chatMessages.innerHTML = ''` (lines 3259, 3403, 4507, 4593, 6307, 6330).
+  The `showNoQuestionsForUnitMessage` path (~line 4505, where the harness's
+  default course-load lands for a unit with no questions) is the one observed
+  detaching the selector mid-click in the failing video — "No Questions
+  Available" replaces the dropdown.
+- **Why it's a real bug, not just a test issue:** A real student mid-interaction
+  with the course selector when any chat re-render fires (incoming message,
+  new session, unit switch, etc.) would experience the same dropdown
+  disappearing under their cursor. The race is rare in production because
+  the selector is only shown on rare paths, but the fragility is real.
+- **Suggested fix:** Move `#course-select` out of `#chat-messages` — render
+  it into a sibling container (parallel to the chat area, like the existing
+  `#revoked-course-select` in `renderStandaloneCourseSelectorBelowHeader`) so
+  it survives chat re-renders. Alternatively, have every `chatMessages.innerHTML
+  = ''` call site check for and preserve `#course-selection-wrapper` first,
+  but that's whack-a-mole.
+- **Test-side hardening (separate, do after code fix):** the harness should
+  await its own default-course-load to settle before tests call
+  `showCourseSelection`, so the test no longer races itself even if the
+  underlying fragility were to reappear.
