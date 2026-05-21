@@ -328,15 +328,7 @@ function escapeHTML(str) {
     });
 }
 
-async function waitForAuth() {
-    let attempts = 0;
-    const maxAttempts = 50;
-    while (attempts < maxAttempts) {
-        if (typeof getCurrentInstructorId === 'function' && getCurrentInstructorId()) return;
-        await new Promise(r => setTimeout(r, 100));
-        attempts++;
-    }
-}
+// waitForAuth is provided by ../../common/scripts/auth.js (window.waitForAuth).
 
 /**
  * Render struggle topics list

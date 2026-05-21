@@ -381,6 +381,42 @@ function getCurrentInstructorId() {
 }
 
 /**
+ * Wait for auth.js to finish initializing the current user.
+ *
+ * Resolves immediately if `currentUser` is already populated. Otherwise waits
+ * for the `auth:ready` event dispatched by `initAuth()`, with a fallback
+ * timeout so callers never hang indefinitely if auth fails to load.
+ *
+ * This is the canonical replacement for the per-page `waitForAuth` helpers
+ * that previously existed in instructor/student/TA scripts (some event-based,
+ * some polling `getCurrentInstructorId`). Both signals fire from the same
+ * `currentUser = result.user` assignment in `initAuth`, so event-based is
+ * equivalent.
+ *
+ * @param {number} timeoutMs - Fallback timeout in ms (default 5000).
+ * @returns {Promise<void>}
+ */
+async function waitForAuth(timeoutMs = 5000) {
+    if (currentUser) return;
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (timedOut) => {
+            if (settled) return;
+            settled = true;
+            if (timedOut) {
+                console.warn('⚠️ [AUTH] Authentication timeout, proceeding anyway');
+            } else {
+                console.log('✅ [AUTH] Authentication ready');
+            }
+            resolve();
+        };
+        document.addEventListener('auth:ready', () => finish(false), { once: true });
+        setTimeout(() => finish(true), timeoutMs);
+    });
+}
+window.waitForAuth = waitForAuth;
+
+/**
  * Set user's current course context
  * @param {string} courseId - Course ID to set
  * @returns {Promise<boolean>} True if successful

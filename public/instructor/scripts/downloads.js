@@ -126,32 +126,7 @@ async function fetchCourseId() {
  * Wait for authentication to be ready
  * @returns {Promise<void>}
  */
-async function waitForAuth() {
-    return new Promise((resolve) => {
-        console.log('🔍 [WAIT_AUTH] Checking if auth is ready...');
-        // Check if auth is already ready
-        const currentUser = getCurrentUser();
-        console.log('🔍 [WAIT_AUTH] Current user:', currentUser);
-        
-        if (currentUser) {
-            console.log('🔍 [WAIT_AUTH] Auth already ready');
-            resolve();
-            return;
-        }
-        
-        // Wait for auth:ready event
-        document.addEventListener('auth:ready', () => {
-            console.log('✅ [AUTH] Authentication ready');
-            resolve();
-        }, { once: true });
-        
-        // Fallback timeout in case auth never loads
-        setTimeout(() => {
-            console.warn('⚠️ [AUTH] Authentication timeout, proceeding anyway');
-            resolve();
-        }, 5000);
-    });
-}
+// waitForAuth is provided by ../../common/scripts/auth.js (window.waitForAuth).
 
 /**
  * Initialize the downloads page
