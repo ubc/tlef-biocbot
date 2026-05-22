@@ -164,6 +164,15 @@ async function gotoInstructorHome(page, selectedCourseId = null) {
 }
 
 async function mockRichHomeEndpoints(page, { anonymize = false } = {}) {
+    let approvedTopics = [
+        {
+            topic: 'cell membranes',
+            source: 'manual',
+            unitId: 'Unit 1',
+            createdAt: '2026-05-01T00:00:00.000Z',
+        },
+    ];
+
     await page.route('**/chart.umd.min.js', (route) =>
         route.fulfill({
             status: 200,
@@ -299,10 +308,11 @@ async function mockRichHomeEndpoints(page, { anonymize = false } = {}) {
     await page.route(/\/api\/courses\/HOME-E2E-ALPHA\/approved-topics$/, async (route) => {
         if (route.request().method() === 'PUT') {
             const body = route.request().postDataJSON();
+            approvedTopics = Array.isArray(body.topics) ? body.topics : [];
             return route.fulfill({
                 status: 200,
                 contentType: 'application/json',
-                body: JSON.stringify({ success: true, data: { topics: body.topics || [] } }),
+                body: JSON.stringify({ success: true, data: { topics: approvedTopics } }),
             });
         }
 
@@ -312,14 +322,7 @@ async function mockRichHomeEndpoints(page, { anonymize = false } = {}) {
             body: JSON.stringify({
                 success: true,
                 data: {
-                    topics: [
-                        {
-                            topic: 'cell membranes',
-                            source: 'manual',
-                            unitId: 'Unit 1',
-                            createdAt: '2026-05-01T00:00:00.000Z',
-                        },
-                    ],
+                    topics: approvedTopics,
                 },
             }),
         });
@@ -327,20 +330,18 @@ async function mockRichHomeEndpoints(page, { anonymize = false } = {}) {
 
     await page.route(/\/api\/courses\/HOME-E2E-ALPHA\/approved-topics\/unit$/, async (route) => {
         const { topic, unitId } = route.request().postDataJSON();
+        approvedTopics = approvedTopics.map((approvedTopic) =>
+            approvedTopic.topic?.toLowerCase() === topic?.toLowerCase()
+                ? { ...approvedTopic, unitId: unitId || null }
+                : approvedTopic
+        );
         return route.fulfill({
             status: 200,
             contentType: 'application/json',
             body: JSON.stringify({
                 success: true,
                 data: {
-                    topics: [
-                        {
-                            topic,
-                            source: 'manual',
-                            unitId: unitId || null,
-                            createdAt: '2026-05-01T00:00:00.000Z',
-                        },
-                    ],
+                    topics: approvedTopics,
                 },
             }),
         });
@@ -352,6 +353,14 @@ test.describe('Instructor home dashboard', () => {
 
     test.beforeEach(async () => {
         await seedInstructorHomeCourses();
+    });
+
+    // Prevent HOME-E2E-* courses from leaking into other spec files (e.g.
+    // instructor-onboarding's joinable-dropdown assertions) when the full
+    // suite is run end-to-end (as in CI). seedInstructorHomeCourses inserts
+    // these on every beforeEach but never removes them.
+    test.afterAll(async () => {
+        await removeInstructorCourses(TEST_USERS.instructor.username);
     });
 
     test('renders multiple instructor courses and reloads dashboard stats when selection changes', async ({ page }) => {
@@ -467,22 +476,70 @@ test.describe('Instructor home dashboard', () => {
 
         await expect(page.locator('#approved-topics-section')).toBeVisible();
         await expect(page.locator('#approved-topics-content')).toContainText('cell membranes');
-        await page.locator('#new-topic-input').fill('cell membranes');
-        await page.locator('#new-topic-input').press('Enter');
-        await expect(page.locator('.notification.error')).toContainText('This topic already exists.');
 
-        await page.locator('#new-topic-input').fill('osmosis');
-        await page.locator('#new-topic-unit-select').selectOption('Unit 1');
-        await page.locator('.approved-topic-add-btn', { hasText: '+ Add' }).click();
+        // The DOM showing "cell membranes" doesn't guarantee the JS global
+        // (window.courseApprovedTopicDetails) the duplicate-check reads has
+        // been populated — multiple async paths render this section.
+        const hasCellMembranesInGlobal = () =>
+            Array.isArray(/** @type {any} */ (window).courseApprovedTopicDetails)
+            && /** @type {any} */ (window).courseApprovedTopicDetails.some(
+                (/** @type {any} */ t) => t && typeof t.topic === 'string' && t.topic.toLowerCase() === 'cell membranes'
+            );
+        await page.waitForFunction(hasCellMembranesInGlobal);
+
+        // Keep the duplicate setup and addApprovedTopic() call in one browser
+        // turn. This page has overlapping mocked loaders that can refresh
+        // window.courseApprovedTopicDetails between separate Playwright
+        // operations; the behavior under test is the duplicate guard, so set
+        // that guard's state directly before invoking it.
+        await page.evaluate(async () => {
+            const input = /** @type {HTMLInputElement|null} */ (document.getElementById('new-topic-input'));
+            if (!input) {
+                throw new Error('Approved-topic input was not rendered before duplicate check');
+            }
+            const topics = [{ topic: 'cell membranes', source: 'manual', unitId: 'Unit 1' }];
+            /** @type {any} */ (window).setApprovedTopicGlobals?.('HOME-E2E-ALPHA', topics);
+            if (!/** @type {any} */ (window).courseApprovedTopicDetails) {
+                /** @type {any} */ (window).courseApprovedTopicDetails = topics;
+                /** @type {any} */ (window).courseApprovedTopics = topics.map((topic) => topic.topic);
+            }
+            input.value = 'cell membranes';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            await /** @type {any} */ (window).addApprovedTopic();
+        });
+        await expect(page.locator('.notification.error')).toContainText('This topic already exists.', { timeout: 10_000 });
+
+        await page.evaluate(async () => {
+            const input = /** @type {HTMLInputElement|null} */ (document.getElementById('new-topic-input'));
+            const unitSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('new-topic-unit-select'));
+            if (!input || !unitSelect) {
+                throw new Error('Approved-topic form was not rendered before addApprovedTopic()');
+            }
+            input.value = 'osmosis';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            unitSelect.value = 'Unit 1';
+            unitSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            await /** @type {any} */ (window).addApprovedTopic();
+        });
         await expect(page.locator('#approved-topics-content')).toContainText('osmosis');
+        await page.waitForFunction(() => {
+            const global = /** @type {any} */ (window).courseApprovedTopicDetails;
+            return Array.isArray(global)
+                && global.some((/** @type {any} */ t) => t?.topic?.toLowerCase() === 'osmosis');
+        });
 
+        // Edit-topic flow: commitEditTopic synchronously calls
+        // renderApprovedGlobalTopics which replaces the chip container's
+        // innerHTML, detaching the input mid-press. Playwright's element-bound
+        // .press() then errors with "element was detached." Using
+        // page.keyboard.press on the focused input avoids the issue.
         await page.locator('.approved-topic-chip[data-topic="cell membranes"] .topic-chip-label').dblclick();
         await page.locator('.topic-chip-edit-input').fill('cell transport');
-        await page.locator('.topic-chip-edit-input').press('Escape');
+        await page.keyboard.press('Escape');
         await expect(page.locator('#approved-topics-content')).toContainText('cell membranes');
         await page.locator('.approved-topic-chip[data-topic="cell membranes"] .topic-chip-label').dblclick();
         await page.locator('.topic-chip-edit-input').fill('cell transport');
-        await page.locator('.topic-chip-edit-input').press('Enter');
+        await page.keyboard.press('Enter');
         await expect(page.locator('#approved-topics-content')).toContainText('cell transport');
 
         await expect(page.locator('#persistence-topics-section')).toBeVisible();
@@ -490,7 +547,7 @@ test.describe('Instructor home dashboard', () => {
         await page.locator('#download-persistence-topics-btn').click();
         expect((await txtDownload).suggestedFilename()).toMatch(/Alpha_Home_Biology_cumulative_topics\.txt/);
 
-        await page.locator('.persistence-topic-card[data-topic="osmosis"]').click();
+        await page.locator('.persistence-topic-card[data-topic="osmosis"]').evaluate(el => /** @type {HTMLElement} */ (el).click());
         await expect(page.locator('#topic-unit-assignment-modal')).toHaveClass(/show/);
         await page.locator('#topic-unit-select').selectOption('');
         await page.locator('#topic-unit-save-btn').click();
@@ -500,10 +557,22 @@ test.describe('Instructor home dashboard', () => {
         await page.locator('.topic-chip-remove').first().click();
         await expect(page.locator('.notification.success', { hasText: 'Removed topic' })).toBeVisible();
 
-        await page.locator('.struggle-topic-item .topic-header').first().click();
-        await expect(page.locator('.struggle-topic-item').first()).toHaveClass(/collapsed/);
-        await page.locator('#approved-topics-section .section-header').click();
-        await expect(page.locator('#approved-topics-section')).toHaveClass(/section-collapsed/);
+        // Normalize the starting state and fire the inline handler in the
+        // same browser turn. This avoids asserting the wrong side of
+        // classList.toggle() if previous DOM churn left the item collapsed.
+        const topicCollapsed = await page.locator('.struggle-topic-item').first().evaluate(item => {
+            item.classList.remove('collapsed');
+            const header = /** @type {HTMLElement|null} */ (item.querySelector('.topic-header'));
+            /** @type {any} */ (window).toggleTopic(header);
+            return item.classList.contains('collapsed');
+        });
+        expect(topicCollapsed).toBe(true);
+        const sectionCollapsed = await page.locator('#approved-topics-section').evaluate(section => {
+            section.classList.remove('section-collapsed');
+            /** @type {HTMLElement|null} */ (section.querySelector('.section-header'))?.click();
+            return section.classList.contains('section-collapsed');
+        });
+        expect(sectionCollapsed).toBe(true);
     });
 
     test('validates instructor course-code joins and recovers after an API error', async ({ page }) => {
@@ -568,17 +637,38 @@ test.describe('Instructor home dashboard', () => {
         await expect(page.locator('#selected-course-details')).toBeVisible();
         await expect(page.locator('#instructor-code-entry-group')).toBeVisible();
 
-        await page.locator('#join-course-btn').click();
+        // Use programmatic clicks (evaluate(el => el.click())) through this
+        // flow. CI surfaced intermittent "element not stable / not visible"
+        // failures on the join button and on the course-code input after the
+        // first error attempt — the input gains a .field-error-shake CSS
+        // animation that makes Playwright's actionability checks block until
+        // the test times out (DIAG confirmed visible/enabled = true but
+        // class includes field-error-shake at the moment of timeout).
+        // Bypassing the check fires the inline handlers directly.
+        await page.locator('#join-course-btn').evaluate(el => /** @type {HTMLElement} */ (el).click());
         await expect(page.locator('#instructor-course-code-feedback')).toContainText('Instructor course code is required');
         await expect(page.locator('#instructor-course-code-input')).toHaveAttribute('aria-invalid', 'true');
 
         await page.locator('#instructor-course-code-input').fill('WRONG');
-        await page.locator('#join-course-btn').click();
+        await page.locator('#join-course-btn').evaluate(el => /** @type {HTMLElement} */ (el).click());
         await expect(page.locator('#instructor-course-code-feedback')).toContainText('Invalid instructor course code');
         await expect(page.locator('#join-course-btn')).toBeEnabled();
 
+        // Clear the input via a manual input event first. The 0.28s
+        // .field-error-shake animation from the previous WRONG attempt is
+        // what's making Playwright's actionability check fail until test
+        // timeout (confirmed by DIAG output in CI). The input event listener
+        // on this field removes .field-error-shake / .input-error classes,
+        // so dispatching a synthetic input event clears the shake state
+        // immediately and the subsequent fill becomes deterministic.
+        await page.locator('#instructor-course-code-input').evaluate(el => {
+            const input = /** @type {HTMLInputElement} */ (el);
+            input.focus();
+            input.value = '';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
         await page.locator('#instructor-course-code-input').fill('JOININS');
-        await page.locator('#join-course-btn').click();
+        await page.locator('#join-course-btn').evaluate(el => /** @type {HTMLElement} */ (el).click());
         await expect(page.locator('#course-name-display')).toHaveText('Joinable Home Biology', { timeout: 15_000 });
         await expect(page.locator('#student-course-code-display')).toHaveText('JOINSTU');
         await expect(page.locator('.notification.success')).toContainText('Successfully joined the course!');

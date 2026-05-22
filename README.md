@@ -195,6 +195,62 @@ tlef-biocbot/
 - `requireStudentEnrolled` — Must be enrolled in the requested course
 - `requireTAPermission(permission)` — TA-scoped permission checks
 
+## 🧪 Testing
+
+### Running tests locally
+
+```bash
+npm test                  # all Playwright tests, headless
+npm run test:headed       # run with a visible browser
+npm run test:ui           # Playwright UI mode
+npm run test:report       # open the last HTML report
+```
+
+The Playwright config (`playwright.config.js`) launches its own server with `BIOCBOT_TEST_LLM_STUB=1`, so the LLM and embeddings calls are intercepted by deterministic stubs (`src/services/llmStub.js`, `src/services/embeddingsStub.js`). You do **not** need an OpenAI key to run tests — but you still need MongoDB and Qdrant reachable at the URLs in your `.env`.
+
+## 🤖 Continuous Integration
+
+A GitHub Actions workflow at [`.github/workflows/playwright.yml`](.github/workflows/playwright.yml) runs the full Playwright suite on every push to `main` and on every pull request targeting `main`.
+
+### What the workflow does
+
+1. Boots `mongo:7` and `qdrant/qdrant:latest` as service containers inside the runner.
+2. Installs Node 20 and project dependencies.
+3. Installs the Chromium browser via `npx playwright install --with-deps chromium`.
+4. Runs `npm test` with `BIOCBOT_TEST_LLM_STUB=1` so no external LLM calls are made.
+5. Uploads the Playwright HTML report, Monocart report, coverage reports, and (on failure) traces/videos/screenshots as workflow artifacts.
+
+### Enabling the workflow on GitHub
+
+The workflow is plain YAML — pushing the file to GitHub is enough to register it. No extra configuration is required for the default case because:
+
+- MongoDB and Qdrant run as ephemeral service containers (no external DB needed).
+- The LLM stub means **no API keys / secrets** need to be configured.
+- All required env vars are inlined in the `env:` block of the workflow.
+
+Steps to enable:
+
+1. Push this branch (which includes `.github/workflows/playwright.yml`) to GitHub.
+2. Open the repository's **Actions** tab on github.com. If Actions are disabled at the org level, an admin must enable them under **Settings → Actions → General → Allow all actions**.
+3. The workflow will run automatically on the next push or pull request. You can also trigger a run manually from the Actions tab if you add a `workflow_dispatch:` trigger.
+
+### Viewing test results
+
+- Go to **Actions → Playwright Tests → (latest run)**.
+- Scroll to the **Artifacts** section at the bottom to download:
+  - `playwright-report` — standard Playwright HTML report
+  - `monocart-report` — Monocart report with coverage
+  - `coverage-reports` — raw v8/lcov coverage
+  - `test-results` — traces, videos, screenshots (only uploaded on failure)
+- Unzip and open `index.html` from any of the reports locally.
+
+### Customizing
+
+- **Different Node version**: change `node-version: 20` in the workflow.
+- **Switch from `npm install` to `npm ci`**: commit `package-lock.json` (currently in `.gitignore`), then change the install step and re-enable `cache: npm` on the `setup-node` action.
+- **Add a manual trigger**: add `workflow_dispatch:` under the top-level `on:` block.
+- **Run on more branches**: extend the `branches:` lists under `push:` and `pull_request:`.
+
 ## 📄 License
 
 ISC License
