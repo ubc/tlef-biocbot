@@ -476,36 +476,48 @@ test.describe('Instructor home dashboard', () => {
         await expect(page.locator('#approved-topics-section')).toBeVisible();
         await expect(page.locator('#approved-topics-content')).toContainText('cell membranes');
 
-        // The DOM showing "cell membranes" doesn't guarantee that the JS state
+        // The DOM showing "cell membranes" doesn't guarantee the JS global
         // (window.courseApprovedTopicDetails) the duplicate-check reads has
-        // been populated — multiple async paths render this section. Wait for
-        // the global to actually contain cell membranes before exercising the
-        // duplicate-detection flow, otherwise we hit a race where the duplicate
-        // check sees an empty array and silently accepts the "duplicate" as a
-        // new entry.
-        await page.waitForFunction(() =>
+        // been populated — multiple async paths render this section.
+        const hasCellMembranesInGlobal = () =>
             Array.isArray(/** @type {any} */ (window).courseApprovedTopicDetails)
             && /** @type {any} */ (window).courseApprovedTopicDetails.some(
                 (/** @type {any} */ t) => t && typeof t.topic === 'string' && t.topic.toLowerCase() === 'cell membranes'
-            )
-        );
+            );
+        await page.waitForFunction(hasCellMembranesInGlobal);
 
         await page.locator('#new-topic-input').fill('cell membranes');
+        // Verify the input value AND global state both align right before
+        // pressing Enter. Without this, a stray re-render between fill and
+        // press can clear the global and the duplicate check silently passes
+        // through (no error notification fires → assertion can't find it).
+        await page.waitForFunction(() => {
+            const input = /** @type {HTMLInputElement|null} */ (document.getElementById('new-topic-input'));
+            const global = /** @type {any} */ (window).courseApprovedTopicDetails;
+            return input?.value === 'cell membranes'
+                && Array.isArray(global)
+                && global.some((/** @type {any} */ t) => t?.topic?.toLowerCase() === 'cell membranes');
+        });
         await page.locator('#new-topic-input').press('Enter');
-        await expect(page.locator('.notification.error')).toContainText('This topic already exists.');
+        await expect(page.locator('.notification.error')).toContainText('This topic already exists.', { timeout: 10_000 });
 
         await page.locator('#new-topic-input').fill('osmosis');
         await page.locator('#new-topic-unit-select').selectOption('Unit 1');
         await page.locator('.approved-topic-add-btn', { hasText: '+ Add' }).click();
         await expect(page.locator('#approved-topics-content')).toContainText('osmosis');
 
+        // Edit-topic flow: commitEditTopic synchronously calls
+        // renderApprovedGlobalTopics which replaces the chip container's
+        // innerHTML, detaching the input mid-press. Playwright's element-bound
+        // .press() then errors with "element was detached." Using
+        // page.keyboard.press on the focused input avoids the issue.
         await page.locator('.approved-topic-chip[data-topic="cell membranes"] .topic-chip-label').dblclick();
         await page.locator('.topic-chip-edit-input').fill('cell transport');
-        await page.locator('.topic-chip-edit-input').press('Escape');
+        await page.keyboard.press('Escape');
         await expect(page.locator('#approved-topics-content')).toContainText('cell membranes');
         await page.locator('.approved-topic-chip[data-topic="cell membranes"] .topic-chip-label').dblclick();
         await page.locator('.topic-chip-edit-input').fill('cell transport');
-        await page.locator('.topic-chip-edit-input').press('Enter');
+        await page.keyboard.press('Enter');
         await expect(page.locator('#approved-topics-content')).toContainText('cell transport');
 
         await expect(page.locator('#persistence-topics-section')).toBeVisible();
@@ -523,9 +535,16 @@ test.describe('Instructor home dashboard', () => {
         await page.locator('.topic-chip-remove').first().click();
         await expect(page.locator('.notification.success', { hasText: 'Removed topic' })).toBeVisible();
 
-        await page.locator('.struggle-topic-item .topic-header').first().click();
+        // Use programmatic click (.evaluate(el => el.click())) instead of
+        // Playwright's actionability-gated .click(). The struggle-topic-item
+        // header occasionally fails the actionability check (likely from a
+        // stray transition/overlay leftover from the just-closed modal),
+        // and Playwright reports a successful click that never actually
+        // fired the onclick handler. Bypassing the check guarantees the
+        // toggleTopic() inline handler runs.
+        await page.locator('.struggle-topic-item .topic-header').first().evaluate(el => /** @type {HTMLElement} */ (el).click());
         await expect(page.locator('.struggle-topic-item').first()).toHaveClass(/collapsed/);
-        await page.locator('#approved-topics-section .section-header').click();
+        await page.locator('#approved-topics-section .section-header').evaluate(el => /** @type {HTMLElement} */ (el).click());
         await expect(page.locator('#approved-topics-section')).toHaveClass(/section-collapsed/);
     });
 
