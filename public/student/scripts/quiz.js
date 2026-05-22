@@ -722,4 +722,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 /**
  * Wait for auth to be ready
  */
-// waitForAuth is provided by ../../common/scripts/auth.js (window.waitForAuth).
+async function waitForAuth() {
+    return new Promise((resolve) => {
+        if (typeof currentUser !== 'undefined' && currentUser) {
+            resolve();
+            return;
+        }
+        document.addEventListener('auth:ready', () => resolve(), { once: true });
+        // Fallback timeout
+        setTimeout(resolve, 3000);
+    });
+}

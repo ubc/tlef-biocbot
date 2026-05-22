@@ -308,38 +308,13 @@ Suggested tests:
 
 ### 1B. Auth Wait / Current User
 
-Status: **`waitForAuth` migration done.** Canonical implementation lives in
-`public/common/scripts/auth.js` (`waitForAuth(timeoutMs = 5000)`, exposed via
-`window.waitForAuth`). All 11 per-page implementations were deleted:
+Target:
 
-- `public/instructor/scripts/instructor.js` — migrated (two duplicate
-  declarations removed; the second was inadvertently shadowing the first,
-  meaning the whole file was running the polling variant instead of the
-  event-based one)
-- `public/instructor/scripts/downloads.js` — migrated
-- `public/instructor/scripts/onboarding.js` — migrated
-- `public/instructor/scripts/student-hub.js` — migrated
-- `public/instructor/scripts/ta-hub.js` — migrated
-- `public/instructor/scripts/flagged.js` — migrated
-- `public/ta/scripts/ta-home.js` — migrated
-- `public/ta/scripts/ta-onboarding.js` — migrated
-- `public/ta/scripts/ta-settings.js` — migrated
-- `public/student/scripts/quiz.js` — migrated
-
-Two patterns existed in the wild — event-based (waited for `auth:ready`) and
-polling (looped on `getCurrentInstructorId()`). Both are equivalent because
-`getCurrentInstructorId()` derives from `currentUser`, which is set just
-before `auth:ready` fires in `initAuth()`. Canonical helper uses the
-event-based pattern with a 5s fallback timeout.
-
-`public/student/scripts/flag-notifications.js` intentionally kept its own
-`waitForAuthReady` — different name, no timeout, separate API surface used
-only by the flag-notifications module.
-
-Still open under 1B:
-
+- Move `waitForAuth` into `public/common/scripts/auth.js` or a small
+  `public/common/scripts/auth-ready.js`.
+- Keep the existing timeout behavior while the migration is in progress.
 - Cache `/api/auth/me` in the common `getCurrentUser()` path so page scripts
-  stop repeatedly fetching auth state. (Not yet started.)
+  stop repeatedly fetching auth state.
 
 Risk notes:
 

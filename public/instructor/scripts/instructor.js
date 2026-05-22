@@ -10,7 +10,27 @@ let currentQuestionType = null;
  * Wait for authentication to be ready
  * @returns {Promise<void>}
  */
-// waitForAuth is provided by ../../common/scripts/auth.js (window.waitForAuth).
+async function waitForAuth() {
+    return new Promise((resolve) => {
+        // Check if auth is already ready
+        if (getCurrentUser()) {
+            resolve();
+            return;
+        }
+        
+        // Wait for auth:ready event
+        document.addEventListener('auth:ready', () => {
+            console.log('✅ [AUTH] Authentication ready');
+            resolve();
+        }, { once: true });
+        
+        // Fallback timeout in case auth never loads
+        setTimeout(() => {
+            console.warn('⚠️ [AUTH] Authentication timeout, proceeding anyway');
+            resolve();
+        }, 5000);
+    });
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('🚀 [DOM_LOADED] Instructor page loaded');
@@ -6886,7 +6906,24 @@ async function submitRegenerate() {
  * Wait for authentication to be initialized
  * @returns {Promise<void>}
  */
-// (duplicate waitForAuth removed; provided by ../../common/scripts/auth.js)
+async function waitForAuth() {
+    // Wait for auth.js to initialize
+    let attempts = 0;
+    const maxAttempts = 50; // 5 seconds max wait
+    
+    while (attempts < maxAttempts) {
+        if (typeof getCurrentInstructorId === 'function' && getCurrentInstructorId()) {
+            console.log('✅ [AUTH] Authentication ready');
+            return;
+        }
+        
+        // Wait 100ms before next attempt
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+    }
+    
+    console.warn('⚠️ [AUTH] Authentication not ready after 5 seconds, proceeding anyway');
+}
 
 /**
  * Update the published units summary text

@@ -571,4 +571,19 @@ function displayTACourses() {
  * Wait for authentication to be initialized
  * @returns {Promise<void>}
  */
-// waitForAuth is provided by ../../common/scripts/auth.js (window.waitForAuth).
+async function waitForAuth() {
+    let attempts = 0;
+    const maxAttempts = 50;
+
+    while (attempts < maxAttempts) {
+        if (typeof getCurrentInstructorId === 'function' && getCurrentInstructorId()) {
+            console.log('[AUTH] TA Authentication ready');
+            return;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+    }
+
+    console.warn('[AUTH] TA Authentication not ready after 5 seconds, proceeding anyway');
+}

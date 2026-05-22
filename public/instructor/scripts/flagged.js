@@ -1389,7 +1389,24 @@ function showErrorMessage(message) {
  * Wait for authentication to be initialized
  * @returns {Promise<void>}
  */
-// waitForAuth is provided by ../../common/scripts/auth.js (window.waitForAuth).
+async function waitForAuth() {
+    // Wait for auth.js to initialize
+    let attempts = 0;
+    const maxAttempts = 50; // 5 seconds max wait
+    
+    while (attempts < maxAttempts) {
+        if (typeof getCurrentInstructorId === 'function' && getCurrentInstructorId()) {
+            console.log('✅ [AUTH] Authentication ready');
+            return;
+        }
+        
+        // Wait 100ms before next attempt
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+    }
+    
+    console.warn('⚠️ [AUTH] Authentication not ready after 5 seconds, proceeding anyway');
+}
 
 /**
  * Load TA permissions for all courses

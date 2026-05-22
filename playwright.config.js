@@ -74,7 +74,7 @@ module.exports = defineConfig({
     ],
 
     webServer: {
-        command: `cross-env NODE_ENV=development NODE_V8_COVERAGE=${NODE_V8_COVERAGE_DIR} BIOCBOT_COVERAGE_RUN_ID=${COVERAGE_RUN_ID} node --require ./tests/e2e/helpers/v8-coverage-hook.js src/server.js`,
+        command: `cross-env NODE_ENV=development BIOCBOT_TEST_LLM_STUB=1 NODE_V8_COVERAGE=${NODE_V8_COVERAGE_DIR} BIOCBOT_COVERAGE_RUN_ID=${COVERAGE_RUN_ID} node --require ./tests/e2e/helpers/v8-coverage-hook.js src/server.js`,
         url: BASE_URL,
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,

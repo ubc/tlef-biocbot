@@ -3,17 +3,18 @@
  * Coverage for src/routes/questions.js — targets paths the existing
  * routes-questions-api.spec.js does not reach:
  *   - model-failure 400s (lecture not found, course not found) on POST/PUT/DELETE
- *   - bulk insert with auto-linking via real LLM
+ *   - bulk insert with auto-linking (LLM stubbed)
  *   - auto-link-learning-objectives DB-write path (no body.questions)
  *   - auto-link-learning-objectives preserveExisting short-circuit
- *   - generate-ai full success path with materials (real LLM)
- *   - generate-ai regenerate happy path with feedback (real LLM)
+ *   - generate-ai full success path with materials (LLM stubbed)
+ *   - generate-ai regenerate happy path with feedback (LLM stubbed)
  *   - generate-ai content-truncation path (>6000 chars combined content)
  *   - generate-ai approved-struggle-topic happy path
  *   - extractFirstJSONObject fallback paths (exercised via auto-link)
  *
- * Per AGENTS.md these are browser-level (HTTP) tests; no internal mocks.
- * LLM-bound tests carry a long timeout — real model calls.
+ * Per AGENTS.md these are browser-level (HTTP) tests. The web server runs
+ * with BIOCBOT_TEST_LLM_STUB=1; each LLM call is scripted via the
+ * /api/test/llm-stub helpers so the suite is hermetic and fast.
  */
 
 const { test, expect, request } = require('./fixtures/monocart');
@@ -25,6 +26,7 @@ const {
     cleanupCourses,
     cleanupCoursesForUser,
 } = require('./helpers/courses-test');
+const { resetLlmStub, enqueueLlmResponses } = require('./helpers/llm-stub');
 
 const COURSE_A = 'BIOC-E2E-QCOV-A';
 const COURSE_B = 'BIOC-E2E-QCOV-B';
@@ -218,7 +220,6 @@ test.describe('POST /api/questions/bulk auto-link branch', () => {
     test.use({ storageState: storageStatePath('instructor') });
 
     test('runs auto-link when unit has LOs and one question is missing a learningObjective', async ({ request: api }) => {
-        test.setTimeout(120_000);
         await seedCourse({
             courseId: COURSE_A,
             instructorId,
@@ -236,6 +237,18 @@ test.describe('POST /api/questions/bulk auto-link branch', () => {
                 }],
             },
         });
+        // linkQuestionsToLearningObjectives sends one prompt covering both
+        // questions; refs default to "question-1"/"question-2" because the
+        // bulk payload omits ref/questionId.
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            JSON.stringify({
+                matches: [
+                    { ref: 'question-1', learningObjective: 'Understand DNA structure' },
+                    { ref: 'question-2', learningObjective: 'Compare DNA and RNA' },
+                ],
+            }),
+        ]);
         const res = await api.post('/api/questions/bulk', {
             data: {
                 courseId: COURSE_A,
@@ -262,7 +275,6 @@ test.describe('POST /api/questions/auto-link-learning-objectives DB-write path',
     test.use({ storageState: storageStatePath('instructor') });
 
     test('updates questions in DB when body.questions is omitted', async ({ request: api }) => {
-        test.setTimeout(120_000);
         const now = new Date();
         await seedCourse({
             courseId: COURSE_A,
@@ -282,6 +294,15 @@ test.describe('POST /api/questions/auto-link-learning-objectives DB-write path',
                 ],
             }],
         });
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            JSON.stringify({
+                matches: [
+                    { ref: 'q_db_link_1', learningObjective: 'Understand DNA structure' },
+                    { ref: 'q_db_link_2', learningObjective: 'Compare DNA and RNA' },
+                ],
+            }),
+        ]);
         const res = await api.post('/api/questions/auto-link-learning-objectives', {
             data: {
                 courseId: COURSE_A,
@@ -341,7 +362,6 @@ test.describe('POST /api/questions/generate-ai full success', () => {
     test.use({ storageState: storageStatePath('instructor') });
 
     test('happy path produces an assessment question with the LLM', async ({ request: api }) => {
-        test.setTimeout(180_000);
         const now = new Date();
         await seedCourse({
             courseId: COURSE_A,
@@ -369,6 +389,16 @@ test.describe('POST /api/questions/generate-ai full success', () => {
             originalName: 'Lecture Notes A.txt',
             documentType: 'lecture-notes',
         });
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            JSON.stringify({
+                type: 'multiple-choice',
+                question: 'Which molecule stores genetic information in cells?',
+                options: { A: 'RNA', B: 'DNA', C: 'Protein', D: 'Lipid' },
+                correctAnswer: 'B',
+                explanation: 'DNA is the genetic material; RNA is transcribed from it.',
+            }),
+        ]);
         const res = await api.post('/api/questions/generate-ai', {
             data: {
                 courseId: COURSE_A,
@@ -381,12 +411,13 @@ test.describe('POST /api/questions/generate-ai full success', () => {
         expect(res.ok()).toBeTruthy();
         const body = await res.json();
         expect(body.success).toBe(true);
-        expect(typeof body.data.question).toBe('string');
+        expect(body.data.question).toBe('Which molecule stores genetic information in cells?');
+        expect(body.data.answer).toBe('B');
+        expect(body.data.options).toMatchObject({ A: 'RNA', B: 'DNA', C: 'Protein', D: 'Lipid' });
         expect(body.data.aiGenerated).toBe(true);
     });
 
     test('regenerate=true with feedback exercises the regeneration branch', async ({ request: api }) => {
-        test.setTimeout(180_000);
         const now = new Date();
         await seedCourse({
             courseId: COURSE_A,
@@ -412,6 +443,21 @@ test.describe('POST /api/questions/generate-ai full success', () => {
             originalName: 'Lecture Notes Energy.txt',
             documentType: 'lecture-notes',
         });
+        // Regenerate path with LOs makes TWO LLM calls: regenerate + relink.
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            JSON.stringify({
+                type: 'true-false',
+                question: 'ATP is the primary energy currency of cells.',
+                correctAnswer: true,
+                explanation: 'ATP releases energy on hydrolysis to ADP + Pi.',
+            }),
+            JSON.stringify({
+                matches: [
+                    { ref: 'regenerated-question', learningObjective: 'Identify the cellular energy currency' },
+                ],
+            }),
+        ]);
         const res = await api.post('/api/questions/generate-ai', {
             data: {
                 courseId: COURSE_A,
@@ -427,10 +473,11 @@ test.describe('POST /api/questions/generate-ai full success', () => {
         expect(res.ok()).toBeTruthy();
         const body = await res.json();
         expect(body.data.wasRegenerated).toBe(true);
+        expect(body.data.answer).toBe('true');
+        expect(body.data.selectedLearningObjective).toBe('Identify the cellular energy currency');
     });
 
     test('approved struggleTopic exercises the topic-focus branch', async ({ request: api }) => {
-        test.setTimeout(180_000);
         const now = new Date();
         await seedCourse({
             courseId: COURSE_A,
@@ -457,6 +504,16 @@ test.describe('POST /api/questions/generate-ai full success', () => {
             originalName: 'Lecture Notes Replication.txt',
             documentType: 'lecture-notes',
         });
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            JSON.stringify({
+                type: 'short-answer',
+                question: 'Describe how DNA replication produces two identical strands.',
+                expectedAnswer: 'Semiconservative replication uses each strand as a template via DNA polymerase.',
+                keyPoints: ['semiconservative', 'DNA polymerase', 'template strand'],
+                explanation: 'Each daughter has one original strand and one newly synthesised strand.',
+            }),
+        ]);
         const res = await api.post('/api/questions/generate-ai', {
             data: {
                 courseId: COURSE_A,
@@ -469,10 +526,10 @@ test.describe('POST /api/questions/generate-ai full success', () => {
         expect(res.ok()).toBeTruthy();
         const body = await res.json();
         expect(body.data.struggleTopic).toBe('DNA replication');
+        expect(body.data.answer).toBe('Semiconservative replication uses each strand as a template via DNA polymerase.');
     });
 
     test('combined content > 6000 chars triggers the truncation/prioritization branch', async ({ request: api }) => {
-        test.setTimeout(180_000);
         const now = new Date();
         await seedCourse({
             courseId: COURSE_A,
@@ -508,6 +565,15 @@ test.describe('POST /api/questions/generate-ai full success', () => {
             originalName: 'Additional Material.txt',
             documentType: 'other',
         });
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            JSON.stringify({
+                type: 'true-false',
+                question: 'The provided lecture notes were truncated before being sent to the LLM.',
+                correctAnswer: true,
+                explanation: 'When combined content exceeds 6000 chars, the route trims sections.',
+            }),
+        ]);
         const res = await api.post('/api/questions/generate-ai', {
             data: {
                 courseId: COURSE_A,
@@ -516,9 +582,102 @@ test.describe('POST /api/questions/generate-ai full success', () => {
                 questionType: 'true-false',
             },
         });
-        // Could return 408/422/200 depending on LLM behaviour; assert 2xx or
-        // 4xx that the route owns (not a 500 catch).
-        expect([200, 408, 422]).toContain(res.status());
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.data.answer).toBe('true');
+    });
+
+    // -------------------------------------------------------------------------
+    // Malformed-response branches for /generate-ai
+    // -------------------------------------------------------------------------
+    test('generate-ai returns a fallback question when the LLM JSON is malformed', async ({ request: api }) => {
+        // parseGeneratedQuestion catches the parse error and returns a fallback
+        // structure instead of throwing, so the route surfaces 200 with the
+        // canned "Error parsing generated question" placeholder.
+        const now = new Date();
+        await seedCourse({
+            courseId: COURSE_A,
+            instructorId,
+            lectures: [{
+                name: 'Unit 1',
+                displayName: 'Unit 1',
+                isPublished: true,
+                learningObjectives: [],
+                passThreshold: 2,
+                createdAt: now,
+                updatedAt: now,
+                documents: [],
+                assessmentQuestions: [],
+            }],
+        });
+        await seedDocumentForUnit({
+            courseId: COURSE_A,
+            lectureName: 'Unit 1',
+            documentId: 'doc-malformed-1',
+            content: 'Cells are the basic unit of life. They contain organelles such as the nucleus.',
+            originalName: 'Lecture Notes Malformed.txt',
+            documentType: 'lecture-notes',
+        });
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            'no JSON at all — just prose from the model',
+        ]);
+        const res = await api.post('/api/questions/generate-ai', {
+            data: {
+                courseId: COURSE_A,
+                lectureName: 'Unit 1',
+                instructorId,
+                questionType: 'true-false',
+            },
+        });
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.success).toBe(true);
+        expect(body.data.question).toContain('Error parsing');
+    });
+
+    test('generate-ai returns 500 when the LLM responds with empty content', async ({ request: api }) => {
+        // generateAssessmentQuestion throws 'No response content received'
+        // when llm.sendMessage returns an empty content string, which the
+        // route catches and maps to a 500 error response.
+        const now = new Date();
+        await seedCourse({
+            courseId: COURSE_A,
+            instructorId,
+            lectures: [{
+                name: 'Unit 1',
+                displayName: 'Unit 1',
+                isPublished: true,
+                learningObjectives: [],
+                passThreshold: 2,
+                createdAt: now,
+                updatedAt: now,
+                documents: [],
+                assessmentQuestions: [],
+            }],
+        });
+        await seedDocumentForUnit({
+            courseId: COURSE_A,
+            lectureName: 'Unit 1',
+            documentId: 'doc-empty-1',
+            content: 'Some lecture content.',
+            originalName: 'Lecture Notes Empty.txt',
+            documentType: 'lecture-notes',
+        });
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, ['']);
+        const res = await api.post('/api/questions/generate-ai', {
+            data: {
+                courseId: COURSE_A,
+                lectureName: 'Unit 1',
+                instructorId,
+                questionType: 'short-answer',
+            },
+        });
+        expect(res.status()).toBe(500);
+        const body = await res.json();
+        expect(body.success).toBe(false);
+        expect(String(body.error || '')).toContain('No response content');
     });
 });
 

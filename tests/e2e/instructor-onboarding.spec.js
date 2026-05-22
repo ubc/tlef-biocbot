@@ -4,6 +4,7 @@ const path = require('path');
 const { MongoClient } = require('mongodb');
 const { test, expect, request } = require('./fixtures/monocart');
 const { TEST_USERS, loadCredentials } = require('./helpers/users');
+const { resetLlmStub, addLlmStubRule } = require('./helpers/llm-stub');
 
 const user = TEST_USERS.instructor_fresh;
 const ownerUser = TEST_USERS.instructor;
@@ -951,6 +952,24 @@ test.describe('instructor onboarding', () => {
 
         // Auto-accept any "replace existing content" confirms triggered by re-uploads.
         page.on('dialog', dialog => dialog.accept());
+
+        // The onboarding flow calls /api/courses/:courseId/extract-topics
+        // after materials are uploaded. With the LLM stub the route otherwise
+        // gets `{}` and returns zero approved topics, which fails the final
+        // assertion that approved-topics is non-empty. Match the extraction
+        // system prompt and script a small topic list.
+        const apiForStub = await request.newContext();
+        try {
+            await resetLlmStub(apiForStub);
+            await addLlmStubRule(apiForStub, {
+                matchSystemPrompt: 'chemistry/biochemistry topic labels',
+                content: JSON.stringify({
+                    topics: ['DNA structure', 'DNA replication', 'Cell membrane transport'],
+                }),
+            });
+        } finally {
+            await apiForStub.dispose();
+        }
 
         await loginViaUI(page);
         await page.goto('/instructor/onboarding');

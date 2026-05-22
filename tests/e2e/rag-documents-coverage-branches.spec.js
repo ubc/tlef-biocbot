@@ -27,6 +27,7 @@ const {
     cleanupCoursesForUser,
     setStudentEnrollment,
 } = require('./helpers/courses-test');
+const { resetLlmStub, enqueueLlmResponses, setLlmStubDefault } = require('./helpers/llm-stub');
 
 const COURSE_A = 'BIOC-E2E-RAG-COV-A';
 const COURSE_B = 'BIOC-E2E-RAG-COV-B';
@@ -279,8 +280,7 @@ test.describe('documents.js — extra validation and helpers', () => {
         expect(Buffer.compare(body, Buffer.from(bytes))).toBe(0);
     });
 
-    test('extract-questions returns extracted questions for short content (real LLM)', async ({ request: api }) => {
-        test.setTimeout(120_000);
+    test('extract-questions returns extracted questions when the LLM returns well-formed JSON', async ({ request: api }) => {
         await seedCourse({ courseId: COURSE_A, instructorId });
         const now = new Date();
         await withDb((db) =>
@@ -312,18 +312,125 @@ test.describe('documents.js — extra validation and helpers', () => {
                 lastModified: now,
             })
         );
+        // Drive extractQuestionsFromText through its happy path AND its
+        // MC/TF normalization branches: MC with lowercase letter, TF with
+        // long-form 'True'.
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            JSON.stringify({
+                questions: [
+                    {
+                        questionType: 'multiple-choice',
+                        question: 'Which molecule is the cellular energy currency?',
+                        options: { a: 'DNA', b: 'ATP', c: 'Glucose', d: 'Lipid' },
+                        correctAnswer: 'b',
+                        explanation: 'ATP releases energy on hydrolysis.',
+                    },
+                    {
+                        questionType: 'true-false',
+                        question: 'Water is a polar molecule.',
+                        correctAnswer: 'True',
+                        explanation: 'The O-H bonds give water a permanent dipole.',
+                    },
+                ],
+            }),
+        ]);
         const res = await api.post('/api/documents/doc_e2e_ragcov_extract/extract-questions', {
             data: {},
-            timeout: 90_000,
+            timeout: 30_000,
         });
         expect(res.ok()).toBeTruthy();
         const body = await res.json();
         expect(body.success).toBe(true);
         expect(Array.isArray(body.data.questions)).toBe(true);
-        // The MC/TF normalization branches inside extractQuestionsFromText
-        // should have fired for at least one extracted question.
-        expect(body.data.totalFound).toBeGreaterThanOrEqual(0);
+        expect(body.data.questions.length).toBe(2);
         expect(body.data.wasChunked).toBe(false);
+
+        const mc = body.data.questions.find((q) => q.questionType === 'multiple-choice');
+        expect(mc).toBeTruthy();
+        // Options keys normalised to uppercase A..D
+        expect(mc.options).toMatchObject({ A: 'DNA', B: 'ATP', C: 'Glucose', D: 'Lipid' });
+        // correctAnswer normalised to uppercase letter
+        expect(mc.correctAnswer).toBe('B');
+
+        const tf = body.data.questions.find((q) => q.questionType === 'true-false');
+        expect(tf).toBeTruthy();
+        // T/F long-form normalised to 'True'/'False'
+        expect(tf.correctAnswer).toBe('True');
+    });
+
+    test('extract-questions returns an empty list when the LLM response is not parseable JSON', async ({ request: api }) => {
+        // extractFirstJSONObject returns null when the response has no JSON
+        // object; extractQuestionsFromText then returns [] without throwing.
+        await seedCourse({ courseId: COURSE_A, instructorId });
+        const now = new Date();
+        await withDb((db) =>
+            db.collection('documents').insertOne({
+                documentId: 'doc_e2e_ragcov_extract_bad',
+                courseId: COURSE_A,
+                lectureName: 'Unit 1',
+                documentType: 'practice-quiz',
+                contentType: 'text',
+                content: 'Practice quiz body that the LLM declines to parse.',
+                originalName: 'pq2.txt',
+                filename: 'pq2.txt',
+                mimeType: 'text/plain',
+                size: 64,
+                status: 'parsed',
+                uploadDate: now,
+                lastModified: now,
+            })
+        );
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            'sorry, I cannot extract questions from this content',
+        ]);
+        const res = await api.post('/api/documents/doc_e2e_ragcov_extract_bad/extract-questions', {
+            data: {},
+            timeout: 30_000,
+        });
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.success).toBe(true);
+        expect(body.data.questions).toEqual([]);
+        expect(body.data.totalFound).toBe(0);
+    });
+
+    test('extract-questions still returns when the LLM JSON is malformed', async ({ request: api }) => {
+        // extractFirstJSONObject's regex looks for `{...}` and tries to parse;
+        // a half-open brace returns null and the route surfaces an empty list.
+        await seedCourse({ courseId: COURSE_A, instructorId });
+        const now = new Date();
+        await withDb((db) =>
+            db.collection('documents').insertOne({
+                documentId: 'doc_e2e_ragcov_extract_malformed',
+                courseId: COURSE_A,
+                lectureName: 'Unit 1',
+                documentType: 'practice-quiz',
+                contentType: 'text',
+                content: 'Some practice quiz content for malformed test.',
+                originalName: 'pq3.txt',
+                filename: 'pq3.txt',
+                mimeType: 'text/plain',
+                size: 64,
+                status: 'parsed',
+                uploadDate: now,
+                lastModified: now,
+            })
+        );
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            '{ "questions": [ { "questionType": "short-answer", "question": "broken',
+        ]);
+        const res = await api.post('/api/documents/doc_e2e_ragcov_extract_malformed/extract-questions', {
+            data: {},
+            timeout: 30_000,
+        });
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.success).toBe(true);
+        expect(Array.isArray(body.data.questions)).toBe(true);
+        expect(body.data.totalFound).toBe(0);
     });
 
     test('cleanup-orphans returns zero orphans when every reference exists', async ({ request: api }) => {
@@ -415,10 +522,27 @@ test.describe('chat.js — extra validation and request shapes', () => {
         test.use({ storageState: storageStatePath('student') });
 
         test('check-practice-answer returns the correct MCQ branch when the supplied answer matches', async ({ request: api }) => {
-            test.setTimeout(60_000);
-            // Loop a few attempts so we don't depend on the LLM picking any
-            // particular type — we just need to land on a deterministic branch
-            // at least once.
+            // Two practice-question generations + one short-answer evaluation.
+            // Iteration 1 lands on MC and matches the first option → mcCorrect.
+            // Iteration 2 lands on short-answer → llmEvaluated (via the
+            // evaluateStudentAnswer JSON response).
+            await resetLlmStub(api);
+            await enqueueLlmResponses(api, [
+                JSON.stringify({
+                    questionType: 'multiple-choice',
+                    question: 'Stub MC question?',
+                    options: { A: 'opt A', B: 'opt B', C: 'opt C', D: 'opt D' },
+                    correctAnswer: 'A',
+                    explanation: '...',
+                }),
+                JSON.stringify({
+                    questionType: 'short-answer',
+                    question: 'Stub short-answer question?',
+                    correctAnswer: 'expected answer',
+                    explanation: '...',
+                }),
+                JSON.stringify({ correct: false, feedback: 'E2E Student, see expected answer.' }),
+            ]);
             const seen = { mcCorrect: false, mcIncorrect: false, llmEvaluated: false };
             for (let i = 0; i < 4 && !(seen.mcCorrect && seen.llmEvaluated); i += 1) {
                 const gen = await api.post('/api/chat/practice-question', {
@@ -779,24 +903,32 @@ test.describe('prompts.js — builders via routes', () => {
     });
 
     test('buildPracticeQuestionPrompt — topic + no-topic + repeated calls hit each question-type branch', async ({ request: api }) => {
-        test.setTimeout(180_000);
         // The random selection inside buildPracticeQuestionPrompt picks one of
-        // three (mc, tf, sa) prompt arms per call. The LLM may also produce
-        // malformed JSON occasionally, which yields a 500 from the route.
-        // We don't fail the test on individual 500s — we just need the route +
-        // builder code to run enough times to land on each arm.
+        // three (mc, tf, sa) prompt arms per call. We just need the route +
+        // builder code to run enough times to land on each arm — drive the
+        // stub with a valid TF practice question on every call so the route
+        // succeeds regardless of which prompt arm was selected.
+        await resetLlmStub(api);
+        await setLlmStubDefault(api, JSON.stringify({
+            questionType: 'true-false',
+            question: 'Stub practice question.',
+            correctAnswer: 'true',
+            explanation: '...',
+        }));
         let successes = 0;
         for (let i = 0; i < 8; i += 1) {
             const topic = i % 2 === 0 ? 'cells' : null;
             const res = await api.post('/api/chat/practice-question', {
                 data: { courseId: COURSE_A, unitName: 'Unit 1', topic },
-                timeout: 60_000,
+                timeout: 30_000,
             }).catch(() => null);
             if (res && res.ok()) {
                 successes += 1;
             }
         }
-        // At least one call must succeed so we know the wiring works.
-        expect(successes).toBeGreaterThan(0);
+        // All 8 calls should succeed because the stub always returns parseable
+        // JSON. Tightened from "at least one" now that LLM nondeterminism is
+        // gone.
+        expect(successes).toBe(8);
     });
 });

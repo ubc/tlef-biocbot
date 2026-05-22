@@ -13,6 +13,7 @@
 const { test, expect } = require('./fixtures/monocart');
 const { TEST_USERS, loadCredentials, storageStatePath } = require('./helpers/users');
 const { withDb, getUserIdByUsername } = require('./helpers/quiz');
+const { resetLlmStub, enqueueLlmResponses } = require('./helpers/llm-stub');
 const {
     STU_COURSE_ID,
     STU_INACTIVE_COURSE_ID,
@@ -901,9 +902,24 @@ test.describe('Practice question API (LLM-backed)', () => {
             )
         );
 
+        // Script the LLM to return a valid MC practice question — the route
+        // parses the JSON and stores the correctAnswer server-side. MC
+        // check-practice-answer is purely string comparison, so no second
+        // LLM call is needed for the scoring step.
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            JSON.stringify({
+                questionType: 'multiple-choice',
+                question: 'Which molecule is the main energy currency of the cell?',
+                options: { A: 'ATP', B: 'DNA', C: 'Cellulose', D: 'Cholesterol' },
+                correctAnswer: 'A',
+                explanation: 'ATP hydrolysis powers cellular work.',
+            }),
+        ]);
+
         const generated = await api.post('/api/chat/practice-question', {
             data: { courseId: STU_COURSE_ID, unitName: 'Unit 1', topic: 'cellular energy' },
-            timeout: 120_000,
+            timeout: 30_000,
         });
         expect(generated.ok()).toBeTruthy();
 
