@@ -560,17 +560,19 @@ test.describe('Instructor home dashboard', () => {
         // Normalize the starting state and fire the inline handler in the
         // same browser turn. This avoids asserting the wrong side of
         // classList.toggle() if previous DOM churn left the item collapsed.
-        await page.locator('.struggle-topic-item').first().evaluate(item => {
+        const topicCollapsed = await page.locator('.struggle-topic-item').first().evaluate(item => {
             item.classList.remove('collapsed');
             const header = /** @type {HTMLElement|null} */ (item.querySelector('.topic-header'));
             /** @type {any} */ (window).toggleTopic(header);
+            return item.classList.contains('collapsed');
         });
-        await expect(page.locator('.struggle-topic-item').first()).toHaveClass(/collapsed/);
-        await page.locator('#approved-topics-section').evaluate(section => {
+        expect(topicCollapsed).toBe(true);
+        const sectionCollapsed = await page.locator('#approved-topics-section').evaluate(section => {
             section.classList.remove('section-collapsed');
             /** @type {HTMLElement|null} */ (section.querySelector('.section-header'))?.click();
+            return section.classList.contains('section-collapsed');
         });
-        await expect(page.locator('#approved-topics-section')).toHaveClass(/section-collapsed/);
+        expect(sectionCollapsed).toBe(true);
     });
 
     test('validates instructor course-code joins and recovers after an API error', async ({ page }) => {
