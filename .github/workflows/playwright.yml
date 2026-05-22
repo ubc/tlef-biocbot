@@ -39,8 +39,12 @@ jobs:
       MONGO_URI: mongodb://mongoadmin:secret@127.0.0.1:27017/biocbot-ci?authSource=admin
       QDRANT_URL: http://127.0.0.1:6333
       QDRANT_API_KEY: super-secret-dev-key
-      # LLM and embeddings are stubbed for tests — no external API keys required.
-      BIOCBOT_TEST_LLM_STUB: '1'
+      # NOTE: BIOCBOT_TEST_LLM_STUB is deliberately NOT set here.
+      # playwright.config.js sets it on the webServer command via cross-env so
+      # the main app server uses the LLM/embeddings stubs. Setting it at the
+      # workflow level would leak it into child processes spawned by individual
+      # tests (e.g. the qdrant service error-branches harness) which need the
+      # real (intercepted) module-load path to run.
       EMBEDDING_PROVIDER: ubc-genai-toolkit-llm
       LLM_PROVIDER: openai
       LLM_API_KEY: stub-key-not-used
