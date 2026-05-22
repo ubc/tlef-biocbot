@@ -139,6 +139,7 @@ async function openStudentWithMocks(page, options = {}) {
         localStorage.clear();
         sessionStorage.clear();
         localStorage.setItem('studentMode', 'tutor');
+        localStorage.setItem('userId', seededChat.metadata.studentId);
         testWindow.__studentSessionPromptValue = 'JOIN-CODE';
         testWindow.__studentSessionConfirmValue = true;
         window.prompt = (message) => {
@@ -449,8 +450,17 @@ test('course join dropdown handles failed join, network error, and prompt cancel
 
 test('loadAvailableCourses clears a stored course when enrollment is revoked', async ({ page }) => {
     await openStudentWithMocks(page, {
+        seedSelectedCourse: false,
         enrollmentResponse: { status: 200, body: { success: true, data: { enrolled: false, status: 'inactive' } } },
     });
+
+    await page.evaluate(({ courseId, courseName, studentId }) => {
+        localStorage.setItem('selectedCourseId', courseId);
+        localStorage.setItem('selectedCourseName', courseName);
+        localStorage.setItem(`biocbot_session_${studentId}_${courseId}_Unit 1`, 'e2e_session_branches');
+        const w = /** @type {any} */ (window);
+        return w.loadAvailableCourses();
+    }, { courseId: COURSE_ID, courseName: COURSE_NAME, studentId: STUDENT_ID });
 
     await expect(page.locator('#course-select')).toBeVisible({ timeout: 10_000 });
     await expect.poll(() => page.evaluate(() => localStorage.getItem('selectedCourseId'))).toBeNull();
