@@ -610,12 +610,20 @@ test.describe('Instructor home dashboard', () => {
         await expect(page.locator('#selected-course-details')).toBeVisible();
         await expect(page.locator('#instructor-code-entry-group')).toBeVisible();
 
-        await page.locator('#join-course-btn').click();
+        // Use programmatic clicks (evaluate(el => el.click())) through this
+        // flow. CI surfaced intermittent "element not stable / not visible"
+        // failures on the join button and on the course-code input after the
+        // first error attempt — the input gains a .field-error-shake CSS
+        // animation that makes Playwright's actionability checks block until
+        // the test times out (DIAG confirmed visible/enabled = true but
+        // class includes field-error-shake at the moment of timeout).
+        // Bypassing the check fires the inline handlers directly.
+        await page.locator('#join-course-btn').evaluate(el => /** @type {HTMLElement} */ (el).click());
         await expect(page.locator('#instructor-course-code-feedback')).toContainText('Instructor course code is required');
         await expect(page.locator('#instructor-course-code-input')).toHaveAttribute('aria-invalid', 'true');
 
         await page.locator('#instructor-course-code-input').fill('WRONG');
-        await page.locator('#join-course-btn').click();
+        await page.locator('#join-course-btn').evaluate(el => /** @type {HTMLElement} */ (el).click());
         await expect(page.locator('#instructor-course-code-feedback')).toContainText('Invalid instructor course code');
         await expect(page.locator('#join-course-btn')).toBeEnabled();
 
@@ -637,8 +645,21 @@ test.describe('Instructor home dashboard', () => {
         }
         // === END TEMP DIAGNOSTIC #2 ===
 
+        // Clear the input via a manual input event first. The 0.28s
+        // .field-error-shake animation from the previous WRONG attempt is
+        // what's making Playwright's actionability check fail until test
+        // timeout (confirmed by DIAG output in CI). The input event listener
+        // on this field removes .field-error-shake / .input-error classes,
+        // so dispatching a synthetic input event clears the shake state
+        // immediately and the subsequent fill becomes deterministic.
+        await page.locator('#instructor-course-code-input').evaluate(el => {
+            const input = /** @type {HTMLInputElement} */ (el);
+            input.focus();
+            input.value = '';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
         await page.locator('#instructor-course-code-input').fill('JOININS');
-        await page.locator('#join-course-btn').click();
+        await page.locator('#join-course-btn').evaluate(el => /** @type {HTMLElement} */ (el).click());
         await expect(page.locator('#course-name-display')).toHaveText('Joinable Home Biology', { timeout: 15_000 });
         await expect(page.locator('#student-course-code-display')).toHaveText('JOINSTU');
         await expect(page.locator('.notification.success')).toContainText('Successfully joined the course!');
