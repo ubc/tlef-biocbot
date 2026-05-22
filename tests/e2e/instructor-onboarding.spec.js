@@ -507,6 +507,15 @@ test.describe('instructor onboarding', () => {
 
         await page.locator('#step-1 button.btn-primary', { hasText: 'Get Started' }).click();
         await expect(page.locator('#step-2.onboarding-step.active')).toBeVisible();
+
+        // === TEMP DIAGNOSTIC — remove once we understand local-vs-CI divergence ===
+        const dropdownHtml = await page.locator('#course-select').innerHTML();
+        const joinableApi = await page.evaluate(() => fetch('/api/courses/available/joinable', { credentials: 'include' }).then(r => r.json()));
+        console.log('=== DIAG: looking for seeded courseId:', privateCourse.courseId);
+        console.log('=== DIAG: #course-select innerHTML ===\n' + dropdownHtml);
+        console.log('=== DIAG: /api/courses/available/joinable response ===\n' + JSON.stringify(joinableApi, null, 2));
+        // === END TEMP DIAGNOSTIC ===
+
         await expect(page.locator(`#course-select option[value="${privateCourse.courseId}"]`)).toHaveCount(0);
         await expect(page.getByText(privateCourse.courseName)).toHaveCount(0);
     });
