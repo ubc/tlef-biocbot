@@ -18,7 +18,12 @@ class QdrantService {
         this.client = null;
         this.embeddings = null;
         this.chunker = null;
-        this.collectionName = 'biocbot_documents';
+        // Use a separate collection when the embeddings stub is active so the
+        // stub's bag-of-words vectors don't mix with real-LLM vectors stored
+        // by a prior dev/prod run against the same Qdrant instance.
+        this.collectionName = process.env.BIOCBOT_TEST_LLM_STUB === '1'
+            ? 'biocbot_documents_stub'
+            : 'biocbot_documents';
         this.vectorSize = process.env.QDRANT_VECTOR_SIZE || 768; // Will be determined dynamically from embeddings
     }
 
@@ -101,8 +106,14 @@ class QdrantService {
             });
 
             try {
-                this.embeddings = await EmbeddingsModule.create(embeddingConfig);
-                console.log('✅ Successfully initialized embeddings service');
+                if (process.env.BIOCBOT_TEST_LLM_STUB === '1') {
+                    const { EmbeddingsStub } = require('./embeddingsStub');
+                    this.embeddings = new EmbeddingsStub({ vectorSize: 1536 });
+                    console.log('🧪 Embeddings stub active (BIOCBOT_TEST_LLM_STUB=1) — no OpenAI traffic');
+                } else {
+                    this.embeddings = await EmbeddingsModule.create(embeddingConfig);
+                    console.log('✅ Successfully initialized embeddings service');
+                }
             } catch (embeddingError) {
                 console.error('❌ Failed to initialize embeddings service:', embeddingError);
                 throw new Error(`Embeddings initialization error: ${embeddingError.message}`);

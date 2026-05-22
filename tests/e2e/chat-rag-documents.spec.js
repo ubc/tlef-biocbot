@@ -11,6 +11,7 @@
 const { test, expect } = require('./fixtures/monocart');
 const { TEST_USERS, storageStatePath } = require('./helpers/users');
 const { withDb, getUserIdByUsername } = require('./helpers/quiz');
+const { resetLlmStub, addLlmStubRule } = require('./helpers/llm-stub');
 const {
     STU_COURSE_ID,
     STU_OTHER_COURSE_ID,
@@ -392,18 +393,22 @@ test.describe('POST /api/chat — RAG answer and source attribution', () => {
     });
 
     test('creates a mental-health flag when the configured detector reports concern', async ({ request: api, browser }) => {
-
+        // The mental-health analyzer is fire-and-forget, so we can't FIFO-queue
+        // its response reliably alongside the struggle tracker + main chat
+        // call. Match by systemPrompt instead — the route passes the
+        // course-specific `mentalHealthDetectionPrompt` as the system prompt.
+        const detectionPromptSentinel = 'E2E mental-health detector sentinel for stub matching';
         await withDb((db) =>
             db.collection('courses').updateOne(
                 { courseId: STU_COURSE_ID },
-                {
-                    $set: {
-                        mentalHealthDetectionPrompt:
-                            'For this e2e test, always respond only with {"concernLevel":"high concern","reason":"E2E forced concern"}',
-                    },
-                }
+                { $set: { mentalHealthDetectionPrompt: detectionPromptSentinel } }
             )
         );
+        await resetLlmStub(api);
+        await addLlmStubRule(api, {
+            matchSystemPrompt: detectionPromptSentinel,
+            content: JSON.stringify({ concernLevel: 'high concern', reason: 'E2E forced concern' }),
+        });
 
         const instructorCtx = await browser.newContext({ storageState: storageStatePath('instructor') });
         const ingest = await instructorCtx.request.post('/api/qdrant/process-document', {

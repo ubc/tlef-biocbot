@@ -153,6 +153,18 @@ class LLMService {
      */
     async _performInitialization() {
         try {
+            // Test stub mode: skip real provider wiring entirely so the e2e
+            // suite can run without hitting ChatGPT. Gated by an env flag the
+            // Playwright web server sets.
+            if (process.env.BIOCBOT_TEST_LLM_STUB === '1') {
+                const { getLLMStub } = require('./llmStub');
+                this.llm = getLLMStub();
+                this.llmConfig = { provider: 'test-stub', defaultModel: 'gpt-4.1-mini' };
+                this.isInitialized = true;
+                console.log('🧪 LLM service initialized with test stub (BIOCBOT_TEST_LLM_STUB=1)');
+                return;
+            }
+
             // Get configuration for current environment
             this.llmConfig = config.getLLMConfig();
 

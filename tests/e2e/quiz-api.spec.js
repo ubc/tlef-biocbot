@@ -16,6 +16,7 @@ const {
     resetQuizCourse,
     cleanupQuizCourse,
 } = require('./helpers/quiz');
+const { resetLlmStub, enqueueLlmResponses } = require('./helpers/llm-stub');
 
 let instructorId;
 let studentId;
@@ -223,13 +224,16 @@ test.describe('POST /api/quiz/check-answer', () => {
     });
 
     // --- LLM-backed short-answer evaluation ---
-    // These call the real LLM service. We do two pairs (clearly correct,
-    // clearly wrong) and assert the boolean outcome — the LLM has plenty of
-    // signal to differentiate "peptide bond" from "I have no idea".
-    test.describe('short-answer (real LLM)', () => {
-        test.setTimeout(60_000);
+    // Previously these called the real LLM service; now they script the
+    // in-process stub so the suite runs offline. Each case enqueues a
+    // specific LLM response to drive a known branch of evaluateStudentAnswer.
+    test.describe('short-answer (stubbed LLM)', () => {
+        test('grades a short answer as correct when the LLM returns well-formed JSON', async ({ request: api }) => {
+            await resetLlmStub(api);
+            await enqueueLlmResponses(api, [
+                JSON.stringify({ correct: true, feedback: 'E2E Student, your answer captures the key idea.' }),
+            ]);
 
-        test('grades a clearly-correct short answer as correct', async ({ request: api }) => {
             const res = await api.post('/api/quiz/check-answer', {
                 data: {
                     courseId: QUIZ_COURSE_ID,
@@ -243,14 +247,18 @@ test.describe('POST /api/quiz/check-answer', () => {
             expect(res.ok()).toBeTruthy();
             const body = await res.json();
             expect(body.success).toBe(true);
-            expect(body.data).toBeTruthy();
-            expect(typeof body.data.correct).toBe('boolean');
-            expect(typeof body.data.feedback).toBe('string');
-            expect(body.data.feedback.length).toBeGreaterThan(0);
-            expect(body.data.correct).toBe(true);
+            expect(body.data).toEqual({
+                correct: true,
+                feedback: 'E2E Student, your answer captures the key idea.',
+            });
         });
 
-        test('grades a clearly-wrong short answer as incorrect', async ({ request: api }) => {
+        test('grades a short answer as incorrect when the LLM returns well-formed JSON', async ({ request: api }) => {
+            await resetLlmStub(api);
+            await enqueueLlmResponses(api, [
+                JSON.stringify({ correct: false, feedback: 'E2E Student, that does not match the expected concept.' }),
+            ]);
+
             const res = await api.post('/api/quiz/check-answer', {
                 data: {
                     courseId: QUIZ_COURSE_ID,
@@ -262,8 +270,55 @@ test.describe('POST /api/quiz/check-answer', () => {
             });
             const body = await res.json();
             expect(body.success).toBe(true);
-            expect(typeof body.data.correct).toBe('boolean');
             expect(body.data.correct).toBe(false);
+            expect(body.data.feedback).toContain('does not match');
+        });
+
+        test('still returns a shape when the LLM response is not JSON (fallback)', async ({ request: api }) => {
+            // evaluateStudentAnswer falls back to a substring scan when JSON
+            // parsing fails. Verify that path produces a usable response.
+            await resetLlmStub(api);
+            await enqueueLlmResponses(api, [
+                'E2E Student, you nailed it: correct": true — keep going.',
+            ]);
+
+            const res = await api.post('/api/quiz/check-answer', {
+                data: {
+                    courseId: QUIZ_COURSE_ID,
+                    questionId: QUESTION_IDS.sa,
+                    lectureName: 'Unit 1',
+                    studentAnswer: 'whatever',
+                    studentName: 'E2E Student',
+                },
+            });
+            expect(res.ok()).toBeTruthy();
+            const body = await res.json();
+            expect(body.success).toBe(true);
+            expect(typeof body.data.correct).toBe('boolean');
+            expect(typeof body.data.feedback).toBe('string');
+            expect(body.data.feedback.length).toBeGreaterThan(0);
+        });
+
+        test('does not crash on malformed JSON in the LLM response', async ({ request: api }) => {
+            await resetLlmStub(api);
+            await enqueueLlmResponses(api, [
+                '{ "correct": true, "feedback": "missing brace',
+            ]);
+
+            const res = await api.post('/api/quiz/check-answer', {
+                data: {
+                    courseId: QUIZ_COURSE_ID,
+                    questionId: QUESTION_IDS.sa,
+                    lectureName: 'Unit 1',
+                    studentAnswer: 'whatever',
+                    studentName: 'E2E Student',
+                },
+            });
+            expect(res.ok()).toBeTruthy();
+            const body = await res.json();
+            expect(body.success).toBe(true);
+            expect(typeof body.data.correct).toBe('boolean');
+            expect(typeof body.data.feedback).toBe('string');
         });
     });
 });
@@ -498,7 +553,10 @@ test.describe('POST /api/quiz/chat', () => {
     });
 
     test('benign question reaches the LLM and returns a quiz-help response', async ({ request: api }) => {
-        test.setTimeout(60_000);
+        const llmReply = 'Think about which biomolecule cells use to power active transport. That is your hint.';
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [llmReply]);
+
         const res = await api.post('/api/quiz/chat', {
             data: {
                 courseId: QUIZ_COURSE_ID,
@@ -515,8 +573,58 @@ test.describe('POST /api/quiz/chat', () => {
         const body = await res.json();
         expect(body.success).toBe(true);
         expect(body.source).toBe('quiz-help');
+        expect(body.message).toBe(llmReply);
+    });
+
+    test('quiz-chat returns the raw LLM text even when it is not JSON-shaped', async ({ request: api }) => {
+        // /api/quiz/chat is plain-text in/out, so non-JSON content is the
+        // normal case. This documents that the route passes the LLM string
+        // through verbatim without any JSON parsing.
+        const llmReply = 'Plain prose with no braces or JSON anywhere.';
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [llmReply]);
+
+        const res = await api.post('/api/quiz/chat', {
+            data: {
+                courseId: QUIZ_COURSE_ID,
+                lectureName: 'Unit 1',
+                questionText: 'Which biomolecule is the primary energy currency of the cell?',
+                questionType: 'multiple-choice',
+                correctAnswer: 'B',
+                studentAnswer: 'A',
+                message: 'Give me one sentence of help.',
+                conversationHistory: [],
+            },
+        });
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.success).toBe(true);
+        expect(body.source).toBe('quiz-help');
+        expect(body.message).toBe(llmReply);
+    });
+
+    test('quiz-chat falls back to a default message when the LLM returns empty content', async ({ request: api }) => {
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, ['']);
+
+        const res = await api.post('/api/quiz/chat', {
+            data: {
+                courseId: QUIZ_COURSE_ID,
+                lectureName: 'Unit 1',
+                questionText: 'Which biomolecule is the primary energy currency of the cell?',
+                questionType: 'multiple-choice',
+                correctAnswer: 'B',
+                studentAnswer: 'A',
+                message: 'Help me out.',
+                conversationHistory: [],
+            },
+        });
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.success).toBe(true);
+        expect(body.source).toBe('quiz-help');
         expect(typeof body.message).toBe('string');
-        expect(body.message.length).toBeGreaterThan(20);
+        expect(body.message.length).toBeGreaterThan(0);
     });
 });
 
@@ -785,7 +893,6 @@ test.describe('Quiz API — focused coverage + product bugs', () => {
     // history loop, short-answer correctAnswer lookup)
     // ------------------------------------------------------------------------
     test('POST /chat uses course-specific prompts and iterates the conversation history block', async ({ request: api }) => {
-        test.setTimeout(60_000);
         await withDb((db) => db.collection('courses').updateOne(
             { courseId: QUIZ_COURSE_ID },
             { $set: { prompts: {
@@ -793,6 +900,9 @@ test.describe('Quiz API — focused coverage + product bugs', () => {
                 quizHelp: 'Be concise and never reveal the literal correct answer.',
             } } }
         ));
+        const llmReply = 'Phosphorylation drives ATP because it stores energy in the third phosphate bond.';
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [llmReply]);
 
         const res = await api.post('/api/quiz/chat', {
             data: {
@@ -814,12 +924,13 @@ test.describe('Quiz API — focused coverage + product bugs', () => {
         const body = await res.json();
         expect(body.success).toBe(true);
         expect(body.source).toBe('quiz-help');
-        expect(typeof body.message).toBe('string');
-        expect(body.message.length).toBeGreaterThan(20);
+        expect(body.message).toBe(llmReply);
     });
 
     test('POST /chat looks up short-answer correctAnswer from the DB when the client sends the AI placeholder', async ({ request: api }) => {
-        test.setTimeout(60_000);
+        const llmReply = 'A peptide bond joins amino acids during translation.';
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [llmReply]);
         const res = await api.post('/api/quiz/chat', {
             data: {
                 courseId: QUIZ_COURSE_ID,

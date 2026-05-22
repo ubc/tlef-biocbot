@@ -519,6 +519,14 @@ function setupAPIRoutes() {
     app.use('/api/struggle-activity', authMiddleware.requireAuth, authMiddleware.requireActiveCourseForNonInstructors, struggleActivityRoutes);
     app.use('/api/quiz', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, quizRoutes);
     app.use('/api/mental-health-flags', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, mentalHealthFlagsRoutes);
+
+    // Test-only routes for scripting the LLM stub. Gated by BIOCBOT_TEST_LLM_STUB
+    // so they are unreachable in production runs (no flag = no router mounted).
+    if (process.env.BIOCBOT_TEST_LLM_STUB === '1') {
+        const testLlmStubRoutes = require('./routes/testLlmStub');
+        app.use('/api/test/llm-stub', testLlmStubRoutes);
+        console.log('🧪 Test LLM stub routes mounted at /api/test/llm-stub');
+    }
 }
 
 // Initialize the application

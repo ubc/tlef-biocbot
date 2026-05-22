@@ -17,6 +17,7 @@ const {
     cleanupCourses,
     cleanupCoursesForUser,
 } = require('./helpers/courses-test');
+const { resetLlmStub, enqueueLlmResponses } = require('./helpers/llm-stub');
 
 const COURSE_A = 'BIOC-E2E-API-QUESTIONS-A';
 const COURSE_B = 'BIOC-E2E-API-QUESTIONS-B';
@@ -662,8 +663,12 @@ test.describe('POST /api/questions/check-answer', () => {
         expect(res.status()).toBe(400);
     });
 
-    test('returns an evaluation result (real LLM, lenient assertion)', async ({ request: api }) => {
-        test.setTimeout(60_000);
+    test('returns the parsed correct/feedback shape when the LLM returns well-formed JSON', async ({ request: api }) => {
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            JSON.stringify({ correct: true, feedback: 'E2E, your answer is correct.' }),
+        ]);
+
         const res = await api.post('/api/questions/check-answer', {
             data: {
                 question: 'What molecule stores genetic information?',
@@ -676,7 +681,58 @@ test.describe('POST /api/questions/check-answer', () => {
         expect(res.ok()).toBeTruthy();
         const body = await res.json();
         expect(body.success).toBe(true);
-        expect(body.data).toBeTruthy();
+        expect(body.data).toEqual({
+            correct: true,
+            feedback: 'E2E, your answer is correct.',
+        });
+    });
+
+    test('still returns a result when the LLM response is not JSON (fallback parser)', async ({ request: api }) => {
+        // evaluateStudentAnswer falls back to substring matching when JSON parse fails.
+        // The string `correct": true` is what the fallback looks for, so the route
+        // still surfaces { correct: true } and uses the raw content as feedback.
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            'Yes, correct": true — your reasoning is sound, well done.',
+        ]);
+
+        const res = await api.post('/api/questions/check-answer', {
+            data: {
+                question: 'What molecule stores genetic information?',
+                studentAnswer: 'DNA',
+                expectedAnswer: 'Deoxyribonucleic acid (DNA)',
+                questionType: 'short-answer',
+                studentName: 'E2E',
+            },
+        });
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.success).toBe(true);
+        expect(body.data.correct).toBe(true);
+        expect(typeof body.data.feedback).toBe('string');
+        expect(body.data.feedback.length).toBeGreaterThan(0);
+    });
+
+    test('handles malformed JSON in the LLM response without crashing', async ({ request: api }) => {
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            '{ "correct": true, "feedback": "missing close brace',
+        ]);
+
+        const res = await api.post('/api/questions/check-answer', {
+            data: {
+                question: 'What molecule stores genetic information?',
+                studentAnswer: 'DNA',
+                expectedAnswer: 'Deoxyribonucleic acid (DNA)',
+                questionType: 'short-answer',
+                studentName: 'E2E',
+            },
+        });
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.success).toBe(true);
+        expect(typeof body.data.correct).toBe('boolean');
+        expect(typeof body.data.feedback).toBe('string');
     });
 });
 
@@ -831,8 +887,16 @@ test.describe('POST /api/questions/auto-link-learning-objectives', () => {
         expect(body.data.matchedQuestions).toEqual([]);
     });
 
-    test('returns matchedQuestions (real LLM) with provided LOs+Qs', async ({ request: api }) => {
-        test.setTimeout(60_000);
+    test('returns matchedQuestions populated from a well-formed LLM JSON response', async ({ request: api }) => {
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            JSON.stringify({
+                matches: [
+                    { ref: 'q1', learningObjective: 'Understand the energy currency of cells' },
+                ],
+            }),
+        ]);
+
         const res = await api.post('/api/questions/auto-link-learning-objectives', {
             data: {
                 courseId: COURSE_A,
@@ -848,5 +912,34 @@ test.describe('POST /api/questions/auto-link-learning-objectives', () => {
         const body = await res.json();
         expect(Array.isArray(body.data.matchedQuestions)).toBe(true);
         expect(body.data.matchedQuestions.length).toBe(1);
+        expect(body.data.matchedQuestions[0].learningObjective)
+            .toBe('Understand the energy currency of cells');
+    });
+
+    test('matchedQuestions stay unmatched when the LLM returns malformed JSON', async ({ request: api }) => {
+        // extractFirstJSONObject in routes/questions.js returns null when the
+        // content is not parseable, and the route falls back to keeping the
+        // empty learningObjective from the original question.
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            'this is not JSON at all — just prose with no braces',
+        ]);
+
+        const res = await api.post('/api/questions/auto-link-learning-objectives', {
+            data: {
+                courseId: COURSE_A,
+                lectureName: 'Unit 1',
+                instructorId,
+                learningObjectives: ['Understand the energy currency of cells'],
+                questions: [
+                    { ref: 'q1', question: 'What molecule is the universal energy carrier?', learningObjective: '' },
+                ],
+            },
+        });
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(Array.isArray(body.data.matchedQuestions)).toBe(true);
+        expect(body.data.matchedQuestions.length).toBe(1);
+        expect(body.data.matchedQuestions[0].learningObjective).toBe('');
     });
 });

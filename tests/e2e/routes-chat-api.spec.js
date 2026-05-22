@@ -24,6 +24,7 @@ const {
     cleanupCoursesForUser,
     setStudentEnrollment,
 } = require('./helpers/courses-test');
+const { resetLlmStub, enqueueLlmResponses } = require('./helpers/llm-stub');
 
 const COURSE_A = 'BIOC-E2E-API-CHAT-A';
 const COURSE_B = 'BIOC-E2E-API-CHAT-B';
@@ -438,16 +439,32 @@ test.describe('practice question lifecycle', () => {
         expect(body.noQuestions).toBe(true);
     });
 
-    test('happy path generates a practice question (real LLM) and check-practice-answer scores it', async ({ request: api }) => {
-        test.setTimeout(60_000);
+    test('happy path: short-answer practice question is generated and scored from well-formed LLM JSON', async ({ request: api }) => {
+        await resetLlmStub(api);
+        // First call: generate the practice question. Second call:
+        // evaluateStudentAnswer for the short-answer branch.
+        await enqueueLlmResponses(api, [
+            JSON.stringify({
+                questionType: 'short-answer',
+                question: 'Describe how cells transport glucose across the membrane.',
+                correctAnswer: 'Via GLUT transporters using facilitated diffusion.',
+                explanation: 'GLUT family proteins move glucose down its gradient.',
+            }),
+            JSON.stringify({
+                correct: false,
+                feedback: 'E2E Student, that does not address the GLUT transporters.',
+            }),
+        ]);
+
         const gen = await api.post('/api/chat/practice-question', {
             data: { courseId: COURSE_A, unitName: 'Unit 1' },
         });
         expect(gen.ok()).toBeTruthy();
         const genBody = await gen.json();
         expect(genBody.data.practiceId).toBeTruthy();
+        // Server must not leak the correct answer back to the client.
+        expect(genBody.data.correctAnswer).toBeUndefined();
 
-        // Submit a deliberately wrong answer to exercise the incorrect branch.
         const chk = await api.post('/api/chat/check-practice-answer', {
             data: {
                 practiceId: genBody.data.practiceId,
@@ -458,8 +475,52 @@ test.describe('practice question lifecycle', () => {
         expect(chk.ok()).toBeTruthy();
         const chkBody = await chk.json();
         expect(chkBody.success).toBe(true);
-        expect(typeof chkBody.data.correct).toBe('boolean');
-        expect(chkBody.data.feedback).toBeTruthy();
+        expect(chkBody.data.correct).toBe(false);
+        expect(chkBody.data.feedback).toContain('GLUT transporters');
+    });
+
+    test('practice-question returns 500 when LLM response is not JSON', async ({ request: api }) => {
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            'sorry, I cannot generate that right now — no JSON at all',
+        ]);
+
+        const res = await api.post('/api/chat/practice-question', {
+            data: { courseId: COURSE_A, unitName: 'Unit 1' },
+        });
+        expect(res.status()).toBe(500);
+        const body = await res.json();
+        expect(body.success).toBe(false);
+        expect(body.message).toMatch(/practice question/i);
+    });
+
+    test('practice-question returns 500 when LLM JSON is missing required fields', async ({ request: api }) => {
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            JSON.stringify({ questionType: 'short-answer', question: 'Missing correctAnswer field' }),
+        ]);
+
+        const res = await api.post('/api/chat/practice-question', {
+            data: { courseId: COURSE_A, unitName: 'Unit 1' },
+        });
+        expect(res.status()).toBe(500);
+        const body = await res.json();
+        expect(body.success).toBe(false);
+        expect(body.message).toMatch(/incomplete|practice question/i);
+    });
+
+    test('practice-question returns 500 when LLM JSON is malformed', async ({ request: api }) => {
+        await resetLlmStub(api);
+        await enqueueLlmResponses(api, [
+            '{ "questionType": "short-answer", "question": "broken',
+        ]);
+
+        const res = await api.post('/api/chat/practice-question', {
+            data: { courseId: COURSE_A, unitName: 'Unit 1' },
+        });
+        expect(res.status()).toBe(500);
+        const body = await res.json();
+        expect(body.success).toBe(false);
     });
 
     test('check-practice-answer 400 when fields missing', async ({ request: api }) => {

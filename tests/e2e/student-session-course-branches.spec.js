@@ -399,6 +399,15 @@ test('course join dropdown handles failed join, network error, and prompt cancel
         w.checkPublishedUnitsAndLoadQuestions = () => {};
     });
 
+    // Page auto-init runs loadAvailableCourses() → loadCourseData() which
+    // wipes #chat-messages and renders the seeded chat. If a scenario below
+    // races against an in-flight auto-init, the dropdown we just rendered
+    // gets clobbered mid-test. Scenarios 1 and 2 happen to mask this because
+    // their `expect.poll(...alert)` step gives init enough time to finish;
+    // scenario 3 (prompt cancel — no alert) runs back-to-back and loses the
+    // race intermittently. Wait for the seeded chat to land before we start.
+    await expect(page.locator('#chat-messages')).toContainText('seeded branch chat');
+
     async function renderJoinDropdown() {
         await page.evaluate((secondCourseId) => {
             const w = /** @type {any} */ (window);
