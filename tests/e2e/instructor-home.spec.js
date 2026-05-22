@@ -475,6 +475,21 @@ test.describe('Instructor home dashboard', () => {
 
         await expect(page.locator('#approved-topics-section')).toBeVisible();
         await expect(page.locator('#approved-topics-content')).toContainText('cell membranes');
+
+        // The DOM showing "cell membranes" doesn't guarantee that the JS state
+        // (window.courseApprovedTopicDetails) the duplicate-check reads has
+        // been populated — multiple async paths render this section. Wait for
+        // the global to actually contain cell membranes before exercising the
+        // duplicate-detection flow, otherwise we hit a race where the duplicate
+        // check sees an empty array and silently accepts the "duplicate" as a
+        // new entry.
+        await page.waitForFunction(() =>
+            Array.isArray(/** @type {any} */ (window).courseApprovedTopicDetails)
+            && /** @type {any} */ (window).courseApprovedTopicDetails.some(
+                (/** @type {any} */ t) => t && typeof t.topic === 'string' && t.topic.toLowerCase() === 'cell membranes'
+            )
+        );
+
         await page.locator('#new-topic-input').fill('cell membranes');
         await page.locator('#new-topic-input').press('Enter');
         await expect(page.locator('.notification.error')).toContainText('This topic already exists.');
@@ -584,6 +599,24 @@ test.describe('Instructor home dashboard', () => {
         await page.locator('#join-course-btn').click();
         await expect(page.locator('#instructor-course-code-feedback')).toContainText('Invalid instructor course code');
         await expect(page.locator('#join-course-btn')).toBeEnabled();
+
+        // === TEMP DIAGNOSTIC #2 — remove once race-condition theory confirmed ===
+        try {
+            const inputCount = await page.locator('#instructor-course-code-input').count();
+            const inputVisible = await page.locator('#instructor-course-code-input').isVisible();
+            const inputEnabled = await page.locator('#instructor-course-code-input').isEnabled();
+            const inputClass = await page.locator('#instructor-course-code-input').getAttribute('class');
+            const groupVisible = await page.locator('#instructor-code-entry-group').isVisible();
+            const groupStyle = await page.locator('#instructor-code-entry-group').getAttribute('style');
+            const detailsVisible = await page.locator('#selected-course-details').isVisible();
+            console.log('=== DIAG join: input count =', inputCount, 'visible =', inputVisible, 'enabled =', inputEnabled);
+            console.log('=== DIAG join: input class =', JSON.stringify(inputClass));
+            console.log('=== DIAG join: code-entry-group visible =', groupVisible, 'style =', JSON.stringify(groupStyle));
+            console.log('=== DIAG join: selected-course-details visible =', detailsVisible);
+        } catch (e) {
+            console.log('=== DIAG join: error capturing state:', /** @type {Error} */ (e).message);
+        }
+        // === END TEMP DIAGNOSTIC #2 ===
 
         await page.locator('#instructor-course-code-input').fill('JOININS');
         await page.locator('#join-course-btn').click();
