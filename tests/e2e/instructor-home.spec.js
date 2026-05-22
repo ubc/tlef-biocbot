@@ -354,6 +354,14 @@ test.describe('Instructor home dashboard', () => {
         await seedInstructorHomeCourses();
     });
 
+    // Prevent HOME-E2E-* courses from leaking into other spec files (e.g.
+    // instructor-onboarding's joinable-dropdown assertions) when the full
+    // suite is run end-to-end (as in CI). seedInstructorHomeCourses inserts
+    // these on every beforeEach but never removes them.
+    test.afterAll(async () => {
+        await removeInstructorCourses(TEST_USERS.instructor.username);
+    });
+
     test('renders multiple instructor courses and reloads dashboard stats when selection changes', async ({ page }) => {
         await gotoInstructorHome(page);
 
