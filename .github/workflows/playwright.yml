@@ -1,0 +1,115 @@
+name: Playwright Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  e2e:
+    name: E2E (chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        env:
+          MONGO_INITDB_ROOT_USERNAME: mongoadmin
+          MONGO_INITDB_ROOT_PASSWORD: secret
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' --username mongoadmin --password secret --authenticationDatabase admin || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+
+    env:
+      CI: true
+      NODE_ENV: development
+      TLEF_BIOCBOT_PORT: 8085
+      MONGO_URI: mongodb://mongoadmin:secret@127.0.0.1:27017/biocbot-ci?authSource=admin
+      QDRANT_URL: http://127.0.0.1:6333
+      QDRANT_API_KEY: super-secret-dev-key
+      # LLM and embeddings are stubbed for tests — no external API keys required.
+      BIOCBOT_TEST_LLM_STUB: '1'
+      EMBEDDING_PROVIDER: ubc-genai-toolkit-llm
+      LLM_PROVIDER: openai
+      LLM_API_KEY: stub-key-not-used
+      OPENAI_API_KEY: stub-key-not-used
+      OPENAI_MODEL: gpt-4.1-mini
+      LLM_EMBEDDING_MODEL: text-embedding-3-small
+      SESSION_SECRET: ci-session-secret
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        # package-lock.json is gitignored in this repo, so we use `npm install`
+        # rather than `npm ci`. If a lockfile is added later, switch this to
+        # `npm ci` and re-enable `cache: npm` on setup-node above.
+        run: npm install
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Wait for Qdrant
+        run: |
+          for i in {1..30}; do
+            if curl -sf http://127.0.0.1:6333/readyz > /dev/null; then
+              echo "Qdrant is ready"
+              exit 0
+            fi
+            echo "Waiting for Qdrant... ($i)"
+            sleep 2
+          done
+          echo "Qdrant did not become ready in time" >&2
+          exit 1
+
+      - name: Run Playwright tests
+        run: npm test
+
+      - name: Upload Playwright HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+
+      - name: Upload Monocart report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: monocart-report
+          path: monocart-report/
+          retention-days: 14
+
+      - name: Upload coverage reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: coverage-reports/
+          retention-days: 14
+
+      - name: Upload test-results (traces, videos, screenshots)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/
+          retention-days: 14
