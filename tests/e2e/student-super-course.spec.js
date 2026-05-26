@@ -19,6 +19,7 @@ const SUPER_OPTED_IN_ID = 'BIOC-E2E-SUPER-OPTED-IN';
 const SUPER_OPTED_OUT_ID = 'BIOC-E2E-SUPER-OPTED-OUT';
 const SUPER_INACTIVE_ID = 'BIOC-E2E-SUPER-INACTIVE';
 const SUPER_TEST_COURSE_IDS = [SUPER_OPTED_IN_ID, SUPER_OPTED_OUT_ID, SUPER_INACTIVE_ID];
+const STUDENT_SUPER_SESSION_IDS = ['student-super-history-keep', 'student-super-history-delete'];
 const SETTINGS_ID = 'superCourseChat';
 
 let instructorId;
@@ -109,6 +110,7 @@ function buildCourse({ courseId, courseName, allowInSuperCourse, status = 'activ
 async function resetSuperCourseSeed() {
     await withDb(async (db) => {
         await db.collection('courses').deleteMany({ courseId: { $in: SUPER_TEST_COURSE_IDS } });
+        await db.collection('student_super_course_chat_sessions').deleteMany({ sessionId: { $in: STUDENT_SUPER_SESSION_IDS } });
         await db.collection('courses').insertMany([
             buildCourse({
                 courseId: SUPER_OPTED_IN_ID,
@@ -135,6 +137,7 @@ async function resetSuperCourseSeed() {
 async function cleanupSuperCourseSeed() {
     await withDb(async (db) => {
         await db.collection('courses').deleteMany({ courseId: { $in: SUPER_TEST_COURSE_IDS } });
+        await db.collection('student_super_course_chat_sessions').deleteMany({ sessionId: { $in: STUDENT_SUPER_SESSION_IDS } });
     });
 }
 
@@ -343,6 +346,107 @@ test.describe('Super Course API', () => {
             expect(Array.isArray(body.sourceAttribution.poolCourses)).toBe(true);
             const poolCourseIds = body.sourceAttribution.poolCourses.map((c) => c.courseId);
             expect(poolCourseIds).toContain(SUPER_OPTED_IN_ID);
+        } finally {
+            await api.dispose();
+        }
+    });
+
+    test('/sessions keeps Super Course history separate and hides deleted sessions', async ({ baseURL }) => {
+        await setSuperCourseSettings({ showStudentSuperCourse: true });
+
+        const api = await request.newContext({ baseURL, storageState: storageStatePath('student') });
+        try {
+            const sessions = [
+                {
+                    sessionId: 'student-super-history-keep',
+                    title: 'Super Course - ATP',
+                    messageCount: 2,
+                    duration: '5s',
+                    savedAt: '2026-05-26T20:00:00.000Z',
+                    chatData: {
+                        metadata: {
+                            studentId,
+                            courseId: 'SUPER_COURSE',
+                            courseName: 'Super Course',
+                            totalMessages: 2,
+                        },
+                        messages: [
+                            { type: 'user', content: 'Explain ATP', timestamp: '2026-05-26T20:00:00.000Z' },
+                            { type: 'bot', content: 'ATP carries cellular energy.', timestamp: '2026-05-26T20:00:05.000Z' },
+                        ],
+                        sessionInfo: { sessionId: 'student-super-history-keep', duration: '5s' },
+                    },
+                },
+                {
+                    sessionId: 'student-super-history-delete',
+                    title: 'Super Course - Delete',
+                    messageCount: 1,
+                    duration: '0s',
+                    savedAt: '2026-05-26T20:05:00.000Z',
+                    chatData: {
+                        metadata: {
+                            studentId,
+                            courseId: 'SUPER_COURSE',
+                            courseName: 'Super Course',
+                            totalMessages: 1,
+                        },
+                        messages: [
+                            { type: 'user', content: 'Delete this', timestamp: '2026-05-26T20:05:00.000Z' },
+                        ],
+                        sessionInfo: { sessionId: 'student-super-history-delete', duration: '0s' },
+                    },
+                },
+            ];
+
+            for (const session of sessions) {
+                const save = await api.post('/api/student/super-course/save', { data: session });
+                expect(save.status()).toBe(200);
+                expect(await save.json()).toMatchObject({ success: true, data: { sessionId: session.sessionId, studentId } });
+            }
+
+            const listed = await api.get('/api/student/super-course/sessions');
+            expect(listed.status()).toBe(200);
+            const listedBody = await listed.json();
+            expect(listedBody.success).toBe(true);
+            const listedIds = listedBody.data.sessions.map((session) => session.sessionId);
+            expect(listedIds).toContain('student-super-history-keep');
+            expect(listedIds).toContain('student-super-history-delete');
+
+            const loaded = await api.get('/api/student/super-course/sessions/student-super-history-keep');
+            expect(loaded.status()).toBe(200);
+            expect(await loaded.json()).toMatchObject({
+                success: true,
+                session: {
+                    sessionId: 'student-super-history-keep',
+                    studentId,
+                    title: 'Super Course - ATP',
+                    chatData: {
+                        messages: [
+                            { type: 'user', content: 'Explain ATP' },
+                            { type: 'bot', content: 'ATP carries cellular energy.' },
+                        ],
+                    },
+                },
+            });
+
+            const deleted = await api.delete('/api/student/super-course/sessions/student-super-history-delete');
+            expect(deleted.status()).toBe(200);
+
+            const afterDelete = await api.get('/api/student/super-course/sessions');
+            const afterBody = await afterDelete.json();
+            const afterIds = afterBody.data.sessions.map((session) => session.sessionId);
+            expect(afterIds).toContain('student-super-history-keep');
+            expect(afterIds).not.toContain('student-super-history-delete');
+
+            const regularHistory = await api.get(`/api/students/${SUPER_OPTED_IN_ID}/${studentId}/sessions/own`, {
+                failOnStatusCode: false,
+            });
+            if (regularHistory.ok()) {
+                const regularBody = await regularHistory.json();
+                const regularIds = (regularBody.data?.sessions || []).map((session) => session.sessionId);
+                expect(regularIds).not.toContain('student-super-history-keep');
+                expect(regularIds).not.toContain('student-super-history-delete');
+            }
         } finally {
             await api.dispose();
         }

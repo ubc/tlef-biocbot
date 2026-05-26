@@ -24,6 +24,7 @@ const appState = {
 let courseIdCache = null;
 let courseIdPromise = null;
 let redirectInProgress = false;
+const SUPER_COURSE_FLAG_COURSE_ID = 'SUPER_COURSE';
 
 function redirectToOnboardingForMissingCourse() {
     if (redirectInProgress) {
@@ -150,11 +151,31 @@ async function fetchCourseId() {
         return currentUser.preferences.courseId;
     }
     
+    if (typeof isSystemAdmin === 'function' && isSystemAdmin()) {
+        console.log('🔍 [GET_COURSE_ID] No regular course found; system admin can still review Super Course flags');
+        return null;
+    }
+
     // If no course found, show an error and redirect to onboarding (only once)
     redirectToOnboardingForMissingCourse();
     
     // Return a placeholder (this should not be reached due to redirect)
     return null;
+}
+
+async function getFlagReviewCourseIds() {
+    const courseId = await getCurrentCourseId();
+    const courseIds = [];
+
+    if (courseId) {
+        courseIds.push(courseId);
+    }
+
+    if (typeof isSystemAdmin === 'function' && isSystemAdmin() && !courseIds.includes(SUPER_COURSE_FLAG_COURSE_ID)) {
+        courseIds.push(SUPER_COURSE_FLAG_COURSE_ID);
+    }
+
+    return courseIds;
 }
 
 /**
@@ -590,10 +611,10 @@ async function loadFlaggedContent() {
             }
         }
         
-        const courseId = await getCurrentCourseId();
-        console.log('🔍 [FLAGGED] getCurrentCourseId() returned:', courseId);
+        const courseIds = await getFlagReviewCourseIds();
+        console.log('🔍 [FLAGGED] getFlagReviewCourseIds() returned:', courseIds);
         
-        if (!courseId) {
+        if (!courseIds.length) {
             console.log('No course available, showing empty state');
             console.log('🔍 [FLAGGED] DEBUG: This means getCurrentCourseId() returned null/undefined');
             console.log('🔍 [FLAGGED] DEBUG: This could mean:');
@@ -610,33 +631,33 @@ async function loadFlaggedContent() {
             return;
         }
         
-        console.log(`Loading flagged content for course: ${courseId}`);
-        
-        // Always load all flags for the course, let local filters handle filtering
-        const apiUrl = `/api/flags/course/${courseId}`;
-        
-        const response = await fetch(apiUrl, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
+        console.log(`Loading flagged content for courses: ${courseIds.join(', ')}`);
+
+        const flagGroups = await Promise.all(courseIds.map(async (courseId) => {
+            const response = await fetch(`/api/flags/course/${encodeURIComponent(courseId)}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
             }
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            appState.flags = result.data.flags || [];
-            console.log(`Loaded ${appState.flags.length} flagged questions for course ${courseId}`);
-            console.log('Flags data:', appState.flags);
-            applyFilters();
-            renderFlaggedContent();
-        } else {
-            throw new Error(result.message || 'Failed to load flagged content');
-        }
+
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.message || 'Failed to load flagged content');
+            }
+
+            return result.data.flags || [];
+        }));
+
+        appState.flags = flagGroups.flat();
+        console.log(`Loaded ${appState.flags.length} flagged questions for courses ${courseIds.join(', ')}`);
+        console.log('Flags data:', appState.flags);
+        applyFilters();
+        renderFlaggedContent();
         
     } catch (error) {
         console.error('Error loading flagged content:', error);
@@ -649,36 +670,46 @@ async function loadFlaggedContent() {
  */
 async function loadFlagStats() {
     try {
-        // Get current course ID from auth or other source
-        const courseId = await getCurrentCourseId();
+        const courseIds = await getFlagReviewCourseIds();
         
-        if (!courseId) {
+        if (!courseIds.length) {
             console.log('No course available for stats, using default stats');
             appState.stats = { total: 0, pending: 0, reviewed: 0, resolved: 0, dismissed: 0 };
             updateStatsDisplay();
             return;
         }
         
-        console.log(`Loading flag statistics for course: ${courseId}`);
-        
-        const response = await fetch(`/api/flags/stats/${courseId}`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
+        console.log(`Loading flag statistics for courses: ${courseIds.join(', ')}`);
+
+        const statsGroups = await Promise.all(courseIds.map(async (courseId) => {
+            const response = await fetch(`/api/flags/stats/${encodeURIComponent(courseId)}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
             }
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            appState.stats = result.data.statistics;
-            console.log('Flag statistics loaded:', appState.stats);
-            updateStatsDisplay();
-        }
+
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.message || 'Failed to load flag statistics');
+            }
+
+            return result.data.statistics || {};
+        }));
+
+        appState.stats = statsGroups.reduce((totals, stats) => ({
+            total: totals.total + (stats.total || 0),
+            pending: totals.pending + (stats.pending || 0),
+            reviewed: totals.reviewed + (stats.reviewed || 0),
+            resolved: totals.resolved + (stats.resolved || 0),
+            dismissed: totals.dismissed + (stats.dismissed || 0)
+        }), { total: 0, pending: 0, reviewed: 0, resolved: 0, dismissed: 0 });
+        console.log('Flag statistics loaded:', appState.stats);
+        updateStatsDisplay();
         
     } catch (error) {
         console.error('Error loading flag stats:', error);
@@ -774,6 +805,14 @@ function createFlagElement(flag) {
     const questionContent = flag.questionContent || {};
     const questionText = questionContent.question || 'Question content not available';
     const unitName = flag.unitName || 'Unknown Unit';
+    const courseName = flag.courseName || '';
+    const courseTagHtml = courseName
+        ? `<span class="context-tag">Course: ${escapeHtml(courseName)}</span>`
+        : '';
+    const reporterName = flag.reporterName || flag.studentName || `Student ${flag.studentId}`;
+    const reporterRole = flag.reporterRole ? `${flag.reporterRole.charAt(0).toUpperCase()}${flag.reporterRole.slice(1)}` : 'Student';
+    const concernTitle = flag.reporterRole === 'instructor' ? "Instructor's Concern" : "Student's Concern";
+    const breadcrumbsHtml = createSourceBreadcrumbsHtml(flag);
     
     // Header Section
     let headerHtml = `
@@ -784,7 +823,7 @@ function createFlagElement(flag) {
             </div>
             <div class="flag-meta-info">
                 <span class="flag-student">
-                    <span class="meta-icon">👤</span> ${escapeHtml(flag.studentName || `Student ${flag.studentId}`)}
+                    <span class="meta-icon">👤</span> ${escapeHtml(reporterName)}
                 </span>
                 <span class="flag-date">${timestamp}</span>
                 <span class="flag-status-badge ${statusClass}">${statusDisplayText}</span>
@@ -800,10 +839,13 @@ function createFlagElement(flag) {
         <div class="flag-section context-section">
             <h4 class="flag-section-title">Flagged Content</h4>
             <div class="flag-context-meta">
+                ${courseTagHtml}
                 <span class="context-tag">${escapeHtml(unitName)}</span>
                 <span class="context-tag">${botModeDisplay} mode</span>
                 <span class="context-tag">Type: ${escapeHtml(questionContent.questionType || 'Unknown')}</span>
+                <span class="context-tag">Reporter: ${escapeHtml(reporterRole)}</span>
             </div>
+            ${breadcrumbsHtml}
             <div class="flag-quote">
                 "${escapeHtml(questionText)}"
             </div>
@@ -813,7 +855,7 @@ function createFlagElement(flag) {
     // 2. Student Concern
     bodyHtml += `
         <div class="flag-section note-section">
-            <h4 class="flag-section-title">Student's Concern</h4>
+            <h4 class="flag-section-title">${concernTitle}</h4>
             <div class="flag-note">
                 ${escapeHtml(flag.flagDescription)}
             </div>
@@ -851,6 +893,54 @@ function createFlagElement(flag) {
     return flagDiv;
 }
 
+function createSourceBreadcrumbsHtml(flag) {
+    if (!flag || flag.isSuperCourseFlag !== true) {
+        return '';
+    }
+
+    const ids = Array.isArray(flag.sourceCourseIds) ? flag.sourceCourseIds : [];
+    const names = Array.isArray(flag.sourceCourseNames) ? flag.sourceCourseNames : [];
+    const crumbs = [];
+    const seen = new Set();
+
+    ids.forEach((courseId, index) => {
+        const safeId = String(courseId || '').trim();
+        const safeName = String(names[index] || safeId || '').trim();
+        const key = safeId || safeName;
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        if (safeId) seen.add(safeId);
+        if (safeName) seen.add(safeName);
+        crumbs.push({
+            courseId: safeId,
+            courseName: safeName
+        });
+    });
+
+    names.forEach((courseName) => {
+        const safeName = String(courseName || '').trim();
+        if (!safeName || seen.has(safeName)) return;
+        seen.add(safeName);
+        crumbs.push({ courseId: '', courseName: safeName });
+    });
+
+    const breadcrumbItems = crumbs.length
+        ? crumbs.map(crumb => `
+            <span class="source-breadcrumb">
+                ${escapeHtml(crumb.courseName || crumb.courseId)}
+                ${crumb.courseId && crumb.courseName !== crumb.courseId ? `<span class="source-breadcrumb-id">${escapeHtml(crumb.courseId)}</span>` : ''}
+            </span>
+        `).join('')
+        : '<span class="source-breadcrumb muted">No cited source courses</span>';
+
+    return `
+        <div class="source-breadcrumb-row" aria-label="Super Course source courses">
+            <span class="source-breadcrumb-label">Source courses</span>
+            ${breadcrumbItems}
+        </div>
+    `;
+}
+
 /**
  * Create action buttons based on flag status
  * @param {Object} flag - The flag data object
@@ -858,6 +948,12 @@ function createFlagElement(flag) {
  */
 function createActionButtons(flag) {
     if (flag.flagStatus === 'pending') {
+        const reporterRole = flag.reporterRole === 'instructor' ? 'instructor' : 'student';
+        const reporterLabel = reporterRole === 'instructor' ? 'Instructor' : 'Student';
+        const defaultMessage = reporterRole === 'instructor'
+            ? 'Thanks for flagging this. This Super Course response has been reviewed and marked as resolved.'
+            : 'Thanks for flagging this, please follow up on this email or come to my office hours if you are still working on this topic';
+
         return `
             <button class="action-btn approve-btn" onclick="showApprovalForm('${flag.flagId}')">
                 Approve & Reply
@@ -868,12 +964,12 @@ function createActionButtons(flag) {
             
             <div id="approval-form-${flag.flagId}" class="approval-form" style="display: none;">
                 <div class="form-header">
-                    <h4>Send Follow-up to Student</h4>
-                    <p class="form-description">This message will be sent to the student who flagged this content.</p>
+                    <h4>Send Follow-up to ${reporterLabel}</h4>
+                    <p class="form-description">This message will be sent to the ${reporterRole} who flagged this content.</p>
                 </div>
                 <div class="form-group">
                     <label for="message-content-${flag.flagId}">Message:</label>
-                    <textarea id="message-content-${flag.flagId}" class="message-textarea" rows="4">Thanks for flagging this, please follow up on this email or come to my office hours if you are still working on this topic</textarea>
+                    <textarea id="message-content-${flag.flagId}" class="message-textarea" rows="4">${escapeHtml(defaultMessage)}</textarea>
                 </div>
                 <div class="form-actions-row">
                     <button class="action-btn send-approve-btn" onclick="sendApprovalMessage('${flag.flagId}')">
@@ -883,7 +979,7 @@ function createActionButtons(flag) {
                         Cancel
                     </button>
                 </div>
-                <!-- Hidden email field for backend processing -->
+                <input type="hidden" id="flag-recipient-role-${flag.flagId}" value="${reporterRole}">
                 <input type="hidden" id="student-email-${flag.flagId}" value="student.${flag.studentId}@university.edu">
             </div>
         `;
@@ -942,6 +1038,7 @@ async function sendApprovalMessage(flagId) {
     try {
         const emailInput = document.getElementById(`student-email-${flagId}`);
         const messageTextarea = document.getElementById(`message-content-${flagId}`);
+        const recipientRoleInput = document.getElementById(`flag-recipient-role-${flagId}`);
         
         if (!emailInput || !messageTextarea) {
             throw new Error('Form elements not found');
@@ -949,9 +1046,10 @@ async function sendApprovalMessage(flagId) {
         
         const studentEmail = emailInput.value.trim(); // Hidden field, automatically generated
         const messageContent = messageTextarea.value.trim();
+        const recipientRole = recipientRoleInput?.value === 'instructor' ? 'instructor' : 'student';
         
         if (!messageContent) {
-            alert('Please enter a message to send to the student.');
+            alert(`Please enter a message to send to the ${recipientRole}.`);
             return;
         }
         
@@ -1018,7 +1116,7 @@ async function sendApprovalMessage(flagId) {
             loadFlagStats();
             
             // Show combined success message
-            showSuccessMessage('Follow-up message sent to student and flag resolved successfully');
+            showSuccessMessage(`Follow-up message sent to ${recipientRole} and flag resolved successfully`);
             
         } else {
             throw new Error(result.message || 'Failed to send instructor response');
@@ -1278,7 +1376,9 @@ function getBotModeDisplay(botMode) {
     
     const modeMap = {
         'protege': 'Protégé',
-        'tutor': 'Tutor'
+        'tutor': 'Tutor',
+        'supercourse-student': 'Super Course Student',
+        'supercourse-instructor': 'Super Course Instructor'
     };
     
     return modeMap[botMode.toLowerCase()] || botMode;

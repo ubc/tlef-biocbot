@@ -105,6 +105,52 @@ router.post('/save', async (req, res) => {
     }
 });
 
+router.get('/sessions', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const instructorId = req.user && req.user.userId;
+        if (!instructorId) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        const sessions = await db.collection('instructor_chat_sessions')
+            .find({
+                instructorId,
+                $or: [
+                    { isDeleted: { $exists: false } },
+                    { isDeleted: false }
+                ]
+            })
+            .sort({ updatedAt: -1, savedAt: -1 })
+            .toArray();
+
+        res.json({
+            success: true,
+            data: {
+                sessions: sessions.map(session => ({
+                    sessionId: session.sessionId,
+                    title: session.title,
+                    messageCount: session.messageCount || 0,
+                    duration: session.duration || '0s',
+                    savedAt: session.savedAt,
+                    updatedAt: session.updatedAt,
+                    chatData: session.chatData || {}
+                }))
+            }
+        });
+    } catch (error) {
+        console.error('Error listing instructor Super Course chat sessions:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to load instructor chat sessions'
+        });
+    }
+});
+
 router.get('/sessions/:sessionId', async (req, res) => {
     try {
         const db = req.app.locals.db;

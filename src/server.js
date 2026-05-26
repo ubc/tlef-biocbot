@@ -518,7 +518,7 @@ function setupAPIRoutes() {
 
     // API endpoints (protected)
     app.use('/api/courses', authMiddleware.requireAuth, authMiddleware.requireActiveCourseForNonInstructors, coursesRoutes);
-    app.use('/api/flags', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, flagsRoutes);
+    app.use('/api/flags', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, flagsRoutes);
     app.use('/api/lectures', authMiddleware.requireAuth, authMiddleware.requireActiveCourseForNonInstructors, lecturesRoutes);
 
     app.use('/api/learning-objectives', authMiddleware.requireAuth, authMiddleware.requireActiveCourseForNonInstructors, learningObjectivesRoutes);

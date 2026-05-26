@@ -239,6 +239,30 @@ test('instructor Super Course pool endpoint exposes configured course names', as
     });
 });
 
+test('instructor Super Course pool filters inactive courses unless the global setting includes them', async () => {
+    await configure('instructor-super-chat');
+
+    const defaultRes = await /** @type {any} */ (api).get('/api/instructor/chat/pool', { failOnStatusCode: false });
+    expect(defaultRes.ok()).toBeTruthy();
+    const defaultBody = await defaultRes.json();
+    expect(defaultBody).toMatchObject({
+        success: true,
+        includeInactiveCourses: false,
+    });
+    expect(defaultBody.courses.map(course => course.courseId)).toEqual(['BIOC-A']);
+
+    await configure('instructor-super-chat-inactive');
+
+    const inactiveRes = await /** @type {any} */ (api).get('/api/instructor/chat/pool', { failOnStatusCode: false });
+    expect(inactiveRes.ok()).toBeTruthy();
+    const inactiveBody = await inactiveRes.json();
+    expect(inactiveBody).toMatchObject({
+        success: true,
+        includeInactiveCourses: true,
+    });
+    expect(inactiveBody.courses.map(course => course.courseId)).toEqual(['BIOC-A', 'BIOC-B']);
+});
+
 test('instructor Super Course chat sessions save, reload, and soft-delete for the instructor', async () => {
     await configure('instructor-super-chat');
 
@@ -267,6 +291,27 @@ test('instructor Super Course chat sessions save, reload, and soft-delete for th
     expect(save.ok()).toBeTruthy();
     expect(await save.json()).toMatchObject({ success: true, data: { sessionId, instructorId: 'inst' } });
 
+    const listed = await /** @type {any} */ (api).get('/api/instructor/chat/sessions', { failOnStatusCode: false });
+    expect(listed.ok()).toBeTruthy();
+    expect(await listed.json()).toMatchObject({
+        success: true,
+        data: {
+            sessions: [
+                {
+                    sessionId,
+                    title: 'Super Course - ATP',
+                    messageCount: 2,
+                    chatData: {
+                        messages: [
+                            { type: 'user', content: 'What is ATP?' },
+                            { type: 'bot', content: 'ATP stores transferable energy.' },
+                        ],
+                    },
+                },
+            ],
+        },
+    });
+
     const loaded = await /** @type {any} */ (api).get(`/api/instructor/chat/sessions/${sessionId}`, { failOnStatusCode: false });
     expect(loaded.ok()).toBeTruthy();
     expect(await loaded.json()).toMatchObject({
@@ -289,6 +334,70 @@ test('instructor Super Course chat sessions save, reload, and soft-delete for th
 
     const afterDelete = await /** @type {any} */ (api).get(`/api/instructor/chat/sessions/${sessionId}`, { failOnStatusCode: false });
     expect(afterDelete.status()).toBe(404);
+});
+
+test('instructor Super Chat history lists saved sessions and hides deleted sessions', async () => {
+    await configure('instructor-super-chat');
+
+    const sessions = [
+        {
+            sessionId: 'inst-super-history-keep',
+            title: 'Super Course - Enzymes',
+            messageCount: 2,
+            duration: '4s',
+            savedAt: '2026-05-26T20:00:00.000Z',
+            chatData: {
+                metadata: { instructorId: 'inst', courseId: 'SUPER_COURSE', totalMessages: 2 },
+                messages: [
+                    { type: 'user', content: 'Explain enzymes', timestamp: '2026-05-26T20:00:00.000Z' },
+                    { type: 'bot', content: 'Enzymes are catalysts.', timestamp: '2026-05-26T20:00:04.000Z' },
+                ],
+                sessionInfo: { sessionId: 'inst-super-history-keep', duration: '4s' },
+            },
+        },
+        {
+            sessionId: 'inst-super-history-delete',
+            title: 'Super Course - Deleted',
+            messageCount: 1,
+            duration: '0s',
+            savedAt: '2026-05-26T20:05:00.000Z',
+            chatData: {
+                metadata: { instructorId: 'inst', courseId: 'SUPER_COURSE', totalMessages: 1 },
+                messages: [{ type: 'user', content: 'Delete me', timestamp: '2026-05-26T20:05:00.000Z' }],
+                sessionInfo: { sessionId: 'inst-super-history-delete', duration: '0s' },
+            },
+        },
+    ];
+
+    for (const session of sessions) {
+        const save = await postJson('/api/instructor/chat/save', session);
+        expect(save.ok()).toBeTruthy();
+    }
+
+    const beforeDelete = await /** @type {any} */ (api).get('/api/instructor/chat/sessions', { failOnStatusCode: false });
+    expect(beforeDelete.ok()).toBeTruthy();
+    expect((await beforeDelete.json()).data.sessions.map(session => session.sessionId)).toEqual([
+        'inst-super-history-keep',
+        'inst-super-history-delete',
+    ]);
+
+    const deleted = await /** @type {any} */ (api).delete('/api/instructor/chat/sessions/inst-super-history-delete', { failOnStatusCode: false });
+    expect(deleted.ok()).toBeTruthy();
+
+    const afterDelete = await /** @type {any} */ (api).get('/api/instructor/chat/sessions', { failOnStatusCode: false });
+    expect(afterDelete.ok()).toBeTruthy();
+    const body = await afterDelete.json();
+    expect(body.data.sessions.map(session => session.sessionId)).toEqual(['inst-super-history-keep']);
+    expect(body.data.sessions[0]).toMatchObject({
+        title: 'Super Course - Enzymes',
+        messageCount: 2,
+        chatData: {
+            messages: [
+                { type: 'user', content: 'Explain enzymes' },
+                { type: 'bot', content: 'Enzymes are catalysts.' },
+            ],
+        },
+    });
 });
 
 test('User model SAML and no-match update branches are covered without real IdP auth', async () => {

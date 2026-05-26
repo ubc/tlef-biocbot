@@ -122,8 +122,10 @@ function buildMHFlag(overrides = {}) {
  *   instructorCoursesEndpointStatus?: number,
  *   permissions?: Record<string, { canAccessCourses: boolean, canAccessFlags: boolean }>,
  *   flags?: FlagShape[],
+ *   flagsByCourse?: Record<string, FlagShape[]>,
  *   flagsStatus?: number,
  *   stats?: Record<string, number>,
+ *   statsByCourse?: Record<string, Record<string, number>>,
  *   statsStatus?: number,
  *   mhFlags?: MHFlag[],
  *   mhIsAdmin?: boolean,
@@ -225,7 +227,9 @@ async function installFlaggedRoutes(page, options = {}) {
                 await route.fulfill({ status: options.flagsStatus, json: { success: false, message: 'forced flags error' } });
                 return;
             }
-            await route.fulfill({ json: { success: true, data: { courseId: flagsCourseMatch[1], flags: options.flags ?? [] } } });
+            const id = decodeURIComponent(flagsCourseMatch[1]);
+            const flags = options.flagsByCourse?.[id] ?? options.flags ?? [];
+            await route.fulfill({ json: { success: true, data: { courseId: id, flags } } });
             return;
         }
 
@@ -235,7 +239,8 @@ async function installFlaggedRoutes(page, options = {}) {
                 await route.fulfill({ status: options.statsStatus, json: { success: false, message: 'forced stats error' } });
                 return;
             }
-            const stats = options.stats ?? { total: 0, pending: 0, resolved: 0, dismissed: 0 };
+            const id = decodeURIComponent(flagStatsMatch[1]);
+            const stats = options.statsByCourse?.[id] ?? options.stats ?? { total: 0, pending: 0, resolved: 0, dismissed: 0 };
             await route.fulfill({ json: { success: true, data: { statistics: stats } } });
             return;
         }
@@ -435,6 +440,90 @@ test.describe('flagged.js — instructor render & moderation', () => {
             response: 'Thanks — fixed.',
             flagStatus: 'resolved',
         });
+    });
+
+    test('regular course flags show course name and student follow-up copy', async ({ page }) => {
+        await installFlaggedRoutes(page, {
+            flags: [
+                buildFlag({
+                    flagId: 'flag_course_name_student',
+                    courseName: 'BIOC 404 Advanced Biochemistry',
+                    reporterRole: 'student',
+                    reporterName: 'Cov Student',
+                }),
+            ],
+            stats: { total: 1, pending: 1 },
+        });
+
+        await page.goto(`/instructor/flagged?courseId=${COURSE_ID}`);
+
+        const card = page.locator('[data-flag-id="flag_course_name_student"]');
+        await expect(card).toBeVisible({ timeout: 15_000 });
+        await expect(card).toContainText('Course: BIOC 404 Advanced Biochemistry');
+        await expect(card).toContainText('Reporter: Student');
+        await expect(card).toContainText("Student's Concern");
+
+        await card.locator('.approve-btn').click();
+        const form = page.locator('#approval-form-flag_course_name_student');
+        await expect(form).toBeVisible();
+        await expect(form).toContainText('Send Follow-up to Student');
+        await expect(form).toContainText('This message will be sent to the student who flagged this content.');
+        await expect(page.locator('#message-content-flag_course_name_student')).toContainText('office hours');
+    });
+
+    test('super course instructor flags show source breadcrumbs and instructor follow-up copy', async ({ page }) => {
+        await installFlaggedRoutes(page, {
+            systemAdmin: true,
+            flagsByCourse: {
+                [COURSE_ID]: [],
+                SUPER_COURSE: [
+                    buildFlag({
+                        flagId: 'flag_super_instructor',
+                        courseId: 'SUPER_COURSE',
+                        courseName: 'Super Course',
+                        unitName: 'Super Course',
+                        botMode: 'supercourse-instructor',
+                        reporterRole: 'instructor',
+                        reporterName: 'Cov Instructor',
+                        studentName: 'Cov Instructor',
+                        flagDescription: 'Instructor flagged Super Course response as typo',
+                        isSuperCourseFlag: true,
+                        sourceCourseIds: ['BIOC404-1759893662591', 'BIOC202-1759632732297'],
+                        sourceCourseNames: ['BIOC404', 'BIOC202'],
+                        questionContent: {
+                            question: 'Super Course answer text',
+                            questionType: 'super-course-bot-response',
+                        },
+                    }),
+                ],
+            },
+            statsByCourse: {
+                [COURSE_ID]: { total: 0, pending: 0, resolved: 0, dismissed: 0 },
+                SUPER_COURSE: { total: 1, pending: 1, resolved: 0, dismissed: 0 },
+            },
+        });
+
+        await page.goto(`/instructor/flagged?courseId=${COURSE_ID}`);
+
+        const card = page.locator('[data-flag-id="flag_super_instructor"]');
+        await expect(card).toBeVisible({ timeout: 15_000 });
+        await expect(card).toContainText('Course: Super Course');
+        await expect(card).toContainText('Super Course Instructor mode');
+        await expect(card).toContainText('Reporter: Instructor');
+        await expect(card).toContainText("Instructor's Concern");
+        await expect(card.locator('.source-breadcrumb-row')).toContainText('BIOC404');
+        await expect(card.locator('.source-breadcrumb-row')).toContainText('BIOC404-1759893662591');
+        await expect(card.locator('.source-breadcrumb-row')).toContainText('BIOC202');
+
+        await card.locator('.approve-btn').click();
+        const form = page.locator('#approval-form-flag_super_instructor');
+        await expect(form).toBeVisible();
+        await expect(form).toContainText('Send Follow-up to Instructor');
+        await expect(form).toContainText('This message will be sent to the instructor who flagged this content.');
+        await expect(page.locator('#message-content-flag_super_instructor')).toHaveValue(
+            'Thanks for flagging this. This Super Course response has been reviewed and marked as resolved.'
+        );
+        await expect(form).not.toContainText('student who flagged');
     });
 
     test('approve flow guard: empty message triggers alert and does not send a response', async ({ page }) => {

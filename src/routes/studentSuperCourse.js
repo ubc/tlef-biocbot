@@ -65,6 +65,152 @@ router.get('/pool', async (req, res) => {
     }
 });
 
+router.post('/save', async (req, res) => {
+    try {
+        const ctx = await ensureStudentSuperCourseEnabled(req, res);
+        if (!ctx) return;
+
+        const {
+            sessionId,
+            title,
+            messageCount,
+            duration,
+            savedAt,
+            chatData
+        } = req.body || {};
+
+        if (!sessionId || !chatData || typeof chatData !== 'object') {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required fields: sessionId, chatData'
+            });
+        }
+
+        const studentId = req.user && req.user.userId;
+        if (!studentId) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        const sessionData = {
+            sessionId,
+            studentId,
+            studentName: req.user.displayName || req.user.username || req.user.email || studentId,
+            title: title || `Super Course Chat ${new Date().toLocaleDateString()}`,
+            messageCount: messageCount || 0,
+            duration: duration || '0s',
+            savedAt: savedAt || new Date().toISOString(),
+            chatData,
+            isDeleted: false,
+            updatedAt: new Date(),
+            createdAt: new Date()
+        };
+
+        await ctx.db.collection('student_super_course_chat_sessions').replaceOne(
+            { sessionId, studentId },
+            sessionData,
+            { upsert: true }
+        );
+
+        res.json({
+            success: true,
+            message: 'Student Super Course chat session saved successfully',
+            data: { sessionId, studentId }
+        });
+    } catch (error) {
+        console.error('Error saving student Super Course chat session:', error);
+        res.status(500).json({ success: false, message: 'Failed to save Super Course chat session' });
+    }
+});
+
+router.get('/sessions', async (req, res) => {
+    try {
+        const ctx = await ensureStudentSuperCourseEnabled(req, res);
+        if (!ctx) return;
+
+        const studentId = req.user && req.user.userId;
+        if (!studentId) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        const sessions = await ctx.db.collection('student_super_course_chat_sessions')
+            .find({
+                studentId,
+                $or: [
+                    { isDeleted: { $exists: false } },
+                    { isDeleted: false }
+                ]
+            })
+            .sort({ updatedAt: -1, savedAt: -1 })
+            .toArray();
+
+        res.json({
+            success: true,
+            data: {
+                sessions: sessions.map(session => ({
+                    sessionId: session.sessionId,
+                    title: session.title,
+                    messageCount: session.messageCount || 0,
+                    duration: session.duration || '0s',
+                    savedAt: session.savedAt,
+                    updatedAt: session.updatedAt,
+                    chatData: session.chatData || {}
+                }))
+            }
+        });
+    } catch (error) {
+        console.error('Error listing student Super Course chat sessions:', error);
+        res.status(500).json({ success: false, message: 'Failed to load Super Course chat sessions' });
+    }
+});
+
+router.get('/sessions/:sessionId', async (req, res) => {
+    try {
+        const ctx = await ensureStudentSuperCourseEnabled(req, res);
+        if (!ctx) return;
+
+        const studentId = req.user && req.user.userId;
+        const session = await ctx.db.collection('student_super_course_chat_sessions').findOne({
+            sessionId: req.params.sessionId,
+            studentId,
+            $or: [
+                { isDeleted: { $exists: false } },
+                { isDeleted: false }
+            ]
+        });
+
+        if (!session) {
+            return res.status(404).json({ success: false, message: 'Super Course chat session not found' });
+        }
+
+        res.json({ success: true, session });
+    } catch (error) {
+        console.error('Error loading student Super Course chat session:', error);
+        res.status(500).json({ success: false, message: 'Failed to load Super Course chat session' });
+    }
+});
+
+router.delete('/sessions/:sessionId', async (req, res) => {
+    try {
+        const ctx = await ensureStudentSuperCourseEnabled(req, res);
+        if (!ctx) return;
+
+        const studentId = req.user && req.user.userId;
+        if (!studentId) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        await ctx.db.collection('student_super_course_chat_sessions').updateOne(
+            { sessionId: req.params.sessionId, studentId },
+            { $set: { isDeleted: true, deletedAt: new Date() } }
+        );
+
+        res.json({ success: true, data: { sessionId: req.params.sessionId } });
+    } catch (error) {
+        console.error('Error deleting student Super Course chat session:', error);
+        res.status(500).json({ success: false, message: 'Failed to delete Super Course chat session' });
+    }
+});
+
 router.post('/chat', async (req, res) => {
     try {
         const ctx = await ensureStudentSuperCourseEnabled(req, res);
