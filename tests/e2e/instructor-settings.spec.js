@@ -390,12 +390,12 @@ async function setupMockedSettingsRoutes(page, options = {}) {
         aiSettings: {
             allowInSuperCourse: false,
             ragSettings: { student: { topK: 6 } },
-            defaults: { allowInSuperCourse: true, studentTopK: 3, minTopK: 1, maxTopK: 20 },
+            defaults: { allowInSuperCourse: false, studentTopK: 3, minTopK: 1, maxTopK: 20 },
         },
         aiSettingsResetResult: {
             success: true,
             settings: {
-                allowInSuperCourse: true,
+                allowInSuperCourse: false,
                 ragSettings: { student: { topK: 3 } },
             },
         },
@@ -1037,7 +1037,7 @@ test.describe('Instructor settings UI', () => {
 
         page.once('dialog', (dialog) => dialog.accept());
         await page.locator('#reset-ai-settings').click();
-        await expect(page.locator('#allow-super-course-toggle')).toBeChecked();
+        await expect(page.locator('#allow-super-course-toggle')).not.toBeChecked();
         await expect(page.locator('#student-chat-topk-input')).toHaveValue('3');
         await expect(page.locator('.notification.success', { hasText: 'AI settings reset to defaults' })).toBeVisible();
 
@@ -1444,7 +1444,7 @@ test.describe('Settings API authorization', () => {
             expect(await defaultAi.json()).toMatchObject({
                 success: true,
                 settings: {
-                    allowInSuperCourse: true,
+                    allowInSuperCourse: false,
                     ragSettings: { student: { topK: 3 } },
                 },
             });
@@ -1456,11 +1456,11 @@ test.describe('Settings API authorization', () => {
             expect(invalidAi.status()).toBe(400);
 
             const saveAi = await adminApi.put('/api/settings/ai-settings', {
-                data: { courseId: SETTINGS_OTHER_COURSE_ID, allowInSuperCourse: false, studentTopK: 5 },
+                data: { courseId: SETTINGS_OTHER_COURSE_ID, allowInSuperCourse: true, studentTopK: 5 },
             });
             expect((await saveAi.json()).success).toBe(true);
             expect(await readCourse(SETTINGS_OTHER_COURSE_ID)).toMatchObject({
-                allowInSuperCourse: false,
+                allowInSuperCourse: true,
                 ragSettings: { student: { topK: 5 } },
             });
 
@@ -1470,7 +1470,7 @@ test.describe('Settings API authorization', () => {
             expect(await resetAi.json()).toMatchObject({
                 success: true,
                 settings: {
-                    allowInSuperCourse: true,
+                    allowInSuperCourse: false,
                     ragSettings: { student: { topK: 3 } },
                 },
             });

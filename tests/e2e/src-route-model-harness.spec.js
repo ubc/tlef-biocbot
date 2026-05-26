@@ -141,8 +141,9 @@ test('Course RAG settings helpers default and validate Top-K without database mi
     expect(CourseModel.resolveRagSettings({ ragSettings: { student: { topK: 12 } } })).toEqual({ student: { topK: 12 } });
     expect(CourseModel.resolveRagSettings({ ragSettings: { student: { topK: 0 } } })).toEqual({ student: { topK: 3 } });
     expect(CourseModel.resolveRagSettings({ ragSettings: { student: { topK: 21 } } })).toEqual({ student: { topK: 3 } });
-    expect(CourseModel.getAllowInSuperCourse({})).toBe(true);
+    expect(CourseModel.getAllowInSuperCourse({})).toBe(false);
     expect(CourseModel.getAllowInSuperCourse({ allowInSuperCourse: false })).toBe(false);
+    expect(CourseModel.getAllowInSuperCourse({ allowInSuperCourse: true })).toBe(true);
 });
 
 test('chat route sends the course RAG Top-K to Qdrant search', async () => {
