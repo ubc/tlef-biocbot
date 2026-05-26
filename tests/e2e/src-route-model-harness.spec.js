@@ -168,6 +168,76 @@ test('chat route sends the course RAG Top-K to Qdrant search', async () => {
     });
 });
 
+test('instructor Super Course chat searches only opted-in active courses by default', async () => {
+    await configure('instructor-super-chat');
+
+    const res = await postJson('/api/instructor/chat', {
+        message: 'Compare glycolysis and beta oxidation',
+        conversationMessages: [{ role: 'user', content: 'Previous context' }],
+    });
+    expect(res.ok()).toBeTruthy();
+    expect(await res.json()).toMatchObject({
+        success: true,
+        message: 'Harness instructor super answer',
+        retrieval: {
+            topK: 6,
+            includeInactiveCourses: false,
+            poolCourseIds: ['BIOC-A'],
+            poolCourses: [{ courseId: 'BIOC-A', courseName: 'Biochemistry A' }],
+            resultCount: 1,
+        },
+        citations: [{ courseId: 'BIOC-A', courseName: 'Biochemistry A' }],
+    });
+
+    const searchRes = await /** @type {any} */ (api).get('/__last-qdrant-search', { failOnStatusCode: false });
+    expect(await searchRes.json()).toMatchObject({
+        query: 'Compare glycolysis and beta oxidation',
+        filters: { courseId: ['BIOC-A'] },
+        limit: 6,
+    });
+
+    const llmRes = await /** @type {any} */ (api).get('/__last-llm-request', { failOnStatusCode: false });
+    expect((await llmRes.json()).prompt).toContain('Configured Super Course source pool:\nBiochemistry A (BIOC-A)');
+});
+
+test('instructor Super Course chat includes inactive courses when the global setting is enabled', async () => {
+    await configure('instructor-super-chat-inactive');
+
+    const res = await postJson('/api/instructor/chat', {
+        message: 'What material is available?',
+    });
+    expect(res.ok()).toBeTruthy();
+    expect(await res.json()).toMatchObject({
+        success: true,
+        retrieval: {
+            includeInactiveCourses: true,
+            poolCourseIds: ['BIOC-A', 'BIOC-B'],
+        },
+    });
+
+    const searchRes = await /** @type {any} */ (api).get('/__last-qdrant-search', { failOnStatusCode: false });
+    expect(await searchRes.json()).toMatchObject({
+        filters: { courseId: ['BIOC-A', 'BIOC-B'] },
+        limit: 6,
+    });
+});
+
+test('instructor Super Course pool endpoint exposes configured course names', async () => {
+    await configure('instructor-super-chat-inactive');
+
+    const res = await /** @type {any} */ (api).get('/api/instructor/chat/pool', { failOnStatusCode: false });
+    expect(res.ok()).toBeTruthy();
+    expect(await res.json()).toMatchObject({
+        success: true,
+        includeInactiveCourses: true,
+        topK: 6,
+        courses: [
+            { courseId: 'BIOC-A', courseName: 'Biochemistry A', status: 'active' },
+            { courseId: 'BIOC-B', courseName: 'Biochemistry B', status: 'inactive' },
+        ],
+    });
+});
+
 test('User model SAML and no-match update branches are covered without real IdP auth', async () => {
     let res = await postJson('/__user-model/get-by-puid');
     expect(await res.json()).toMatchObject({ missing: null, found: { userId: 'saml-existing', puid: 'puid-1' } });
@@ -361,6 +431,10 @@ test('qdrant route failure branches use fake service/db dependencies only', asyn
     await configure('qdrant-delete-fails');
     res = await /** @type {any} */ (api).delete('/api/qdrant/document/doc-h', { failOnStatusCode: false });
     expect(res.status()).toBe(500);
+
+    await configure('middleware-admin-denied');
+    res = await /** @type {any} */ (api).delete('/api/qdrant/collection', { failOnStatusCode: false });
+    expect(res.status()).toBe(403);
 
     await configure('qdrant-collection-fails');
     res = await /** @type {any} */ (api).delete('/api/qdrant/collection', { failOnStatusCode: false });

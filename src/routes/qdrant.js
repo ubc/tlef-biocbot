@@ -331,6 +331,13 @@ router.get('/collection-stats', async (req, res) => {
  */
 router.delete('/collection', async (req, res) => {
     try {
+        if (!hasSystemAdminAccess(req.user)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied'
+            });
+        }
+
         // Ensure service is initialized
         if (!qdrantService.client) {
             await qdrantService.initialize();
@@ -598,4 +605,3 @@ router.post('/cleanup-vectors', async (req, res) => {
 });
 
 module.exports = router;
-
