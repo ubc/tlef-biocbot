@@ -189,7 +189,9 @@ test.describe('Super Course page — toggle off', () => {
         await setSuperCourseSettings({ showStudentSuperCourse: false });
 
         await page.goto('/student/super-course');
-        await page.waitForURL((url) => url.pathname === '/student', { timeout: 10_000 });
+        await page.waitForURL((url) => url.pathname === '/student' || url.pathname === '/student/', {
+            timeout: 10_000,
+        });
     });
 });
 

@@ -849,8 +849,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 const allowToggle = document.getElementById('allow-super-course-toggle');
                 const topKInput = document.getElementById('student-chat-topk-input');
-                if (allowToggle) allowToggle.checked = true;
-                if (topKInput) topKInput.value = 3;
+                const settings = result.settings || {};
+                if (allowToggle) allowToggle.checked = settings.allowInSuperCourse === true;
+                if (topKInput) topKInput.value = settings.ragSettings?.student?.topK ?? 3;
                 showNotification('AI settings reset to defaults', 'success');
             } catch (error) {
                 console.error('Error resetting AI settings:', error);
