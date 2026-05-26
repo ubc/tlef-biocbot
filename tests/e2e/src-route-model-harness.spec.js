@@ -238,6 +238,58 @@ test('instructor Super Course pool endpoint exposes configured course names', as
     });
 });
 
+test('instructor Super Course chat sessions save, reload, and soft-delete for the instructor', async () => {
+    await configure('instructor-super-chat');
+
+    const sessionId = 'inst-super-session-1';
+    const save = await postJson('/api/instructor/chat/save', {
+        sessionId,
+        title: 'Super Course - ATP',
+        messageCount: 2,
+        duration: '3s',
+        savedAt: '2026-05-25T00:00:00.000Z',
+        chatData: {
+            metadata: {
+                instructorId: 'inst',
+                instructorName: 'Harness User',
+                courseId: 'SUPER_COURSE',
+                courseName: 'Super Course',
+                totalMessages: 2,
+            },
+            messages: [
+                { type: 'user', content: 'What is ATP?', timestamp: '2026-05-25T00:00:00.000Z' },
+                { type: 'bot', content: 'ATP stores transferable energy.', timestamp: '2026-05-25T00:00:03.000Z' },
+            ],
+            sessionInfo: { sessionId, duration: '3s' },
+        },
+    });
+    expect(save.ok()).toBeTruthy();
+    expect(await save.json()).toMatchObject({ success: true, data: { sessionId, instructorId: 'inst' } });
+
+    const loaded = await /** @type {any} */ (api).get(`/api/instructor/chat/sessions/${sessionId}`, { failOnStatusCode: false });
+    expect(loaded.ok()).toBeTruthy();
+    expect(await loaded.json()).toMatchObject({
+        success: true,
+        session: {
+            sessionId,
+            instructorId: 'inst',
+            title: 'Super Course - ATP',
+            chatData: {
+                messages: [
+                    { type: 'user', content: 'What is ATP?' },
+                    { type: 'bot', content: 'ATP stores transferable energy.' },
+                ],
+            },
+        },
+    });
+
+    const deleted = await /** @type {any} */ (api).delete(`/api/instructor/chat/sessions/${sessionId}`, { failOnStatusCode: false });
+    expect(deleted.ok()).toBeTruthy();
+
+    const afterDelete = await /** @type {any} */ (api).get(`/api/instructor/chat/sessions/${sessionId}`, { failOnStatusCode: false });
+    expect(afterDelete.status()).toBe(404);
+});
+
 test('User model SAML and no-match update branches are covered without real IdP auth', async () => {
     let res = await postJson('/__user-model/get-by-puid');
     expect(await res.json()).toMatchObject({ missing: null, found: { userId: 'saml-existing', puid: 'puid-1' } });

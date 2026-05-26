@@ -65,6 +65,19 @@ class MemoryCollection {
         return { modifiedCount: 1, upsertedCount: 0 };
     }
 
+    async replaceOne(query, replacement, options = {}) {
+        const index = this.docs.findIndex(doc => matchesQuery(doc, query || {}));
+        if (index >= 0) {
+            this.docs[index] = { ...replacement };
+            return { matchedCount: 1, modifiedCount: 1, upsertedCount: 0 };
+        }
+        if (options.upsert) {
+            this.docs.push({ ...replacement });
+            return { matchedCount: 0, modifiedCount: 0, upsertedCount: 1 };
+        }
+        return { matchedCount: 0, modifiedCount: 0, upsertedCount: 0 };
+    }
+
     async countDocuments() {
         return this.docs.length;
     }

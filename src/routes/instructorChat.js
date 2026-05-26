@@ -43,6 +43,122 @@ router.get('/pool', async (req, res) => {
     }
 });
 
+router.post('/save', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const {
+            sessionId,
+            title,
+            messageCount,
+            duration,
+            savedAt,
+            chatData
+        } = req.body || {};
+
+        if (!sessionId || !chatData || typeof chatData !== 'object') {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required fields: sessionId, chatData'
+            });
+        }
+
+        const instructorId = req.user && req.user.userId;
+        if (!instructorId) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        const sessionData = {
+            sessionId,
+            instructorId,
+            instructorName: req.user.displayName || req.user.username || req.user.email || instructorId,
+            title: title || `Super Course Chat ${new Date().toLocaleDateString()}`,
+            messageCount: messageCount || 0,
+            duration: duration || '0s',
+            savedAt: savedAt || new Date().toISOString(),
+            chatData,
+            isDeleted: false,
+            updatedAt: new Date(),
+            createdAt: new Date()
+        };
+
+        await db.collection('instructor_chat_sessions').replaceOne(
+            { sessionId, instructorId },
+            sessionData,
+            { upsert: true }
+        );
+
+        res.json({
+            success: true,
+            message: 'Instructor chat session saved successfully',
+            data: { sessionId, instructorId }
+        });
+    } catch (error) {
+        console.error('Error saving instructor Super Course chat session:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to save instructor chat session'
+        });
+    }
+});
+
+router.get('/sessions/:sessionId', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const instructorId = req.user && req.user.userId;
+        const session = await db.collection('instructor_chat_sessions').findOne({
+            sessionId: req.params.sessionId,
+            instructorId,
+            $or: [
+                { isDeleted: { $exists: false } },
+                { isDeleted: false }
+            ]
+        });
+
+        if (!session) {
+            return res.status(404).json({ success: false, message: 'Chat session not found' });
+        }
+
+        res.json({ success: true, session });
+    } catch (error) {
+        console.error('Error loading instructor Super Course chat session:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to load instructor chat session'
+        });
+    }
+});
+
+router.delete('/sessions/:sessionId', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const instructorId = req.user && req.user.userId;
+        await db.collection('instructor_chat_sessions').updateOne(
+            { sessionId: req.params.sessionId, instructorId },
+            { $set: { isDeleted: true, deletedAt: new Date() } }
+        );
+
+        res.json({ success: true, data: { sessionId: req.params.sessionId } });
+    } catch (error) {
+        console.error('Error deleting instructor Super Course chat session:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete instructor chat session'
+        });
+    }
+});
+
 router.post('/', async (req, res) => {
     try {
         const db = req.app.locals.db;

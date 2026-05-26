@@ -14,6 +14,21 @@
     gap: 16px;
 }
 
+.super-course-new-chat-btn {
+    padding: 8px 14px;
+    border: 1px solid #cdd7e6;
+    border-radius: 6px;
+    background: #fff;
+    color: #2f3a4a;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.super-course-new-chat-btn:hover {
+    background: #f5f7fb;
+}
+
 .instructor-super-chat .pending-message .message-content {
     color: var(--text-secondary, #666);
 }
