@@ -9,6 +9,10 @@ const router = express.Router();
 // Import the FlaggedQuestion model
 const FlaggedQuestionModel = require('../models/FlaggedQuestion');
 const CourseModel = require('../models/Course');
+const { hasSystemAdminAccess } = require('../services/authorization');
+
+const SUPER_COURSE_FLAG_COURSE_ID = 'SUPER_COURSE';
+const VALID_BOT_MODES = new Set(['protege', 'tutor', 'supercourse-student', 'supercourse-instructor']);
 
 // Middleware for JSON parsing
 router.use(express.json());
@@ -41,17 +45,10 @@ async function loadFlagAndAssertCourseAccess(req, res, flagId) {
         res.status(400).json({ success: false, message: 'Flag not found' });
         return null;
     }
-    const hasAccess = await CourseModel.userHasCourseAccess(db, flag.courseId, user.userId, user.role);
+    const hasAccess = await canReadCourseFlags(db, user, flag.courseId);
     if (!hasAccess) {
         res.status(403).json({ success: false, message: 'No access to this course' });
         return null;
-    }
-    if (user.role === 'ta') {
-        const hasFlagPermission = await CourseModel.checkTAPermission(db, flag.courseId, user.userId, 'flags');
-        if (!hasFlagPermission) {
-            res.status(403).json({ success: false, message: 'No access to flagged content for this course' });
-            return null;
-        }
     }
     return flag;
 }
@@ -59,6 +56,10 @@ async function loadFlagAndAssertCourseAccess(req, res, flagId) {
 async function canReadCourseFlags(db, user, courseId) {
     if (!user) return false;
     if (user.role !== 'instructor' && user.role !== 'ta') return false;
+
+    if (courseId === SUPER_COURSE_FLAG_COURSE_ID) {
+        return user.role === 'instructor' && hasSystemAdminAccess(user);
+    }
 
     const hasCourseAccess = await CourseModel.userHasCourseAccess(db, courseId, user.userId, user.role);
     if (!hasCourseAccess) return false;
@@ -85,6 +86,31 @@ async function filterFlagsByReadableCourse(db, user, flags) {
     }
 
     return filtered;
+}
+
+function normalizeStringArray(value) {
+    if (!Array.isArray(value)) return [];
+
+    const seen = new Set();
+    const normalized = [];
+    for (const item of value) {
+        const text = String(item || '').trim();
+        if (!text || seen.has(text)) continue;
+        seen.add(text);
+        normalized.push(text);
+    }
+    return normalized;
+}
+
+async function canCreateFlagForCourse(db, user, courseId, isSuperCourseFlag) {
+    if (!user) return false;
+    if (user.role !== 'student' && user.role !== 'instructor') return false;
+
+    if (isSuperCourseFlag || courseId === SUPER_COURSE_FLAG_COURSE_ID) {
+        return true;
+    }
+
+    return CourseModel.userHasCourseAccess(db, courseId, user.userId, user.role);
 }
 
 /**
@@ -153,7 +179,10 @@ router.post('/', async (req, res) => {
             flagReason,
             flagDescription,
             botMode,
-            questionContent
+            questionContent,
+            sourceCourseIds,
+            sourceCourseNames,
+            isSuperCourseFlag
         } = req.body;
         
         // Get authenticated user information
@@ -165,27 +194,30 @@ router.post('/', async (req, res) => {
             });
         }
         
-        // Only students can flag questions
-        if (user.role !== 'student') {
+        // Students and instructors can flag responses. TAs review flags but do not create them.
+        if (user.role !== 'student' && user.role !== 'instructor') {
             return res.status(403).json({
                 success: false,
-                message: 'Only students can flag questions'
+                message: 'Only students and instructors can flag questions'
             });
         }
+
+        const superCourseFlag = isSuperCourseFlag === true || courseId === SUPER_COURSE_FLAG_COURSE_ID;
+        const effectiveCourseId = superCourseFlag ? SUPER_COURSE_FLAG_COURSE_ID : courseId;
         
         // Validate required fields
-        if (!questionId || !courseId || !unitName || !flagReason || !flagDescription) {
+        if (!questionId || !effectiveCourseId || !flagReason || !flagDescription) {
             return res.status(400).json({
                 success: false,
-                message: 'Missing required fields: questionId, courseId, unitName, flagReason, flagDescription'
+                message: 'Missing required fields: questionId, courseId, flagReason, flagDescription'
             });
         }
         
-        // Validate botMode if provided (should be "protege" or "tutor")
-        if (botMode && botMode !== 'protege' && botMode !== 'tutor') {
+        // Validate botMode if provided.
+        if (botMode && !VALID_BOT_MODES.has(botMode)) {
             return res.status(400).json({
                 success: false,
-                message: 'Invalid botMode. Must be "protege" or "tutor"'
+                message: 'Invalid botMode. Must be "protege", "tutor", "supercourse-student", or "supercourse-instructor"'
             });
         }
         
@@ -197,18 +229,39 @@ router.post('/', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const hasCourseAccess = await canCreateFlagForCourse(db, user, effectiveCourseId, superCourseFlag);
+        if (!hasCourseAccess) {
+            return res.status(403).json({
+                success: false,
+                message: 'No access to flag content for this course'
+            });
+        }
+
+        let courseName = 'Super Course';
+        if (!superCourseFlag) {
+            const course = await CourseModel.getCourseById(db, effectiveCourseId);
+            courseName = course?.courseName || course?.courseCode || effectiveCourseId;
+        }
         
         // Create the flagged question with authenticated user info
         const result = await FlaggedQuestionModel.createFlaggedQuestion(db, {
             questionId,
-            courseId,
-            unitName,
+            courseId: effectiveCourseId,
+            courseName,
+            unitName: unitName || (superCourseFlag ? 'Super Course' : null),
             studentId: user.userId,
             studentName: user.displayName || user.username,
+            reporterId: user.userId,
+            reporterName: user.displayName || user.username,
+            reporterRole: user.role,
             flagReason,
             flagDescription,
-            botMode: botMode || 'tutor', // Default to 'tutor' if not provided for backward compatibility
-            questionContent
+            botMode: botMode || (superCourseFlag ? `supercourse-${user.role}` : 'tutor'),
+            questionContent,
+            sourceCourseIds: normalizeStringArray(sourceCourseIds),
+            sourceCourseNames: normalizeStringArray(sourceCourseNames),
+            isSuperCourseFlag: superCourseFlag
         });
         
         if (!result.success) {
@@ -218,7 +271,7 @@ router.post('/', async (req, res) => {
             });
         }
         
-        console.log(`Flagged question created by student ${user.userId} for question ${questionId}`);
+        console.log(`Flagged question created by ${user.role} ${user.userId} for question ${questionId}`);
         
         res.json({
             success: true,
@@ -389,6 +442,15 @@ router.get('/:flagId', async (req, res) => {
             return res.status(404).json({
                 success: false,
                 message: 'Flagged question not found'
+            });
+        }
+
+        const user = req.user;
+        const hasAccess = await canReadCourseFlags(db, user, flag.courseId);
+        if (!hasAccess) {
+            return res.status(403).json({
+                success: false,
+                message: 'No access to flagged content for this course'
             });
         }
         

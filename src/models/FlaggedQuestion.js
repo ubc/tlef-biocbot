@@ -12,12 +12,19 @@ const { MongoClient } = require('mongodb');
  *   flagId: String,              // Unique flag identifier
  *   questionId: String,          // ID of the flagged question
  *   courseId: String,            // Course where the question was flagged
+ *   courseName: String,          // Display name/code for the course where the question was flagged
  *   unitName: String,            // Unit/lecture name where question appears
  *   studentId: String,           // ID of the student who flagged
  *   studentName: String,         // Name of the student (for display)
  *   flagReason: String,          // Reason for flagging (e.g., "unclear", "incorrect", "inappropriate")
  *   flagDescription: String,     // Detailed description of the issue
  *   botMode: String,             // Bot mode when flag was submitted ("protege" or "tutor")
+ *   reporterId: String,          // ID of the user who submitted the flag
+ *   reporterName: String,        // Display name of the user who submitted the flag
+ *   reporterRole: String,        // Role of the user who submitted the flag
+ *   sourceCourseIds: Array,      // Source course IDs cited by a Super Course answer
+ *   sourceCourseNames: Array,    // Source course names cited by a Super Course answer
+ *   isSuperCourseFlag: Boolean,  // True when submitted from a Super Course chat
  *   flagStatus: String,          // "pending", "reviewed", "resolved", "dismissed"
  *   instructorResponse: String,  // Instructor's response/explanation
  *   instructorId: String,        // ID of instructor who responded
