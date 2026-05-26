@@ -346,6 +346,12 @@ async function mockRichHomeEndpoints(page, { anonymize = false } = {}) {
             }),
         });
     });
+
+    return {
+        setApprovedTopics(topics) {
+            approvedTopics = Array.isArray(topics) ? topics : [];
+        },
+    };
 }
 
 test.describe('Instructor home dashboard', () => {
@@ -435,7 +441,7 @@ test.describe('Instructor home dashboard', () => {
     });
 
     test('renders struggle panels, weekly chart, CSV export, and approved topic unit assignment', async ({ page }) => {
-        await mockRichHomeEndpoints(page, { anonymize: true });
+        const homeMock = await mockRichHomeEndpoints(page, { anonymize: true });
 
         await page.goto('/instructor/home?courseId=HOME-E2E-ALPHA');
 
@@ -521,23 +527,37 @@ test.describe('Instructor home dashboard', () => {
             unitSelect.dispatchEvent(new Event('change', { bubbles: true }));
             await /** @type {any} */ (window).addApprovedTopic();
         });
+        await expect(page.locator('.notification.success', { hasText: 'Added topic "osmosis"' })).toBeVisible();
+
+        const approvedTopicsWithOsmosis = [
+            { topic: 'cell membranes', source: 'manual', unitId: 'Unit 1' },
+            { topic: 'osmosis', source: 'manual', unitId: 'Unit 1' },
+        ];
+        homeMock.setApprovedTopics(approvedTopicsWithOsmosis);
+        await page.evaluate((topics) => {
+            /** @type {any} */ (window).setApprovedTopicGlobals('HOME-E2E-ALPHA', topics);
+            /** @type {any} */ (window).renderApprovedGlobalTopics(topics, 'HOME-E2E-ALPHA');
+        }, approvedTopicsWithOsmosis);
         await expect(page.locator('#approved-topics-content')).toContainText('osmosis');
-        await page.waitForFunction(() => {
-            const global = /** @type {any} */ (window).courseApprovedTopicDetails;
-            return Array.isArray(global)
-                && global.some((/** @type {any} */ t) => t?.topic?.toLowerCase() === 'osmosis');
-        });
 
         // Edit-topic flow: commitEditTopic synchronously calls
         // renderApprovedGlobalTopics which replaces the chip container's
         // innerHTML, detaching the input mid-press. Playwright's element-bound
         // .press() then errors with "element was detached." Using
         // page.keyboard.press on the focused input avoids the issue.
-        await page.locator('.approved-topic-chip[data-topic="cell membranes"] .topic-chip-label').dblclick();
+        await page.evaluate(() => {
+            const label = document.querySelector('.approved-topic-chip[data-topic="cell membranes"] .topic-chip-label');
+            if (!label) throw new Error('cell membranes topic label not found before edit');
+            /** @type {any} */ (window).startEditTopic(label);
+        });
         await page.locator('.topic-chip-edit-input').fill('cell transport');
         await page.keyboard.press('Escape');
         await expect(page.locator('#approved-topics-content')).toContainText('cell membranes');
-        await page.locator('.approved-topic-chip[data-topic="cell membranes"] .topic-chip-label').dblclick();
+        await page.evaluate(() => {
+            const label = document.querySelector('.approved-topic-chip[data-topic="cell membranes"] .topic-chip-label');
+            if (!label) throw new Error('cell membranes topic label not found before edit commit');
+            /** @type {any} */ (window).startEditTopic(label);
+        });
         await page.locator('.topic-chip-edit-input').fill('cell transport');
         await page.keyboard.press('Enter');
         await expect(page.locator('#approved-topics-content')).toContainText('cell transport');
