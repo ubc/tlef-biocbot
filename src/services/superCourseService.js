@@ -28,7 +28,7 @@ async function getSuperCourseChatSettings(db) {
 
 function buildSuperCoursePoolQuery(includeInactiveCourses = false) {
     const query = {
-        allowInSuperCourse: { $ne: false },
+        allowInSuperCourse: true,
         status: { $ne: 'deleted' }
     };
 

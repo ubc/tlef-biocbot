@@ -171,7 +171,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             const allowToggle = document.getElementById('allow-super-course-toggle');
             const topKInput = document.getElementById('student-chat-topk-input');
-            if (allowToggle) allowToggle.checked = result.settings.allowInSuperCourse !== false;
+            if (allowToggle) allowToggle.checked = result.settings.allowInSuperCourse === true;
             if (topKInput) topKInput.value = result.settings.ragSettings?.student?.topK || 3;
         } catch (error) {
             console.error('Error loading AI settings:', error);
@@ -1054,7 +1054,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 const aiSettingsSection = document.getElementById('ai-settings-section');
                 if (aiSettingsSection && aiSettingsSection.style.display !== 'none') {
-                    const allowInSuperCourse = document.getElementById('allow-super-course-toggle')?.checked !== false;
+                    const allowInSuperCourse = document.getElementById('allow-super-course-toggle')?.checked === true;
                     const studentTopK = Number(document.getElementById('student-chat-topk-input')?.value || 3);
                     const aiResponse = await fetch('/api/settings/ai-settings', {
                         method: 'PUT',

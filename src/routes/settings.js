@@ -39,7 +39,7 @@ function buildAiSettingsResponse(course) {
         allowInSuperCourse: CourseModel.getAllowInSuperCourse(course),
         ragSettings: CourseModel.resolveRagSettings(course),
         defaults: {
-            allowInSuperCourse: true,
+            allowInSuperCourse: false,
             studentTopK: CourseModel.DEFAULT_STUDENT_RAG_TOP_K,
             minTopK: CourseModel.MIN_RAG_TOP_K,
             maxTopK: CourseModel.MAX_RAG_TOP_K
@@ -292,7 +292,7 @@ router.put('/ai-settings', async (req, res) => {
             { courseId, status: { $ne: 'deleted' } },
             {
                 $set: {
-                    allowInSuperCourse: allowInSuperCourse !== false,
+                    allowInSuperCourse: allowInSuperCourse === true,
                     'ragSettings.student.topK': topK,
                     updatedAt: new Date(),
                     lastUpdatedById: req.user.userId
@@ -309,7 +309,7 @@ router.put('/ai-settings', async (req, res) => {
             courseId,
             message: 'AI settings saved',
             settings: {
-                allowInSuperCourse: allowInSuperCourse !== false,
+                allowInSuperCourse: allowInSuperCourse === true,
                 ragSettings: { student: { topK } },
                 defaults: buildAiSettingsResponse({}).defaults
             }
@@ -340,7 +340,7 @@ router.post('/ai-settings/reset', async (req, res) => {
             { courseId, status: { $ne: 'deleted' } },
             {
                 $set: {
-                    allowInSuperCourse: true,
+                    allowInSuperCourse: false,
                     'ragSettings.student.topK': CourseModel.DEFAULT_STUDENT_RAG_TOP_K,
                     updatedAt: new Date(),
                     lastUpdatedById: req.user.userId
@@ -357,7 +357,7 @@ router.post('/ai-settings/reset', async (req, res) => {
             courseId,
             message: 'AI settings reset to defaults',
             settings: {
-                allowInSuperCourse: true,
+                allowInSuperCourse: false,
                 ragSettings: { student: { topK: CourseModel.DEFAULT_STUDENT_RAG_TOP_K } },
                 defaults: buildAiSettingsResponse({}).defaults
             }

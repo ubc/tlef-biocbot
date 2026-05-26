@@ -290,7 +290,7 @@ function resolveRagSettings(courseDoc = {}) {
 }
 
 function getAllowInSuperCourse(courseDoc = {}) {
-    return courseDoc.allowInSuperCourse !== false;
+    return courseDoc.allowInSuperCourse === true;
 }
 
 async function getRagSettings(db, courseId) {
@@ -345,7 +345,7 @@ async function updateRagSettings(db, courseId, settings = {}, updatedById = null
 async function updateAllowInSuperCourse(db, courseId, allowInSuperCourse, updatedById = null) {
     const collection = getCoursesCollection(db);
     const update = {
-        allowInSuperCourse: allowInSuperCourse !== false,
+        allowInSuperCourse: allowInSuperCourse === true,
         updatedAt: new Date()
     };
 
@@ -360,7 +360,7 @@ async function updateAllowInSuperCourse(db, courseId, allowInSuperCourse, update
 
     return {
         success: result.matchedCount > 0,
-        allowInSuperCourse: allowInSuperCourse !== false,
+        allowInSuperCourse: allowInSuperCourse === true,
         error: result.matchedCount > 0 ? null : 'Course not found'
     };
 }
