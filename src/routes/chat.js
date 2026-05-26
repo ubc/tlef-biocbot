@@ -680,8 +680,10 @@ router.post('/', async (req, res) => {
         // Debug logging to verify retrieval mode and scope
         console.log(`🔎 [CHAT_RAG] RetrievalMode=${isAdditive ? 'additive' : 'single'} | Course=${courseId} | Unit=${unitName} | LectureNames=${JSON.stringify(lectureNames)}`);
 
+        const ragSettings = CourseModel.resolveRagSettings(course);
+
         // Retrieve top chunks from Qdrant
-        const searchResults = await qdrant.searchDocuments(message, { courseId, lectureNames }, 12);
+        const searchResults = await qdrant.searchDocuments(message, { courseId, lectureNames }, ragSettings.student.topK);
 
         // Log summary of results by lecture to validate scope
         try {

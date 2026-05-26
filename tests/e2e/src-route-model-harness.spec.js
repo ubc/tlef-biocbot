@@ -12,6 +12,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const net = require('net');
 const { once } = require('events');
+const CourseModel = require('../../src/models/Course');
 
 /** @type {import('child_process').ChildProcess|null} */
 let harnessProc = null;
@@ -133,6 +134,161 @@ test('UserAgreement defensive defaults and exported stats helpers are covered', 
         emptyStats: { totalUsers: 0, agreedUsers: 0, pendingUsers: 0, agreementRate: 0 },
         stats: { totalUsers: 2, agreedUsers: 1, pendingUsers: 1, agreementRate: 50 },
     });
+});
+
+test('Course RAG settings helpers default and validate Top-K without database migration', async () => {
+    expect(CourseModel.resolveRagSettings({})).toEqual({ student: { topK: 3 } });
+    expect(CourseModel.resolveRagSettings({ ragSettings: { student: { topK: 12 } } })).toEqual({ student: { topK: 12 } });
+    expect(CourseModel.resolveRagSettings({ ragSettings: { student: { topK: 0 } } })).toEqual({ student: { topK: 3 } });
+    expect(CourseModel.resolveRagSettings({ ragSettings: { student: { topK: 21 } } })).toEqual({ student: { topK: 3 } });
+    expect(CourseModel.getAllowInSuperCourse({})).toBe(false);
+    expect(CourseModel.getAllowInSuperCourse({ allowInSuperCourse: false })).toBe(false);
+    expect(CourseModel.getAllowInSuperCourse({ allowInSuperCourse: true })).toBe(true);
+});
+
+test('chat route sends the course RAG Top-K to Qdrant search', async () => {
+    await configure('chat-rag-topk');
+
+    const res = await postJson('/api/chat', {
+        message: 'What is ATP?',
+        mode: 'default',
+        unitName: 'Unit 1',
+        courseId: 'BIOC-H',
+    });
+    expect(res.ok()).toBeTruthy();
+    expect(await res.json()).toMatchObject({ success: true, message: 'Harness chat response' });
+
+    const searchRes = await /** @type {any} */ (api).get('/__last-qdrant-search', { failOnStatusCode: false });
+    expect(await searchRes.json()).toMatchObject({
+        query: 'What is ATP?',
+        filters: {
+            courseId: 'BIOC-H',
+            lectureNames: ['Unit 1'],
+        },
+        limit: 5,
+    });
+});
+
+test('instructor Super Course chat searches only opted-in active courses by default', async () => {
+    await configure('instructor-super-chat');
+
+    const res = await postJson('/api/instructor/chat', {
+        message: 'Compare glycolysis and beta oxidation',
+        conversationMessages: [{ role: 'user', content: 'Previous context' }],
+    });
+    expect(res.ok()).toBeTruthy();
+    expect(await res.json()).toMatchObject({
+        success: true,
+        message: 'Harness instructor super answer',
+        retrieval: {
+            topK: 6,
+            includeInactiveCourses: false,
+            poolCourseIds: ['BIOC-A'],
+            poolCourses: [{ courseId: 'BIOC-A', courseName: 'Biochemistry A' }],
+            resultCount: 1,
+        },
+        citations: [{ courseId: 'BIOC-A', courseName: 'Biochemistry A' }],
+    });
+
+    const searchRes = await /** @type {any} */ (api).get('/__last-qdrant-search', { failOnStatusCode: false });
+    expect(await searchRes.json()).toMatchObject({
+        query: 'Compare glycolysis and beta oxidation',
+        filters: { courseId: ['BIOC-A'] },
+        limit: 6,
+    });
+
+    const llmRes = await /** @type {any} */ (api).get('/__last-llm-request', { failOnStatusCode: false });
+    expect((await llmRes.json()).prompt).toContain('Configured Super Course source pool:\nBiochemistry A (BIOC-A)');
+});
+
+test('instructor Super Course chat includes inactive courses when the global setting is enabled', async () => {
+    await configure('instructor-super-chat-inactive');
+
+    const res = await postJson('/api/instructor/chat', {
+        message: 'What material is available?',
+    });
+    expect(res.ok()).toBeTruthy();
+    expect(await res.json()).toMatchObject({
+        success: true,
+        retrieval: {
+            includeInactiveCourses: true,
+            poolCourseIds: ['BIOC-A', 'BIOC-B'],
+        },
+    });
+
+    const searchRes = await /** @type {any} */ (api).get('/__last-qdrant-search', { failOnStatusCode: false });
+    expect(await searchRes.json()).toMatchObject({
+        filters: { courseId: ['BIOC-A', 'BIOC-B'] },
+        limit: 6,
+    });
+});
+
+test('instructor Super Course pool endpoint exposes configured course names', async () => {
+    await configure('instructor-super-chat-inactive');
+
+    const res = await /** @type {any} */ (api).get('/api/instructor/chat/pool', { failOnStatusCode: false });
+    expect(res.ok()).toBeTruthy();
+    expect(await res.json()).toMatchObject({
+        success: true,
+        includeInactiveCourses: true,
+        topK: 6,
+        courses: [
+            { courseId: 'BIOC-A', courseName: 'Biochemistry A', status: 'active' },
+            { courseId: 'BIOC-B', courseName: 'Biochemistry B', status: 'inactive' },
+        ],
+    });
+});
+
+test('instructor Super Course chat sessions save, reload, and soft-delete for the instructor', async () => {
+    await configure('instructor-super-chat');
+
+    const sessionId = 'inst-super-session-1';
+    const save = await postJson('/api/instructor/chat/save', {
+        sessionId,
+        title: 'Super Course - ATP',
+        messageCount: 2,
+        duration: '3s',
+        savedAt: '2026-05-25T00:00:00.000Z',
+        chatData: {
+            metadata: {
+                instructorId: 'inst',
+                instructorName: 'Harness User',
+                courseId: 'SUPER_COURSE',
+                courseName: 'Super Course',
+                totalMessages: 2,
+            },
+            messages: [
+                { type: 'user', content: 'What is ATP?', timestamp: '2026-05-25T00:00:00.000Z' },
+                { type: 'bot', content: 'ATP stores transferable energy.', timestamp: '2026-05-25T00:00:03.000Z' },
+            ],
+            sessionInfo: { sessionId, duration: '3s' },
+        },
+    });
+    expect(save.ok()).toBeTruthy();
+    expect(await save.json()).toMatchObject({ success: true, data: { sessionId, instructorId: 'inst' } });
+
+    const loaded = await /** @type {any} */ (api).get(`/api/instructor/chat/sessions/${sessionId}`, { failOnStatusCode: false });
+    expect(loaded.ok()).toBeTruthy();
+    expect(await loaded.json()).toMatchObject({
+        success: true,
+        session: {
+            sessionId,
+            instructorId: 'inst',
+            title: 'Super Course - ATP',
+            chatData: {
+                messages: [
+                    { type: 'user', content: 'What is ATP?' },
+                    { type: 'bot', content: 'ATP stores transferable energy.' },
+                ],
+            },
+        },
+    });
+
+    const deleted = await /** @type {any} */ (api).delete(`/api/instructor/chat/sessions/${sessionId}`, { failOnStatusCode: false });
+    expect(deleted.ok()).toBeTruthy();
+
+    const afterDelete = await /** @type {any} */ (api).get(`/api/instructor/chat/sessions/${sessionId}`, { failOnStatusCode: false });
+    expect(afterDelete.status()).toBe(404);
 });
 
 test('User model SAML and no-match update branches are covered without real IdP auth', async () => {
@@ -328,6 +484,10 @@ test('qdrant route failure branches use fake service/db dependencies only', asyn
     await configure('qdrant-delete-fails');
     res = await /** @type {any} */ (api).delete('/api/qdrant/document/doc-h', { failOnStatusCode: false });
     expect(res.status()).toBe(500);
+
+    await configure('middleware-admin-denied');
+    res = await /** @type {any} */ (api).delete('/api/qdrant/collection', { failOnStatusCode: false });
+    expect(res.status()).toBe(403);
 
     await configure('qdrant-collection-fails');
     res = await /** @type {any} */ (api).delete('/api/qdrant/collection', { failOnStatusCode: false });

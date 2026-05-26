@@ -135,6 +135,7 @@ function adjustNavigationForRole() {
         // Check quiz visibility for students
         if (currentUser.role === 'student') {
             checkQuizNavVisibility();
+            checkSuperCourseNavVisibility();
         }
     } catch (e) {
         console.warn('adjustNavigationForRole failed:', e);
@@ -144,6 +145,18 @@ function adjustNavigationForRole() {
 /**
  * Check if quiz page is enabled and show/hide nav item accordingly
  */
+async function checkSuperCourseNavVisibility() {
+    const navItem = document.getElementById('super-course-nav-item');
+    if (!navItem) return;
+    try {
+        const response = await fetch('/api/student/super-course/status', { credentials: 'include' });
+        const data = await response.json();
+        navItem.style.display = data && data.success && data.enabled ? '' : 'none';
+    } catch (e) {
+        navItem.style.display = 'none';
+    }
+}
+
 async function checkQuizNavVisibility() {
     const quizNavItem = document.getElementById('quiz-nav-item');
     if (!quizNavItem) return;

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Course Chat - BiocBot</title>
+
+    <link rel="icon" type="image/x-icon" href="../assets/images/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../assets/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../assets/images/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../assets/images/apple-touch-icon.png">
+    <link rel="manifest" href="../assets/images/site.webmanifest">
+
+    <link rel="stylesheet" href="../styles/style.css">
+    <link rel="stylesheet" href="../styles/chat.css">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="logo-container">
+                <h2>BiocBot</h2>
+            </div>
+            <nav class="main-nav">
+                <ul>
+                    <li><a href="/student"><span class="icon"></span> Chat</a></li>
+                    <li><a href="/student/history"><span class="icon"></span> Chat History</a></li>
+                    <li><a href="/student/flagged"><span class="icon"></span> Flagged</a></li>
+                    <li><a href="/student/dashboard.html"><span class="icon"></span> Topic Dashboard</a></li>
+                    <li id="quiz-nav-item"><a href="/student/quiz"><span class="icon"></span> Quiz</a></li>
+                    <li id="super-course-nav-item" class="active"><a href="/student/super-course"><span class="icon"></span> Super Course</a></li>
+                    <li class="mobile-only-nav"><a href="#" id="mobile-logout-btn"><span class="icon"></span> Logout</a></li>
+                </ul>
+            </nav>
+            <div class="user-info">
+                <div class="user-avatar">S</div>
+                <div class="user-name" id="user-display-name">Student Name</div>
+                <div class="user-role">Student</div>
+                <div class="user-actions">
+                    <a href="#" id="logout-btn" class="user-action">Logout</a>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="chat-header instructor-super-chat-header">
+                <h1>Super Course Chat</h1>
+                <div class="current-course">
+                    <span class="course-label">Scope:</span>
+                    <span class="course-name" id="super-course-scope">Opted-in biochemistry courses</span>
+                </div>
+            </header>
+
+            <div class="chat-container instructor-super-chat">
+                <div class="super-course-pool-panel" id="super-course-pool-panel" aria-live="polite">
+                    <div class="super-course-pool-heading">Sources</div>
+                    <div class="super-course-pool-list" id="super-course-pool-list">Loading source pool...</div>
+                </div>
+
+                <div class="messages" id="chat-messages">
+                    <div class="message bot-message">
+                        <div class="message-avatar">B</div>
+                        <div class="message-content">
+                            <p>Ask about material across the Super Course. I will use opted-in uploaded course material when relevant and can draw on general biochemistry when the uploaded context is thin.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chat-input-container">
+                    <form id="chat-form" autocomplete="off">
+                        <input type="text" id="chat-input" placeholder="Ask about biochemistry course material..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="true" name="super-course-chat-message-input">
+                        <button type="submit" id="send-button">Send</button>
+                    </form>
+                    <div class="chat-footer">
+                        <div class="chat-disclaimer">
+                            BiocBot can make mistakes. Verify important information with your instructor. Don't share personal information.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="../common/scripts/auth.js"></script>
+    <script src="../common/scripts/mobile-layout.js"></script>
+    <script src="./scripts/super-course.js"></script>
+</body>
+</html>

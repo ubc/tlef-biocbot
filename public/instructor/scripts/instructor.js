@@ -1644,6 +1644,7 @@ async function updateSidebarForTA() {
         // Hide instructor navigation items
         const instructorNavItems = [
             'instructor-home-nav',
+            'instructor-chat-nav',
             'instructor-documents-nav', 
             'instructor-onboarding-nav',
             'instructor-flagged-nav',

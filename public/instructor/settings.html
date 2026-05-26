@@ -25,6 +25,7 @@
             <nav class="main-nav">
                 <ul>
                     <li><a href="/instructor/home">Home</a></li>
+                    <li><a href="/instructor/chat">Chat</a></li>
                     <li><a href="/instructor/documents">Course Upload</a></li>
                     <li id="onboarding-nav-item" style="display: none;"><a href="/instructor/onboarding">Onboarding</a></li>
                     <li><a href="/instructor/flagged">Flagged Content</a></li>
@@ -109,6 +110,109 @@
                                 </select>
                             </div>
                         </div>
+                    </div>
+                </section>
+
+                <!-- AI Settings (system admins only) -->
+                <section class="settings-section" id="ai-settings-section" style="display: none;">
+                    <h2>AI Settings</h2>
+                    <p class="section-description">Course-specific retrieval settings for the regular student chat and Super Course source pool.</p>
+                    <div class="settings-content">
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <h3>Include in Super Course</h3>
+                                <p>When enabled, this course's uploaded material can be included in the Super Course retrieval pool.</p>
+                            </div>
+                            <div class="setting-controls">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="allow-super-course-toggle">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <h3>Student Chat - Top-K</h3>
+                                <p>Number of course-material chunks regular student chat retrieves before answering. Default is 3.</p>
+                            </div>
+                            <div class="setting-controls">
+                                <input type="number" id="student-chat-topk-input" class="number-input" min="1" max="20" step="1" value="3">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="settings-actions" style="margin-top: 1rem;">
+                        <button id="reset-ai-settings" class="secondary-button">Reset AI Settings to Default</button>
+                    </div>
+                </section>
+
+                <!-- Super Course Chat Settings (system admins only) -->
+                <section class="settings-section" id="super-course-chat-section" style="display: none;">
+                    <h2>Super Course Chat Settings</h2>
+                    <p class="section-description">Platform-wide settings for the future instructor and student Super Course chat pages.</p>
+                    <div class="settings-content">
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <h3>Instructor Super Course Top-K</h3>
+                                <p>Number of chunks instructor Super Course chat retrieves before answering. Default is 8.</p>
+                            </div>
+                            <div class="setting-controls">
+                                <input type="number" id="super-instructor-topk-input" class="number-input" min="1" max="20" step="1" value="8">
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <h3>Student Super Course Top-K</h3>
+                                <p>Number of chunks student Super Course chat retrieves before answering. Default is 8.</p>
+                            </div>
+                            <div class="setting-controls">
+                                <input type="number" id="super-student-topk-input" class="number-input" min="1" max="20" step="1" value="8">
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <h3>Include Inactive Courses</h3>
+                                <p>When enabled, inactive opted-in courses can contribute material to Super Course chat. Off by default.</p>
+                            </div>
+                            <div class="setting-controls">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="include-inactive-super-course-toggle">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <h3>Show Students the Super Course</h3>
+                                <p>When enabled, students can access the student Super Course chat page once it is built.</p>
+                            </div>
+                            <div class="setting-controls">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="show-student-super-course-toggle">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-item vertical">
+                            <div class="setting-info">
+                                <h3>Instructor Super Course Prompt</h3>
+                                <p>System prompt used for instructor Super Course chat.</p>
+                            </div>
+                            <div class="setting-controls full-width-control">
+                                <textarea id="super-instructor-prompt" rows="10" placeholder="Enter instructor Super Course prompt..."></textarea>
+                            </div>
+                        </div>
+                        <div class="setting-item vertical">
+                            <div class="setting-info">
+                                <h3>Student Super Course Prompt</h3>
+                                <p>System prompt used for student Super Course chat.</p>
+                            </div>
+                            <div class="setting-controls full-width-control">
+                                <textarea id="super-student-prompt" rows="10" placeholder="Enter student Super Course prompt..."></textarea>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="settings-actions" style="margin-top: 1rem;">
+                        <button id="reset-super-course-settings" class="secondary-button">Reset Super Course Settings to Default</button>
                     </div>
                 </section>
 

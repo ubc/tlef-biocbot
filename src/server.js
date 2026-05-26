@@ -12,6 +12,8 @@ const flagsRoutes = require('./routes/flags');
 const lecturesRoutes = require('./routes/lectures');
 
 const chatRoutes = require('./routes/chat');
+const instructorChatRoutes = require('./routes/instructorChat');
+const studentSuperCourseRoutes = require('./routes/studentSuperCourse');
 const authRoutes = require('./routes/auth');
 const shibbolethRoutes = require('./routes/shibboleth');
 
@@ -283,6 +285,10 @@ function setupProtectedRoutes() {
         res.sendFile(path.join(__dirname, '../public/instructor/student-hub.html'));
     });
 
+    app.get('/instructor/chat.html', authMiddleware.requireInstructor, (req, res) => {
+        res.sendFile(path.join(__dirname, '../public/instructor/chat.html'));
+    });
+
     // Protected static files
     app.use('/student', authMiddleware.requireStudent, express.static(path.join(__dirname, '../public/student')));
     app.use('/instructor', authMiddleware.requireInstructorOrTA, express.static(path.join(__dirname, '../public/instructor')));
@@ -310,6 +316,11 @@ function setupProtectedRoutes() {
     // Student quiz practice page
     app.get('/student/quiz', authMiddleware.requireStudent, (req, res) => {
         res.sendFile(path.join(__dirname, '../public/student/quiz.html'));
+    });
+
+    // Student Super Course chat page
+    app.get('/student/super-course', authMiddleware.requireStudent, (req, res) => {
+        res.sendFile(path.join(__dirname, '../public/student/super-course.html'));
     });
 
     // TA routes (protected)
@@ -384,6 +395,10 @@ function setupProtectedRoutes() {
 
     app.get('/instructor/home', authMiddleware.requireInstructorOrTA, redirectTATo('/ta'), (req, res) => {
         res.sendFile(path.join(__dirname, '../public/instructor/home.html'));
+    });
+
+    app.get('/instructor/chat', authMiddleware.requireInstructor, (req, res) => {
+        res.sendFile(path.join(__dirname, '../public/instructor/chat.html'));
     });
 
     app.get('/instructor/documents', authMiddleware.requireInstructorOrTA, authMiddleware.requireTAPermission('courses'), (req, res) => {
@@ -512,6 +527,8 @@ function setupAPIRoutes() {
     app.use('/api/onboarding', authMiddleware.requireAuth, onboardingRoutes);
     app.use('/api/qdrant', authMiddleware.requireAuth, qdrantRoutes);
     app.use('/api/chat', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, chatRoutes);
+    app.use('/api/instructor/chat', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, instructorChatRoutes);
+    app.use('/api/student/super-course', authMiddleware.requireAuth, authMiddleware.populateUser, studentSuperCourseRoutes);
     app.use('/api/students', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, studentsRoutes);
     app.use('/api/user-agreement', authMiddleware.requireAuth, userAgreementRoutes);
     app.use('/api/settings', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, settingsRoutes);

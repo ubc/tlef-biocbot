@@ -147,6 +147,9 @@ test('searchDocuments covers empty hits, filter combinations, embedding wrappers
         { key: 'lectureName', match: { any: ['Unit 1', 'Unit 3'] } },
     ]);
     expect(result.calls.courseAndLectureNames.filter.must).toHaveLength(2);
+    expect(result.calls.courseIdPool.filter.must).toEqual([
+        { key: 'courseId', match: { any: ['BIOC-202', 'BIOC-302'] } },
+    ]);
     expect(result.calls.emptyLectureNames.filter).toBeUndefined();
     expect(result.calls.createBeforeSearch).toBe(1);
     expect(result.calls.searchMissingCollectionError).toContain('collection not found during search');

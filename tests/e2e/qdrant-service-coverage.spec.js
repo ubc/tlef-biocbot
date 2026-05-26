@@ -44,6 +44,7 @@ const {
 
 const SVC_COURSE_A = 'BIOC-E2E-QDRSVC-A';
 const SVC_COURSE_TRANSFER_SRC = 'BIOC-E2E-QDRSVC-XFER-SRC';
+const ALLOW_DESTRUCTIVE_QDRANT_E2E = process.env.ALLOW_DESTRUCTIVE_QDRANT_E2E === '1';
 
 let instructorId;
 
@@ -337,6 +338,7 @@ test.describe('qdrantService — collection lifecycle (destructive, ordered)', (
     }
 
     test('DELETE /api/qdrant/collection succeeds, then second delete hits the "does not exist" branch', async ({ request: api }) => {
+        test.skip(!ALLOW_DESTRUCTIVE_QDRANT_E2E, 'Set ALLOW_DESTRUCTIVE_QDRANT_E2E=1 to delete the shared Qdrant collection.');
         test.skip(!(await probeOnce(api)), 'Qdrant not reachable.');
         test.setTimeout(60_000);
 
@@ -358,6 +360,7 @@ test.describe('qdrantService — collection lifecycle (destructive, ordered)', (
     });
 
     test('GET /api/qdrant/collection-stats hits the catch branch when the collection has been removed', async ({ request: api }) => {
+        test.skip(!ALLOW_DESTRUCTIVE_QDRANT_E2E, 'Set ALLOW_DESTRUCTIVE_QDRANT_E2E=1 to delete the shared Qdrant collection.');
         test.skip(!(await probeOnce(api)), 'Qdrant not reachable.');
         test.setTimeout(60_000);
         // The previous test left the collection deleted. Calling
@@ -371,6 +374,7 @@ test.describe('qdrantService — collection lifecycle (destructive, ordered)', (
     });
 
     test('process-document after collection removal exercises ensureCollectionExists "create new" branch', async ({ request: api }) => {
+        test.skip(!ALLOW_DESTRUCTIVE_QDRANT_E2E, 'Set ALLOW_DESTRUCTIVE_QDRANT_E2E=1 to delete the shared Qdrant collection.');
         test.skip(!(await probeOnce(api)), 'Qdrant not reachable.');
         test.setTimeout(120_000);
         await seedCourse({ courseId: SVC_COURSE_A, instructorId });
@@ -410,6 +414,7 @@ test.describe('qdrantService — collection lifecycle (destructive, ordered)', (
     });
 
     test('safety: ensure the shared collection is back in place for downstream specs', async ({ request: api }) => {
+        test.skip(!ALLOW_DESTRUCTIVE_QDRANT_E2E, 'Set ALLOW_DESTRUCTIVE_QDRANT_E2E=1 to delete the shared Qdrant collection.');
         test.skip(!(await probeOnce(api)), 'Qdrant not reachable.');
         await seedCourse({ courseId: SVC_COURSE_A, instructorId });
         await reseedCollection(api, SVC_COURSE_A);

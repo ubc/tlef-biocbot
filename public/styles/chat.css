@@ -10,6 +10,111 @@
     overflow: hidden;
 }
 
+.instructor-super-chat-header {
+    gap: 16px;
+}
+
+.super-course-new-chat-btn {
+    padding: 8px 14px;
+    border: 1px solid #cdd7e6;
+    border-radius: 6px;
+    background: #fff;
+    color: #2f3a4a;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.super-course-new-chat-btn:hover {
+    background: #f5f7fb;
+}
+
+.instructor-super-chat .pending-message .message-content {
+    color: var(--text-secondary, #666);
+}
+
+.instructor-super-chat .error-message .message-content {
+    border: 1px solid #c62828;
+    background: #fff5f5;
+}
+
+.super-course-pool-panel {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+    background: #fbfcff;
+}
+
+.super-course-pool-heading {
+    flex: 0 0 auto;
+    color: var(--text-secondary, #666);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 28px;
+}
+
+.super-course-pool-list {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+}
+
+.super-course-pool-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    max-width: 260px;
+    padding: 4px 10px;
+    border: 1px solid #d9e2f0;
+    border-radius: 6px;
+    background: #fff;
+    color: #2f3a4a;
+    font-size: 13px;
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.super-course-pool-chip.muted {
+    color: var(--text-secondary, #666);
+}
+
+.super-course-pool-note {
+    color: var(--text-secondary, #555);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.super-course-source {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.super-course-citation-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.super-course-citation {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    padding: 3px 8px;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--text-secondary, #555);
+    font-size: 12px;
+    line-height: 1.3;
+}
+
 .messages {
     flex: 1;
     overflow-y: auto;
@@ -347,22 +452,27 @@
     border-top: 1px solid var(--border-color);
 }
 
-#chat-form {
+#chat-form,
+#instructor-chat-form {
     display: flex;
     gap: 10px;
+    align-items: stretch;
 }
 
-#chat-input {
+#chat-input,
+#instructor-chat-input {
     flex: 1;
     padding: 12px;
     border: 1px solid var(--border-color);
     border-radius: 20px;
     font-size: 14px;
     outline: none;
+    min-width: 0;
 }
 
 #chat-input.disabled-input,
-#chat-input:disabled {
+#chat-input:disabled,
+#instructor-chat-input:disabled {
     background-color: #f5f5f5;
     color: #999;
     cursor: not-allowed;
@@ -370,7 +480,8 @@
 }
 
 #chat-input.disabled-input:focus,
-#chat-input:disabled:focus {
+#chat-input:disabled:focus,
+#instructor-chat-input:disabled:focus {
     border-color: var(--border-color);
     box-shadow: none;
 }
@@ -380,9 +491,12 @@
     color: white;
     border: none;
     border-radius: 20px;
+    min-width: 96px;
     padding: 0 20px;
     cursor: pointer;
     transition: background-color 0.3s;
+    font-size: 14px;
+    font-weight: 600;
 }
 
 #send-button:hover {
@@ -692,7 +806,22 @@
         padding: 10px;
     }
 
-    #chat-input {
+    .super-course-pool-panel {
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px;
+    }
+
+    .super-course-pool-heading {
+        line-height: 1.3;
+    }
+
+    .super-course-pool-chip {
+        max-width: 100%;
+    }
+
+    #chat-input,
+    #instructor-chat-input {
         padding: 8px 12px;
     }
 

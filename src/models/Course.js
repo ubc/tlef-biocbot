@@ -264,6 +264,107 @@ function compareCoursesWithInactiveLast(a = {}, b = {}) {
     );
 }
 
+const DEFAULT_STUDENT_RAG_TOP_K = 3;
+const MIN_RAG_TOP_K = 1;
+const MAX_RAG_TOP_K = 20;
+
+function normalizeRagTopK(value, fallback = DEFAULT_STUDENT_RAG_TOP_K) {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < MIN_RAG_TOP_K || parsed > MAX_RAG_TOP_K) {
+        return fallback;
+    }
+
+    return parsed;
+}
+
+function resolveRagSettings(courseDoc = {}) {
+    const studentSettings = courseDoc && courseDoc.ragSettings && courseDoc.ragSettings.student
+        ? courseDoc.ragSettings.student
+        : {};
+
+    return {
+        student: {
+            topK: normalizeRagTopK(studentSettings.topK)
+        }
+    };
+}
+
+function getAllowInSuperCourse(courseDoc = {}) {
+    return courseDoc.allowInSuperCourse === true;
+}
+
+async function getRagSettings(db, courseId) {
+    const collection = getCoursesCollection(db);
+    const course = await collection.findOne(
+        { courseId, status: { $ne: 'deleted' } },
+        { projection: { ragSettings: 1, allowInSuperCourse: 1, courseId: 1 } }
+    );
+
+    if (!course) {
+        return { success: false, error: 'Course not found' };
+    }
+
+    return {
+        success: true,
+        ragSettings: resolveRagSettings(course),
+        allowInSuperCourse: getAllowInSuperCourse(course)
+    };
+}
+
+async function updateRagSettings(db, courseId, settings = {}, updatedById = null) {
+    const topK = normalizeRagTopK(settings.student && settings.student.topK, null);
+    if (topK === null) {
+        return {
+            success: false,
+            error: `Student Chat Top-K must be an integer from ${MIN_RAG_TOP_K} to ${MAX_RAG_TOP_K}`
+        };
+    }
+
+    const collection = getCoursesCollection(db);
+    const update = {
+        'ragSettings.student.topK': topK,
+        updatedAt: new Date()
+    };
+
+    if (updatedById) {
+        update.lastUpdatedById = updatedById;
+    }
+
+    const result = await collection.updateOne(
+        { courseId, status: { $ne: 'deleted' } },
+        { $set: update }
+    );
+
+    return {
+        success: result.matchedCount > 0,
+        ragSettings: { student: { topK } },
+        error: result.matchedCount > 0 ? null : 'Course not found'
+    };
+}
+
+async function updateAllowInSuperCourse(db, courseId, allowInSuperCourse, updatedById = null) {
+    const collection = getCoursesCollection(db);
+    const update = {
+        allowInSuperCourse: allowInSuperCourse === true,
+        updatedAt: new Date()
+    };
+
+    if (updatedById) {
+        update.lastUpdatedById = updatedById;
+    }
+
+    const result = await collection.updateOne(
+        { courseId, status: { $ne: 'deleted' } },
+        { $set: update }
+    );
+
+    return {
+        success: result.matchedCount > 0,
+        allowInSuperCourse: allowInSuperCourse === true,
+        error: result.matchedCount > 0 ? null : 'Course not found'
+    };
+}
+
 /**
  * Ensure all courses have both student and instructor course codes (Migration)
  * @param {Object} db - MongoDB database instance
@@ -1978,5 +2079,14 @@ module.exports = {
     getQuizSettings,
     updateQuizSettings,
     getAnonymizeStudents,
-    updateAnonymizeStudents
+    updateAnonymizeStudents,
+    DEFAULT_STUDENT_RAG_TOP_K,
+    MIN_RAG_TOP_K,
+    MAX_RAG_TOP_K,
+    normalizeRagTopK,
+    resolveRagSettings,
+    getRagSettings,
+    updateRagSettings,
+    getAllowInSuperCourse,
+    updateAllowInSuperCourse
 };

@@ -50,10 +50,7 @@ class MemoryCollection {
     }
 
     async findOne(query) {
-        if (query && query.$or) {
-            return this.docs.find(doc => query.$or.some(part => Object.entries(part).every(([k, v]) => doc[k] === v))) || null;
-        }
-        return this.docs.find(doc => Object.entries(query || {}).every(([k, v]) => doc[k] === v)) || null;
+        return this.docs.find(doc => matchesQuery(doc, query || {})) || null;
     }
 
     async insertOne(doc) {
@@ -68,20 +65,31 @@ class MemoryCollection {
         return { modifiedCount: 1, upsertedCount: 0 };
     }
 
+    async replaceOne(query, replacement, options = {}) {
+        const index = this.docs.findIndex(doc => matchesQuery(doc, query || {}));
+        if (index >= 0) {
+            this.docs[index] = { ...replacement };
+            return { matchedCount: 1, modifiedCount: 1, upsertedCount: 0 };
+        }
+        if (options.upsert) {
+            this.docs.push({ ...replacement });
+            return { matchedCount: 0, modifiedCount: 0, upsertedCount: 1 };
+        }
+        return { matchedCount: 0, modifiedCount: 0, upsertedCount: 0 };
+    }
+
     async countDocuments() {
         return this.docs.length;
     }
 
     find(query) {
-        const rows = this.docs.filter(doc => Object.entries(query || {}).every(([k, v]) => doc[k] === v));
-        return {
-            project: () => ({
-                sort: () => ({
-                    toArray: async () => rows,
-                }),
-            }),
+        const rows = this.docs.filter(doc => matchesQuery(doc, query || {}));
+        const cursor = {
+            project: () => cursor,
+            sort: () => cursor,
             toArray: async () => rows,
         };
+        return cursor;
     }
 
     aggregate(pipeline) {
@@ -96,6 +104,30 @@ class MemoryCollection {
             }],
         };
     }
+}
+
+function matchesQuery(doc, query = {}) {
+    return Object.entries(query).every(([key, value]) => {
+        if (key === '$or') {
+            return Array.isArray(value) && value.some(part => matchesQuery(doc, part));
+        }
+
+        const docValue = doc[key];
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+            if (Object.prototype.hasOwnProperty.call(value, '$ne') && docValue === value.$ne) {
+                return false;
+            }
+            if (Object.prototype.hasOwnProperty.call(value, '$exists')) {
+                const exists = Object.prototype.hasOwnProperty.call(doc, key);
+                if (exists !== value.$exists) return false;
+            }
+            return Object.entries(value)
+                .filter(([operator]) => operator !== '$ne' && operator !== '$exists')
+                .every(([, expected]) => docValue === expected);
+        }
+
+        return docValue === value;
+    });
 }
 
 function memoryDb(collections = {}) {
@@ -135,10 +167,13 @@ const state = {
     passportForLocals: null,
     llm: {
         sendMessage: async () => ({ content: '{"matches":[{"ref":"q1","learningObjective":"Objective A"}]}' }),
+        analyzeMentalHealth: async () => ({ concernLevel: 'no concern', reason: '' }),
         evaluateStudentAnswer: async () => ({ correct: true, feedback: 'stub' }),
         generateAssessmentQuestion: async () => ({ question: 'Generated?', answer: 'true', options: {} }),
         regenerateAssessmentQuestion: async () => ({ question: 'Regenerated?', answer: 'true', options: {} }),
     },
+    lastQdrantSearch: null,
+    lastLlmRequest: null,
 };
 
 function fakeSession(session) {
@@ -201,9 +236,23 @@ function configureQdrant(mode) {
         if (mode === 'qdrant-process-fails') return { success: false, error: 'store failed' };
         return { success: true, message: 'stored', chunksProcessed: 1, chunksStored: 1 };
     };
-    QdrantService.prototype.searchDocuments = async () => {
+    QdrantService.prototype.searchDocuments = async (query, filters, limit) => {
         if (mode === 'qdrant-search-throws') throw new Error('harness search failure');
-        return [{ documentId: 'doc-1' }];
+        state.lastQdrantSearch = { query, filters, limit };
+        const courseId = Array.isArray(filters && filters.courseId) ? filters.courseId[0] : filters && filters.courseId;
+        return [{
+            id: 'chunk-1',
+            score: 0.91,
+            courseId,
+            lectureName: 'Unit 1',
+            documentId: 'doc-1',
+            fileName: 'doc.txt',
+            documentType: 'lecture-notes',
+            type: 'lecture_notes',
+            chunkText: 'Harness chunk text',
+            chunkIndex: 0,
+            timestamp: new Date().toISOString(),
+        }];
     };
     QdrantService.prototype.deleteDocumentChunks = async () => {
         if (mode === 'qdrant-delete-throws') throw new Error('harness delete failure');
@@ -232,10 +281,13 @@ function applyMode(mode) {
     state.passportForLocals = null;
     state.llm = {
         sendMessage: async () => ({ content: '{"matches":[{"ref":"q1","learningObjective":"Objective A"}]}' }),
+        analyzeMentalHealth: async () => ({ concernLevel: 'no concern', reason: '' }),
         evaluateStudentAnswer: async () => ({ correct: true, feedback: 'stub' }),
         generateAssessmentQuestion: async () => ({ question: 'Generated?', answer: 'true', options: {} }),
         regenerateAssessmentQuestion: async () => ({ question: 'Regenerated?', answer: 'true', options: {} }),
     };
+    state.lastQdrantSearch = null;
+    state.lastLlmRequest = null;
 
     configurePassport(state.mode);
     configureQdrant(state.mode);
@@ -302,7 +354,7 @@ function applyMode(mode) {
         CourseModel.userHasCourseAccess = async () => true;
         state.llm = { evaluateStudentAnswer: async () => { throw new Error('harness eval failure'); } };
     }
-    if (state.mode === 'qdrant-admin' || state.mode === 'qdrant-delete-all-qdrant-fails') {
+    if (state.mode === 'qdrant-admin' || state.mode === 'qdrant-delete-all-qdrant-fails' || state.mode === 'qdrant-collection-fails') {
         state.user = { ...baseUser, role: 'instructor', permissions: { systemAdmin: true } };
     }
     if (state.mode === 'qdrant-delete-all-no-db') {
@@ -326,11 +378,58 @@ function applyMode(mode) {
         || state.mode === 'qdrant-delete-throws'
         || state.mode === 'qdrant-delete-fails'
         || state.mode === 'qdrant-collection-throws'
-        || state.mode === 'qdrant-collection-fails'
         || state.mode === 'qdrant-stats-throws'
     ) {
         state.user = { ...baseUser, userId: 'inst', role: 'instructor' };
         CourseModel.userHasCourseAccess = async () => true;
+    }
+    if (state.mode === 'chat-rag-topk') {
+        state.user = { ...baseUser, userId: 'student-harness', role: 'student' };
+        state.db = memoryDb({
+            users: new MemoryCollection([{ ...baseUser }]),
+            courses: new MemoryCollection([{
+                courseId: 'BIOC-H',
+                courseName: 'Harness Course',
+                instructorId: 'inst',
+                instructors: ['inst'],
+                approvedStruggleTopics: [],
+                ragSettings: { student: { topK: 5 } },
+                lectures: [{ name: 'Unit 1', isPublished: true }],
+            }]),
+            mentalHealthFlags: new MemoryCollection([]),
+        });
+        state.llm = {
+            sendMessage: async () => ({ content: 'Harness chat response', model: 'harness-llm', usage: { tokens: 1 } }),
+            analyzeMentalHealth: async () => ({ concernLevel: 'no concern', reason: '' }),
+        };
+    }
+    if (state.mode === 'instructor-super-chat' || state.mode === 'instructor-super-chat-inactive') {
+        state.user = { ...baseUser, userId: 'inst', role: 'instructor', permissions: { systemAdmin: true } };
+        state.db = memoryDb({
+            users: new MemoryCollection([{ ...baseUser, userId: 'inst', role: 'instructor' }]),
+            settings: new MemoryCollection([{
+                _id: 'superCourseChat',
+                instructorTopK: 6,
+                studentTopK: 8,
+                includeInactiveCourses: state.mode === 'instructor-super-chat-inactive',
+                showStudentSuperCourse: false,
+                instructorPrompt: 'Harness instructor super prompt',
+                studentPrompt: 'Harness student super prompt',
+            }]),
+            courses: new MemoryCollection([
+                { courseId: 'BIOC-A', courseName: 'Biochemistry A', status: 'active', allowInSuperCourse: true },
+                { courseId: 'BIOC-B', courseName: 'Biochemistry B', status: 'inactive', allowInSuperCourse: true },
+                { courseId: 'BIOC-C', courseName: 'Biochemistry C', status: 'active', allowInSuperCourse: false },
+                { courseId: 'BIOC-D', courseName: 'Biochemistry D', status: 'deleted', allowInSuperCourse: true },
+            ]),
+        });
+        state.llm = {
+            sendMessage: async (prompt, options) => {
+                state.lastLlmRequest = { prompt, options };
+                return { content: 'Harness instructor super answer', model: 'harness-llm', usage: { tokens: 1 } };
+            },
+            analyzeMentalHealth: async () => ({ concernLevel: 'no concern', reason: '' }),
+        };
     }
 }
 
@@ -367,6 +466,8 @@ passport.authenticate = function (strategy, cbOrOptions) {
 };
 
 app.get('/__ping', (_req, res) => res.json({ ok: true }));
+app.get('/__last-qdrant-search', (_req, res) => res.json(state.lastQdrantSearch || {}));
+app.get('/__last-llm-request', (_req, res) => res.json(state.lastLlmRequest || {}));
 app.post('/__configure', (req, res) => {
     applyMode(req.body.mode || '');
     res.json({ ok: true });
@@ -506,6 +607,8 @@ app.use('/api/auth', applyRequestState, moduleRequire('../../../src/routes/auth'
 app.use('/', applyRequestState, moduleRequire('../../../src/routes/shibboleth'));
 app.use('/api/questions', applyRequestState, moduleRequire('../../../src/routes/questions'));
 app.use('/api/qdrant', applyRequestState, moduleRequire('../../../src/routes/qdrant'));
+app.use('/api/chat', applyRequestState, moduleRequire('../../../src/routes/chat'));
+app.use('/api/instructor/chat', applyRequestState, moduleRequire('../../../src/routes/instructorChat'));
 
 const port = Number(process.env.SRC_HARNESS_PORT || 0);
 const server = app.listen(port, '127.0.0.1', () => {
