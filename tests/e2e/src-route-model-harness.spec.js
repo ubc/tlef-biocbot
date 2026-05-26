@@ -12,6 +12,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const net = require('net');
 const { once } = require('events');
+const CourseModel = require('../../src/models/Course');
 
 /** @type {import('child_process').ChildProcess|null} */
 let harnessProc = null;
@@ -132,6 +133,38 @@ test('UserAgreement defensive defaults and exported stats helpers are covered', 
         agreed: false,
         emptyStats: { totalUsers: 0, agreedUsers: 0, pendingUsers: 0, agreementRate: 0 },
         stats: { totalUsers: 2, agreedUsers: 1, pendingUsers: 1, agreementRate: 50 },
+    });
+});
+
+test('Course RAG settings helpers default and validate Top-K without database migration', async () => {
+    expect(CourseModel.resolveRagSettings({})).toEqual({ student: { topK: 3 } });
+    expect(CourseModel.resolveRagSettings({ ragSettings: { student: { topK: 12 } } })).toEqual({ student: { topK: 12 } });
+    expect(CourseModel.resolveRagSettings({ ragSettings: { student: { topK: 0 } } })).toEqual({ student: { topK: 3 } });
+    expect(CourseModel.resolveRagSettings({ ragSettings: { student: { topK: 21 } } })).toEqual({ student: { topK: 3 } });
+    expect(CourseModel.getAllowInSuperCourse({})).toBe(true);
+    expect(CourseModel.getAllowInSuperCourse({ allowInSuperCourse: false })).toBe(false);
+});
+
+test('chat route sends the course RAG Top-K to Qdrant search', async () => {
+    await configure('chat-rag-topk');
+
+    const res = await postJson('/api/chat', {
+        message: 'What is ATP?',
+        mode: 'default',
+        unitName: 'Unit 1',
+        courseId: 'BIOC-H',
+    });
+    expect(res.ok()).toBeTruthy();
+    expect(await res.json()).toMatchObject({ success: true, message: 'Harness chat response' });
+
+    const searchRes = await /** @type {any} */ (api).get('/__last-qdrant-search', { failOnStatusCode: false });
+    expect(await searchRes.json()).toMatchObject({
+        query: 'What is ATP?',
+        filters: {
+            courseId: 'BIOC-H',
+            lectureNames: ['Unit 1'],
+        },
+        limit: 5,
     });
 });
 

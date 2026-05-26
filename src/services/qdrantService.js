@@ -542,7 +542,16 @@ class QdrantService {
             };
 
             // Add filters if provided
-            if (filters.courseId) {
+            if (Array.isArray(filters.courseId) && filters.courseId.length > 0) {
+                searchParams.filter = {
+                    must: [
+                        {
+                            key: 'courseId',
+                            match: { any: filters.courseId }
+                        }
+                    ]
+                };
+            } else if (filters.courseId) {
                 searchParams.filter = {
                     must: [
                         {

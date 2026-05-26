@@ -431,6 +431,12 @@ async function searchBranches() {
     }, 3);
     calls.courseAndLectureNames = state.calls.search[0].params;
 
+    service = readyService({ embeddingReturn: [0.1, 0.2, 0.3] });
+    await service.searchDocuments('course pool', {
+        courseId: ['BIOC-202', 'BIOC-302'],
+    }, 8);
+    calls.courseIdPool = state.calls.search[0].params;
+
     service = readyService({ embeddingReturn: [0.1, 0.2], vectorSize: 3 });
     await service.searchDocuments('size mismatch', { lectureNames: [] }, 1);
     calls.emptyLectureNames = state.calls.search[0].params;

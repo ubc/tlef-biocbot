@@ -6,6 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const prompts = require('../services/prompts');
+const CourseModel = require('../models/Course');
 const { hasSystemAdminAccess, normalizeEmail } = require('../services/authorization');
 const {
     listSystemAdmins,
@@ -25,6 +26,49 @@ function requireSystemAdmin(req, res) {
     }
 
     return true;
+}
+
+const SUPER_COURSE_SETTINGS_ID = 'superCourseChat';
+
+function normalizeTopKForSettings(value) {
+    return CourseModel.normalizeRagTopK(value, null);
+}
+
+function buildAiSettingsResponse(course) {
+    return {
+        allowInSuperCourse: CourseModel.getAllowInSuperCourse(course),
+        ragSettings: CourseModel.resolveRagSettings(course),
+        defaults: {
+            allowInSuperCourse: true,
+            studentTopK: CourseModel.DEFAULT_STUDENT_RAG_TOP_K,
+            minTopK: CourseModel.MIN_RAG_TOP_K,
+            maxTopK: CourseModel.MAX_RAG_TOP_K
+        }
+    };
+}
+
+function resolveSuperCourseChatSettings(settingsDoc = {}) {
+    const defaults = prompts.DEFAULT_SUPER_COURSE_CHAT_SETTINGS;
+    return {
+        studentTopK: CourseModel.normalizeRagTopK(settingsDoc.studentTopK, defaults.studentTopK),
+        instructorTopK: CourseModel.normalizeRagTopK(settingsDoc.instructorTopK, defaults.instructorTopK),
+        includeInactiveCourses: settingsDoc.includeInactiveCourses === true,
+        showStudentSuperCourse: settingsDoc.showStudentSuperCourse === true,
+        instructorPrompt: typeof settingsDoc.instructorPrompt === 'string' && settingsDoc.instructorPrompt.trim()
+            ? settingsDoc.instructorPrompt
+            : defaults.instructorPrompt,
+        studentPrompt: typeof settingsDoc.studentPrompt === 'string' && settingsDoc.studentPrompt.trim()
+            ? settingsDoc.studentPrompt
+            : defaults.studentPrompt
+    };
+}
+
+function buildSuperCourseChatDefaults() {
+    return {
+        ...prompts.DEFAULT_SUPER_COURSE_CHAT_SETTINGS,
+        minTopK: CourseModel.MIN_RAG_TOP_K,
+        maxTopK: CourseModel.MAX_RAG_TOP_K
+    };
 }
 
 async function requireInstructorForCourseSettings(db, req, res, courseId) {
@@ -181,6 +225,266 @@ router.post('/system-admins/revoke', async (req, res) => {
             success: false,
             error: 'Failed to revoke system admin access'
         });
+    }
+});
+
+router.get('/ai-settings', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const courseId = req.query.courseId;
+        if (!courseId) {
+            return res.status(400).json({ success: false, message: 'courseId is required' });
+        }
+
+        const course = await db.collection('courses').findOne(
+            { courseId, status: { $ne: 'deleted' } },
+            { projection: { courseId: 1, ragSettings: 1, allowInSuperCourse: 1 } }
+        );
+
+        if (!course) {
+            return res.status(404).json({ success: false, message: 'Course not found' });
+        }
+
+        res.json({
+            success: true,
+            courseId,
+            settings: buildAiSettingsResponse(course)
+        });
+    } catch (error) {
+        console.error('Error fetching AI settings:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch AI settings' });
+    }
+});
+
+router.put('/ai-settings', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const { courseId, allowInSuperCourse, studentTopK } = req.body || {};
+        if (!courseId) {
+            return res.status(400).json({ success: false, message: 'courseId is required' });
+        }
+
+        const topK = normalizeTopKForSettings(studentTopK);
+        if (topK === null) {
+            return res.status(400).json({
+                success: false,
+                message: `Student Chat Top-K must be an integer from ${CourseModel.MIN_RAG_TOP_K} to ${CourseModel.MAX_RAG_TOP_K}`
+            });
+        }
+
+        const result = await db.collection('courses').updateOne(
+            { courseId, status: { $ne: 'deleted' } },
+            {
+                $set: {
+                    allowInSuperCourse: allowInSuperCourse !== false,
+                    'ragSettings.student.topK': topK,
+                    updatedAt: new Date(),
+                    lastUpdatedById: req.user.userId
+                }
+            }
+        );
+
+        if (result.matchedCount === 0) {
+            return res.status(404).json({ success: false, message: 'Course not found' });
+        }
+
+        res.json({
+            success: true,
+            courseId,
+            message: 'AI settings saved',
+            settings: {
+                allowInSuperCourse: allowInSuperCourse !== false,
+                ragSettings: { student: { topK } },
+                defaults: buildAiSettingsResponse({}).defaults
+            }
+        });
+    } catch (error) {
+        console.error('Error saving AI settings:', error);
+        res.status(500).json({ success: false, message: 'Failed to save AI settings' });
+    }
+});
+
+router.post('/ai-settings/reset', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const { courseId } = req.body || {};
+        if (!courseId) {
+            return res.status(400).json({ success: false, message: 'courseId is required' });
+        }
+
+        const result = await db.collection('courses').updateOne(
+            { courseId, status: { $ne: 'deleted' } },
+            {
+                $set: {
+                    allowInSuperCourse: true,
+                    'ragSettings.student.topK': CourseModel.DEFAULT_STUDENT_RAG_TOP_K,
+                    updatedAt: new Date(),
+                    lastUpdatedById: req.user.userId
+                }
+            }
+        );
+
+        if (result.matchedCount === 0) {
+            return res.status(404).json({ success: false, message: 'Course not found' });
+        }
+
+        res.json({
+            success: true,
+            courseId,
+            message: 'AI settings reset to defaults',
+            settings: {
+                allowInSuperCourse: true,
+                ragSettings: { student: { topK: CourseModel.DEFAULT_STUDENT_RAG_TOP_K } },
+                defaults: buildAiSettingsResponse({}).defaults
+            }
+        });
+    } catch (error) {
+        console.error('Error resetting AI settings:', error);
+        res.status(500).json({ success: false, message: 'Failed to reset AI settings' });
+    }
+});
+
+router.get('/super-course-chat', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const settingsDoc = await db.collection('settings').findOne({ _id: SUPER_COURSE_SETTINGS_ID });
+        res.json({
+            success: true,
+            settings: resolveSuperCourseChatSettings(settingsDoc || {}),
+            defaults: buildSuperCourseChatDefaults()
+        });
+    } catch (error) {
+        console.error('Error fetching super course chat settings:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch super course chat settings' });
+    }
+});
+
+router.put('/super-course-chat', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const body = req.body || {};
+        const studentTopK = normalizeTopKForSettings(body.studentTopK);
+        const instructorTopK = normalizeTopKForSettings(body.instructorTopK);
+
+        if (studentTopK === null || instructorTopK === null) {
+            return res.status(400).json({
+                success: false,
+                message: `Top-K values must be integers from ${CourseModel.MIN_RAG_TOP_K} to ${CourseModel.MAX_RAG_TOP_K}`
+            });
+        }
+
+        if (typeof body.instructorPrompt !== 'string' || !body.instructorPrompt.trim()
+            || typeof body.studentPrompt !== 'string' || !body.studentPrompt.trim()) {
+            return res.status(400).json({ success: false, message: 'Instructor and student prompts are required' });
+        }
+
+        const settings = {
+            studentTopK,
+            instructorTopK,
+            includeInactiveCourses: body.includeInactiveCourses === true,
+            showStudentSuperCourse: body.showStudentSuperCourse === true,
+            instructorPrompt: body.instructorPrompt,
+            studentPrompt: body.studentPrompt
+        };
+
+        await db.collection('settings').updateOne(
+            { _id: SUPER_COURSE_SETTINGS_ID },
+            {
+                $set: {
+                    ...settings,
+                    updatedAt: new Date(),
+                    updatedBy: normalizeEmail(req.user.email)
+                },
+                $setOnInsert: { createdAt: new Date() }
+            },
+            { upsert: true }
+        );
+
+        res.json({
+            success: true,
+            message: 'Super Course chat settings saved',
+            settings
+        });
+    } catch (error) {
+        console.error('Error saving super course chat settings:', error);
+        res.status(500).json({ success: false, message: 'Failed to save super course chat settings' });
+    }
+});
+
+router.post('/super-course-chat/reset', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const settings = { ...prompts.DEFAULT_SUPER_COURSE_CHAT_SETTINGS };
+        await db.collection('settings').updateOne(
+            { _id: SUPER_COURSE_SETTINGS_ID },
+            {
+                $set: {
+                    ...settings,
+                    updatedAt: new Date(),
+                    updatedBy: normalizeEmail(req.user.email)
+                },
+                $setOnInsert: { createdAt: new Date() }
+            },
+            { upsert: true }
+        );
+
+        res.json({
+            success: true,
+            message: 'Super Course chat settings reset to defaults',
+            settings,
+            defaults: buildSuperCourseChatDefaults()
+        });
+    } catch (error) {
+        console.error('Error resetting super course chat settings:', error);
+        res.status(500).json({ success: false, message: 'Failed to reset super course chat settings' });
     }
 });
 

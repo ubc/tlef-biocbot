@@ -55,6 +55,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (canManageDB) {
                 await loadAdminSettings();
                 await loadLLMSettings();
+                await loadAiSettings();
+                await loadSuperCourseChatSettings();
                 await loadQuestionPrompts();
                 await loadSystemAdmins();
             }
@@ -153,6 +155,52 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (error) {
             console.error('Error loading system admins:', error);
             systemAdminList.innerHTML = '<div class="system-admin-empty">Failed to load system admins.</div>';
+        }
+    }
+
+    async function loadAiSettings() {
+        try {
+            const courseId = await getCurrentCourseId();
+            if (!courseId) return;
+
+            const response = await fetch(`/api/settings/ai-settings?courseId=${encodeURIComponent(courseId)}`, {
+                credentials: 'include'
+            });
+            const result = await response.json();
+            if (!result.success || !result.settings) return;
+
+            const allowToggle = document.getElementById('allow-super-course-toggle');
+            const topKInput = document.getElementById('student-chat-topk-input');
+            if (allowToggle) allowToggle.checked = result.settings.allowInSuperCourse !== false;
+            if (topKInput) topKInput.value = result.settings.ragSettings?.student?.topK || 3;
+        } catch (error) {
+            console.error('Error loading AI settings:', error);
+        }
+    }
+
+    async function loadSuperCourseChatSettings() {
+        try {
+            const response = await fetch('/api/settings/super-course-chat', {
+                credentials: 'include'
+            });
+            const result = await response.json();
+            if (!result.success || !result.settings) return;
+
+            const instructorTopKInput = document.getElementById('super-instructor-topk-input');
+            const studentTopKInput = document.getElementById('super-student-topk-input');
+            const includeInactiveToggle = document.getElementById('include-inactive-super-course-toggle');
+            const showStudentToggle = document.getElementById('show-student-super-course-toggle');
+            const instructorPrompt = document.getElementById('super-instructor-prompt');
+            const studentPrompt = document.getElementById('super-student-prompt');
+
+            if (instructorTopKInput) instructorTopKInput.value = result.settings.instructorTopK || 8;
+            if (studentTopKInput) studentTopKInput.value = result.settings.studentTopK || 8;
+            if (includeInactiveToggle) includeInactiveToggle.checked = result.settings.includeInactiveCourses === true;
+            if (showStudentToggle) showStudentToggle.checked = result.settings.showStudentSuperCourse === true;
+            if (instructorPrompt) instructorPrompt.value = result.settings.instructorPrompt || '';
+            if (studentPrompt) studentPrompt.value = result.settings.studentPrompt || '';
+        } catch (error) {
+            console.error('Error loading Super Course chat settings:', error);
         }
     }
 
@@ -779,6 +827,83 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    const resetAiSettingsBtn = document.getElementById('reset-ai-settings');
+    if (resetAiSettingsBtn) {
+        resetAiSettingsBtn.addEventListener('click', async () => {
+            if (!confirm('Reset AI settings for this course to defaults?')) return;
+
+            resetAiSettingsBtn.disabled = true;
+            resetAiSettingsBtn.textContent = 'Resetting...';
+            try {
+                const courseId = await getCurrentCourseId();
+                const response = await fetch('/api/settings/ai-settings/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ courseId })
+                });
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.message || 'Failed to reset AI settings');
+                }
+
+                const allowToggle = document.getElementById('allow-super-course-toggle');
+                const topKInput = document.getElementById('student-chat-topk-input');
+                if (allowToggle) allowToggle.checked = true;
+                if (topKInput) topKInput.value = 3;
+                showNotification('AI settings reset to defaults', 'success');
+            } catch (error) {
+                console.error('Error resetting AI settings:', error);
+                showNotification(error.message || 'Failed to reset AI settings', 'error');
+            } finally {
+                resetAiSettingsBtn.disabled = false;
+                resetAiSettingsBtn.textContent = 'Reset AI Settings to Default';
+            }
+        });
+    }
+
+    const resetSuperCourseSettingsBtn = document.getElementById('reset-super-course-settings');
+    if (resetSuperCourseSettingsBtn) {
+        resetSuperCourseSettingsBtn.addEventListener('click', async () => {
+            if (!confirm('Reset Super Course chat settings to defaults?')) return;
+
+            resetSuperCourseSettingsBtn.disabled = true;
+            resetSuperCourseSettingsBtn.textContent = 'Resetting...';
+            try {
+                const response = await fetch('/api/settings/super-course-chat/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include'
+                });
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.message || 'Failed to reset Super Course settings');
+                }
+
+                const settings = result.settings || {};
+                const instructorTopKInput = document.getElementById('super-instructor-topk-input');
+                const studentTopKInput = document.getElementById('super-student-topk-input');
+                const includeInactiveToggle = document.getElementById('include-inactive-super-course-toggle');
+                const showStudentToggle = document.getElementById('show-student-super-course-toggle');
+                const instructorPrompt = document.getElementById('super-instructor-prompt');
+                const studentPrompt = document.getElementById('super-student-prompt');
+                if (instructorTopKInput) instructorTopKInput.value = settings.instructorTopK || 8;
+                if (studentTopKInput) studentTopKInput.value = settings.studentTopK || 8;
+                if (includeInactiveToggle) includeInactiveToggle.checked = settings.includeInactiveCourses === true;
+                if (showStudentToggle) showStudentToggle.checked = settings.showStudentSuperCourse === true;
+                if (instructorPrompt) instructorPrompt.value = settings.instructorPrompt || '';
+                if (studentPrompt) studentPrompt.value = settings.studentPrompt || '';
+                showNotification('Super Course settings reset to defaults', 'success');
+            } catch (error) {
+                console.error('Error resetting Super Course settings:', error);
+                showNotification(error.message || 'Failed to reset Super Course settings', 'error');
+            } finally {
+                resetSuperCourseSettingsBtn.disabled = false;
+                resetSuperCourseSettingsBtn.textContent = 'Reset Super Course Settings to Default';
+            }
+        });
+    }
+
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape' && transferCourseModal?.classList.contains('show')) {
             closeTransferModal();
@@ -924,6 +1049,43 @@ document.addEventListener('DOMContentLoaded', async () => {
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ model, reasoningEffort })
                         });
+                    }
+                }
+
+                const aiSettingsSection = document.getElementById('ai-settings-section');
+                if (aiSettingsSection && aiSettingsSection.style.display !== 'none') {
+                    const allowInSuperCourse = document.getElementById('allow-super-course-toggle')?.checked !== false;
+                    const studentTopK = Number(document.getElementById('student-chat-topk-input')?.value || 3);
+                    const aiResponse = await fetch('/api/settings/ai-settings', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ courseId, allowInSuperCourse, studentTopK })
+                    });
+                    const aiResult = await aiResponse.json();
+                    if (!aiResponse.ok || !aiResult.success) {
+                        throw new Error(aiResult.message || 'Failed to save AI settings');
+                    }
+                }
+
+                const superCourseSection = document.getElementById('super-course-chat-section');
+                if (superCourseSection && superCourseSection.style.display !== 'none') {
+                    const superResponse = await fetch('/api/settings/super-course-chat', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({
+                            instructorTopK: Number(document.getElementById('super-instructor-topk-input')?.value || 8),
+                            studentTopK: Number(document.getElementById('super-student-topk-input')?.value || 8),
+                            includeInactiveCourses: document.getElementById('include-inactive-super-course-toggle')?.checked === true,
+                            showStudentSuperCourse: document.getElementById('show-student-super-course-toggle')?.checked === true,
+                            instructorPrompt: document.getElementById('super-instructor-prompt')?.value || '',
+                            studentPrompt: document.getElementById('super-student-prompt')?.value || ''
+                        })
+                    });
+                    const superResult = await superResponse.json();
+                    if (!superResponse.ok || !superResult.success) {
+                        throw new Error(superResult.message || 'Failed to save Super Course settings');
                     }
                 }
 
@@ -1316,6 +1478,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             const mhDetectionSection = document.getElementById('mental-health-detection-section');
             const adminSection = document.getElementById('system-admin-section');
             const llmModelSection = document.getElementById('llm-model-section');
+            const aiSettingsSection = document.getElementById('ai-settings-section');
+            const superCourseChatSection = document.getElementById('super-course-chat-section');
 
             if (result.success && result.canDeleteAll) {
                 // User has permission, ensure the sections are visible
@@ -1325,6 +1489,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (mhDetectionSection) mhDetectionSection.style.display = '';
                 if (adminSection) adminSection.style.display = '';
                 if (llmModelSection) llmModelSection.style.display = '';
+                if (aiSettingsSection) aiSettingsSection.style.display = '';
+                if (superCourseChatSection) superCourseChatSection.style.display = '';
                 return true;
             } else {
                 // User doesn't have permission, hide the sections
@@ -1334,6 +1500,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (mhDetectionSection) mhDetectionSection.style.display = 'none';
                 if (adminSection) adminSection.style.display = 'none';
                 if (llmModelSection) llmModelSection.style.display = 'none';
+                if (aiSettingsSection) aiSettingsSection.style.display = 'none';
+                if (superCourseChatSection) superCourseChatSection.style.display = 'none';
                 return false;
             }
         } catch (error) {
@@ -1345,12 +1513,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             const mhDetectionSection = document.getElementById('mental-health-detection-section');
             const adminSection = document.getElementById('system-admin-section');
             const llmModelSection = document.getElementById('llm-model-section');
+            const aiSettingsSection = document.getElementById('ai-settings-section');
+            const superCourseChatSection = document.getElementById('super-course-chat-section');
             if (databaseSection) databaseSection.style.display = 'none';
             if (loginRestrictionSection) loginRestrictionSection.style.display = 'none';
             if (questionGenerationSection) questionGenerationSection.style.display = 'none';
             if (mhDetectionSection) mhDetectionSection.style.display = 'none';
             if (adminSection) adminSection.style.display = 'none';
             if (llmModelSection) llmModelSection.style.display = 'none';
+            if (aiSettingsSection) aiSettingsSection.style.display = 'none';
+            if (superCourseChatSection) superCourseChatSection.style.display = 'none';
             return false;
         }
     }

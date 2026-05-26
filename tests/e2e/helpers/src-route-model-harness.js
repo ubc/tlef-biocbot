@@ -135,10 +135,12 @@ const state = {
     passportForLocals: null,
     llm: {
         sendMessage: async () => ({ content: '{"matches":[{"ref":"q1","learningObjective":"Objective A"}]}' }),
+        analyzeMentalHealth: async () => ({ concernLevel: 'no concern', reason: '' }),
         evaluateStudentAnswer: async () => ({ correct: true, feedback: 'stub' }),
         generateAssessmentQuestion: async () => ({ question: 'Generated?', answer: 'true', options: {} }),
         regenerateAssessmentQuestion: async () => ({ question: 'Regenerated?', answer: 'true', options: {} }),
     },
+    lastQdrantSearch: null,
 };
 
 function fakeSession(session) {
@@ -201,9 +203,22 @@ function configureQdrant(mode) {
         if (mode === 'qdrant-process-fails') return { success: false, error: 'store failed' };
         return { success: true, message: 'stored', chunksProcessed: 1, chunksStored: 1 };
     };
-    QdrantService.prototype.searchDocuments = async () => {
+    QdrantService.prototype.searchDocuments = async (query, filters, limit) => {
         if (mode === 'qdrant-search-throws') throw new Error('harness search failure');
-        return [{ documentId: 'doc-1' }];
+        state.lastQdrantSearch = { query, filters, limit };
+        return [{
+            id: 'chunk-1',
+            score: 0.91,
+            courseId: filters && filters.courseId,
+            lectureName: 'Unit 1',
+            documentId: 'doc-1',
+            fileName: 'doc.txt',
+            documentType: 'lecture-notes',
+            type: 'lecture_notes',
+            chunkText: 'Harness chunk text',
+            chunkIndex: 0,
+            timestamp: new Date().toISOString(),
+        }];
     };
     QdrantService.prototype.deleteDocumentChunks = async () => {
         if (mode === 'qdrant-delete-throws') throw new Error('harness delete failure');
@@ -232,10 +247,12 @@ function applyMode(mode) {
     state.passportForLocals = null;
     state.llm = {
         sendMessage: async () => ({ content: '{"matches":[{"ref":"q1","learningObjective":"Objective A"}]}' }),
+        analyzeMentalHealth: async () => ({ concernLevel: 'no concern', reason: '' }),
         evaluateStudentAnswer: async () => ({ correct: true, feedback: 'stub' }),
         generateAssessmentQuestion: async () => ({ question: 'Generated?', answer: 'true', options: {} }),
         regenerateAssessmentQuestion: async () => ({ question: 'Regenerated?', answer: 'true', options: {} }),
     };
+    state.lastQdrantSearch = null;
 
     configurePassport(state.mode);
     configureQdrant(state.mode);
@@ -332,6 +349,26 @@ function applyMode(mode) {
         state.user = { ...baseUser, userId: 'inst', role: 'instructor' };
         CourseModel.userHasCourseAccess = async () => true;
     }
+    if (state.mode === 'chat-rag-topk') {
+        state.user = { ...baseUser, userId: 'student-harness', role: 'student' };
+        state.db = memoryDb({
+            users: new MemoryCollection([{ ...baseUser }]),
+            courses: new MemoryCollection([{
+                courseId: 'BIOC-H',
+                courseName: 'Harness Course',
+                instructorId: 'inst',
+                instructors: ['inst'],
+                approvedStruggleTopics: [],
+                ragSettings: { student: { topK: 5 } },
+                lectures: [{ name: 'Unit 1', isPublished: true }],
+            }]),
+            mentalHealthFlags: new MemoryCollection([]),
+        });
+        state.llm = {
+            sendMessage: async () => ({ content: 'Harness chat response', model: 'harness-llm', usage: { tokens: 1 } }),
+            analyzeMentalHealth: async () => ({ concernLevel: 'no concern', reason: '' }),
+        };
+    }
 }
 
 applyMode('');
@@ -367,6 +404,7 @@ passport.authenticate = function (strategy, cbOrOptions) {
 };
 
 app.get('/__ping', (_req, res) => res.json({ ok: true }));
+app.get('/__last-qdrant-search', (_req, res) => res.json(state.lastQdrantSearch || {}));
 app.post('/__configure', (req, res) => {
     applyMode(req.body.mode || '');
     res.json({ ok: true });
@@ -506,6 +544,7 @@ app.use('/api/auth', applyRequestState, moduleRequire('../../../src/routes/auth'
 app.use('/', applyRequestState, moduleRequire('../../../src/routes/shibboleth'));
 app.use('/api/questions', applyRequestState, moduleRequire('../../../src/routes/questions'));
 app.use('/api/qdrant', applyRequestState, moduleRequire('../../../src/routes/qdrant'));
+app.use('/api/chat', applyRequestState, moduleRequire('../../../src/routes/chat'));
 
 const port = Number(process.env.SRC_HARNESS_PORT || 0);
 const server = app.listen(port, '127.0.0.1', () => {
