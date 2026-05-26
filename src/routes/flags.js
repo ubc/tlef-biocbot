@@ -110,7 +110,11 @@ async function canCreateFlagForCourse(db, user, courseId, isSuperCourseFlag) {
         return true;
     }
 
-    return CourseModel.userHasCourseAccess(db, courseId, user.userId, user.role);
+    if (user.role !== 'student') {
+        return false;
+    }
+
+    return CourseModel.userHasCourseAccess(db, courseId, user.userId, 'student');
 }
 
 /**
@@ -206,10 +210,10 @@ router.post('/', async (req, res) => {
         const effectiveCourseId = superCourseFlag ? SUPER_COURSE_FLAG_COURSE_ID : courseId;
         
         // Validate required fields
-        if (!questionId || !effectiveCourseId || !flagReason || !flagDescription) {
+        if (!questionId || !effectiveCourseId || !flagReason || !flagDescription || (!superCourseFlag && !unitName)) {
             return res.status(400).json({
                 success: false,
-                message: 'Missing required fields: questionId, courseId, flagReason, flagDescription'
+                message: 'Missing required fields: questionId, courseId, unitName, flagReason, flagDescription'
             });
         }
         
@@ -230,6 +234,17 @@ router.post('/', async (req, res) => {
             });
         }
 
+        let course = null;
+        if (!superCourseFlag) {
+            course = await CourseModel.getCourseById(db, effectiveCourseId);
+            if (!course) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Course not found'
+                });
+            }
+        }
+
         const hasCourseAccess = await canCreateFlagForCourse(db, user, effectiveCourseId, superCourseFlag);
         if (!hasCourseAccess) {
             return res.status(403).json({
@@ -240,7 +255,6 @@ router.post('/', async (req, res) => {
 
         let courseName = 'Super Course';
         if (!superCourseFlag) {
-            const course = await CourseModel.getCourseById(db, effectiveCourseId);
             courseName = course?.courseName || course?.courseCode || effectiveCourseId;
         }
         
