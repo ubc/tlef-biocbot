@@ -401,6 +401,11 @@ function setupProtectedRoutes() {
         res.sendFile(path.join(__dirname, '../public/instructor/chat.html'));
     });
 
+    // Super Chat Notes — concept demo page (clickable mockup, not yet wired to a backend)
+    app.get('/instructor/notes', authMiddleware.requireInstructor, (req, res) => {
+        res.sendFile(path.join(__dirname, '../public/instructor/notes-demo.html'));
+    });
+
     app.get('/instructor/documents', authMiddleware.requireInstructorOrTA, authMiddleware.requireTAPermission('courses'), (req, res) => {
         res.sendFile(path.join(__dirname, '../public/instructor/index.html'));
     });
