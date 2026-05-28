@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const sessionKey = `biocbot_instructor_super_session_${instructorId}`;
     const historyStateKey = `biocbot_instructor_super_history_open_${instructorId}`;
     const SUPER_COURSE_FLAG_COURSE_ID = 'SUPER_COURSE';
+    const GREETING_TEXT = 'Ask about material across the Super Course. I will use opted-in uploaded course material when relevant and can draw on general biochemistry when the uploaded context is thin.';
 
     if (!form || !input || !messages || !sendButton) {
         return;
@@ -35,7 +36,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     initializeHistoryDisclosure();
     loadHistoryList();
     initializeAutoSave();
-    restoreRecentSession();
+    if (!restoreRecentSession()) {
+        showGreeting({ save: true });
+    }
 
     if (newChatButton) {
         newChatButton.addEventListener('click', () => {
@@ -143,7 +146,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const right = document.createElement('div');
         right.className = 'message-footer-right';
 
-        if (sender === 'bot' && !options.isPending && !options.isError) {
+        if (sender === 'bot' && !options.isPending && !options.isError && !options.isGreeting) {
             right.appendChild(createFlagControl(content, options));
         }
 
@@ -163,7 +166,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             autoSaveMessage(content, sender, {
                 sourceAttribution: options.sourceAttribution || null,
                 citations: Array.isArray(options.citations) ? options.citations : [],
-                isError: options.isError === true
+                isError: options.isError === true,
+                isGreeting: options.isGreeting === true
             });
         }
 
@@ -358,7 +362,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 messageType: 'instructor-super-course-chat',
                 sourceAttribution: options.sourceAttribution || null,
                 citations: options.citations || [],
-                isError: options.isError === true
+                isError: options.isError === true,
+                isGreeting: options.isGreeting === true
             });
 
             chatData.metadata.totalMessages = chatData.messages.length;
@@ -368,7 +373,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             chatData.lastActivityTimestamp = new Date().toISOString();
 
             localStorage.setItem(currentChatKey, JSON.stringify(chatData));
-            syncAutoSaveWithServer(chatData);
+
+            // Persist the greeting locally so it survives refreshes, but don't create a
+            // server-side history entry for a chat that only contains the greeting (no
+            // real exchange yet). Once a real message exists, the greeting syncs with it.
+            const hasRealMessage = chatData.messages.some(message => !message.isGreeting);
+            if (hasRealMessage) {
+                syncAutoSaveWithServer(chatData);
+            }
         } catch (error) {
             console.error('Error auto-saving instructor chat:', error);
         }
@@ -382,24 +394,49 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const restorableMessages = chatData.messages.filter(message => !message.isError);
         if (restorableMessages.length === 0) {
-            localStorage.removeItem(currentChatKey);
+            resetToFreshSession();
             return false;
         }
 
         if (!chatData.lastActivityTimestamp) {
+            resetToFreshSession();
             return false;
         }
 
         const lastActivity = new Date(chatData.lastActivityTimestamp);
         const diffMinutes = Math.floor((Date.now() - lastActivity.getTime()) / (1000 * 60));
         if (Number.isNaN(diffMinutes) || diffMinutes > 30) {
+            // Session is stale: clear it out so the next message starts a brand new
+            // session instead of being appended to the expired one.
+            resetToFreshSession();
             return false;
         }
 
         ensureSessionId(chatData);
         loadChatData(chatData);
-        showAutoContinueNotification();
+        // Only announce "continued where you left off" if there's a real exchange to
+        // continue — a greeting-only session shouldn't trigger that notification.
+        if (restorableMessages.some(message => !message.isGreeting)) {
+            showAutoContinueNotification();
+        }
         return true;
+    }
+
+    // Clears any stored chat/session state and starts a fresh, empty autosave session
+    // with a new session ID. The caller is responsible for re-rendering the greeting.
+    function resetToFreshSession() {
+        localStorage.removeItem(currentChatKey);
+        localStorage.removeItem(sessionKey);
+        conversationMessages.length = 0;
+        initializeAutoSave();
+    }
+
+    // Renders the standard Super Course greeting as the first bot message. When `save`
+    // is true, the greeting is persisted into the current chat data so it survives
+    // refreshes and appears at the top of saved history sessions.
+    function showGreeting({ save = false } = {}) {
+        messages.innerHTML = '';
+        addMessage(GREETING_TEXT, 'bot', { isGreeting: true, skipAutoSave: !save });
     }
 
     function loadChatData(chatData) {
@@ -416,8 +453,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 sourceAttribution: messageData.sourceAttribution,
                 citations: messageData.citations,
                 isError: messageData.isError,
+                isGreeting: messageData.isGreeting === true,
                 skipAutoSave: true
             });
+
+            // The greeting is display-only — never feed it back to the LLM as context.
+            if (messageData.isGreeting) {
+                return;
+            }
 
             if (messageData.type === 'user') {
                 conversationMessages.push({ role: 'user', content: messageData.content });
@@ -433,15 +476,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         localStorage.removeItem(currentChatKey);
         localStorage.removeItem(sessionKey);
         conversationMessages.length = 0;
-        messages.innerHTML = `
-            <div class="message bot-message">
-                <div class="message-avatar">B</div>
-                <div class="message-content">
-                    <p>Ask about material across the Super Course. I will use opted-in uploaded course material when relevant and can draw on general biochemistry when the uploaded context is thin.</p>
-                </div>
-            </div>
-        `;
         initializeAutoSave();
+        showGreeting({ save: true });
         loadHistoryList({ silent: true });
         input.focus();
     }
