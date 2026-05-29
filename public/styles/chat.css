@@ -1100,6 +1100,55 @@
     text-align: center;
 }
 
+/* Answer Level Selector (user-selectable output level for Super Chat) */
+.answer-level-selector {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    font-size: 12px;
+    color: #666;
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 8px;
+    padding: 5px 10px;
+}
+
+.answer-level-selector label {
+    white-space: nowrap;
+    font-weight: 500;
+    color: #888;
+    user-select: none;
+}
+
+.answer-level-selector select {
+    font-size: 12px;
+    font-family: inherit;
+    padding: 4px 26px 4px 8px;
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 6px;
+    background-color: var(--card-bg, #fff);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23888' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    color: var(--text-color, #333);
+    cursor: pointer;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.answer-level-selector select:hover {
+    border-color: var(--primary-color, #4a90e2);
+}
+
+.answer-level-selector select:focus {
+    outline: none;
+    border-color: var(--primary-color, #4a90e2);
+    box-shadow: 0 0 0 3px rgba(var(--primary-color-rgb, 74, 144, 226), 0.15);
+}
+
 /* Mode Toggle */
 .mode-toggle-container {
     display: none;
@@ -1278,6 +1327,10 @@ input:checked+.toggle-slider:before {
         font-size: 11px;
         text-align: center;
         width: 100%;
+    }
+
+    .answer-level-selector {
+        align-self: center;
     }
 
     /* Mode Toggle Mobile */

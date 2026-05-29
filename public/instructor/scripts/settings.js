@@ -1,4 +1,6 @@
 document.addEventListener('DOMContentLoaded', async () => {
+    const SUPER_STUDENT_LEVELS = ['intro', 'undergraduate', 'graduate'];
+    const SUPER_INSTRUCTOR_LEVELS = ['overview', 'standard', 'deepDive'];
     const saveSettingsBtn = document.getElementById('save-settings');
     const resetSettingsBtn = document.getElementById('reset-settings');
     const deleteCollectionBtn = document.getElementById('delete-collection');
@@ -178,6 +180,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    function applyLevelModifiersToFields(prefix, levels, modifiers) {
+        const map = modifiers && typeof modifiers === 'object' ? modifiers : {};
+        levels.forEach(level => {
+            const el = document.getElementById(`${prefix}-${level}`);
+            if (el) el.value = typeof map[level] === 'string' ? map[level] : '';
+        });
+    }
+
+    function collectLevelModifiersFromFields(prefix, levels) {
+        const result = {};
+        levels.forEach(level => {
+            const el = document.getElementById(`${prefix}-${level}`);
+            result[level] = el ? el.value : '';
+        });
+        return result;
+    }
+
     async function loadSuperCourseChatSettings() {
         try {
             const response = await fetch('/api/settings/super-course-chat', {
@@ -205,6 +224,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (noteMinScoreInput) noteMinScoreInput.value = result.settings.noteMinScore ?? 0.25;
             if (instructorPrompt) instructorPrompt.value = result.settings.instructorPrompt || '';
             if (studentPrompt) studentPrompt.value = result.settings.studentPrompt || '';
+            applyLevelModifiersToFields('super-student-level', SUPER_STUDENT_LEVELS, result.settings.studentLevelModifiers);
+            applyLevelModifiersToFields('super-instructor-level', SUPER_INSTRUCTOR_LEVELS, result.settings.instructorLevelModifiers);
         } catch (error) {
             console.error('Error loading Super Course chat settings:', error);
         }
@@ -906,6 +927,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (noteMinScoreInput) noteMinScoreInput.value = settings.noteMinScore ?? 0.25;
                 if (instructorPrompt) instructorPrompt.value = settings.instructorPrompt || '';
                 if (studentPrompt) studentPrompt.value = settings.studentPrompt || '';
+                applyLevelModifiersToFields('super-student-level', SUPER_STUDENT_LEVELS, settings.studentLevelModifiers);
+                applyLevelModifiersToFields('super-instructor-level', SUPER_INSTRUCTOR_LEVELS, settings.instructorLevelModifiers);
                 showNotification('Super Course settings reset to defaults', 'success');
             } catch (error) {
                 console.error('Error resetting Super Course settings:', error);
@@ -1096,7 +1119,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                             noteRetrievalRatio: Number(document.getElementById('super-note-ratio-input')?.value ?? 0.25),
                             noteMinScore: Number(document.getElementById('super-note-min-score-input')?.value ?? 0.25),
                             instructorPrompt: document.getElementById('super-instructor-prompt')?.value || '',
-                            studentPrompt: document.getElementById('super-student-prompt')?.value || ''
+                            studentPrompt: document.getElementById('super-student-prompt')?.value || '',
+                            studentLevelModifiers: collectLevelModifiersFromFields('super-student-level', SUPER_STUDENT_LEVELS),
+                            instructorLevelModifiers: collectLevelModifiersFromFields('super-instructor-level', SUPER_INSTRUCTOR_LEVELS)
                         })
                     });
                     const superResult = await superResponse.json();

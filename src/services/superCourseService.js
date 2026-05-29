@@ -22,6 +22,17 @@ function normalizeNoteRatio(value, fallback) {
     return num;
 }
 
+// Keep only the known level keys and coerce each modifier to a string,
+// falling back to the default modifier text when a value is missing.
+function normalizeLevelModifiers(value, keys, defaults) {
+    const source = value && typeof value === 'object' ? value : {};
+    const result = {};
+    for (const key of keys) {
+        result[key] = typeof source[key] === 'string' ? source[key] : defaults[key];
+    }
+    return result;
+}
+
 function resolveSuperCourseChatSettings(settingsDoc = {}) {
     const defaults = prompts.DEFAULT_SUPER_COURSE_CHAT_SETTINGS;
 
@@ -45,7 +56,17 @@ function resolveSuperCourseChatSettings(settingsDoc = {}) {
             : defaults.instructorPrompt,
         studentPrompt: typeof settingsDoc.studentPrompt === 'string' && settingsDoc.studentPrompt.trim()
             ? settingsDoc.studentPrompt
-            : defaults.studentPrompt
+            : defaults.studentPrompt,
+        studentLevelModifiers: normalizeLevelModifiers(
+            settingsDoc.studentLevelModifiers,
+            prompts.STUDENT_LEVEL_KEYS,
+            defaults.studentLevelModifiers
+        ),
+        instructorLevelModifiers: normalizeLevelModifiers(
+            settingsDoc.instructorLevelModifiers,
+            prompts.INSTRUCTOR_LEVEL_KEYS,
+            defaults.instructorLevelModifiers
+        )
     };
 }
 

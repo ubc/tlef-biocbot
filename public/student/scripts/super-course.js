@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const messages = document.getElementById('chat-messages');
     const sendButton = document.getElementById('send-button');
     const newChatButton = document.getElementById('new-super-course-chat');
+    const levelSelect = document.getElementById('answer-level');
     const scopeLabel = document.getElementById('super-course-scope');
     const poolPanel = document.getElementById('super-course-pool-panel');
     const poolList = document.getElementById('super-course-pool-list');
@@ -35,6 +36,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     const SUPER_COURSE_FLAG_COURSE_ID = 'SUPER_COURSE';
 
     if (!form || !input || !messages || !sendButton) return;
+
+    // Persist the user's chosen answer level across sessions.
+    const levelStorageKey = `biocbot_student_super_level_${studentId}`;
+    if (levelSelect) {
+        const savedLevel = localStorage.getItem(levelStorageKey);
+        if (savedLevel && [...levelSelect.options].some(opt => opt.value === savedLevel)) {
+            levelSelect.value = savedLevel;
+        }
+        levelSelect.addEventListener('change', () => {
+            localStorage.setItem(levelStorageKey, levelSelect.value);
+        });
+    }
 
     loadSourcePool();
     initializeHistoryDisclosure();
@@ -78,7 +91,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
-                body: JSON.stringify({ message: text, conversationMessages })
+                body: JSON.stringify({
+                    message: text,
+                    conversationMessages,
+                    level: levelSelect ? levelSelect.value : undefined
+                })
             });
 
             const result = await response.json();

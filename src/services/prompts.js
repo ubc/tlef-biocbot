@@ -144,6 +144,28 @@ Use the retrieved course materials as the primary source when they are relevant.
 
 Keep responses conversational and digestible. Cite source units or course materials when the answer relies on retrieved context.`;
 
+// User-selectable answer-level modifiers appended to the base Super Course
+// prompts. Student levels tune comprehension depth; instructor levels tune
+// answer thoroughness for a peer audience. The middle level of each set is the
+// default selection and is kept deliberately mild so it does not fight the
+// configured base prompt.
+const STUDENT_LEVEL_KEYS = ['intro', 'undergraduate', 'graduate'];
+const INSTRUCTOR_LEVEL_KEYS = ['overview', 'standard', 'deepDive'];
+const DEFAULT_STUDENT_LEVEL = 'undergraduate';
+const DEFAULT_INSTRUCTOR_LEVEL = 'standard';
+
+const DEFAULT_STUDENT_LEVEL_MODIFIERS = {
+    intro: `ANSWER LEVEL — INTRODUCTORY: Assume the student is new to biochemistry. Use plain language and everyday analogies, define every technical term the first time it appears, and keep the conceptual load light. Favor building intuition over formal rigor, and check understanding before layering on complexity.`,
+    undergraduate: `ANSWER LEVEL — UNDERGRADUATE: Assume the student is taking a standard undergraduate biochemistry course. Use correct terminology but briefly define less-common terms, explain mechanisms at a course-appropriate depth, and connect ideas to material a second- or third-year student would already have seen.`,
+    graduate: `ANSWER LEVEL — GRADUATE: Assume a strong undergraduate foundation. Use precise biochemical terminology without re-defining the basics, include mechanistic and quantitative detail where relevant, and surface nuance, exceptions, regulatory context, and connections to broader pathways and current understanding.`
+};
+
+const DEFAULT_INSTRUCTOR_LEVEL_MODIFIERS = {
+    overview: `ANSWER DEPTH — OVERVIEW: Give a brief, high-level summary aimed at a peer. Lead with the key takeaways in a few sentences, keep it scannable, and omit fine-grained mechanistic detail unless it is essential to the point.`,
+    standard: `ANSWER DEPTH — STANDARD: Give a balanced, peer-level answer suitable for course planning and explanation. Cover the main mechanisms and reasoning at a useful level of detail without exhaustively walking through every edge case.`,
+    deepDive: `ANSWER DEPTH — DEEP DIVE: Be thorough and technically comprehensive for a subject-matter expert. Include detailed mechanisms, quantitative and regulatory detail, edge cases, caveats, and relevant comparisons across topics, noting where the science is nuanced or contested.`
+};
+
 const DEFAULT_SUPER_COURSE_CHAT_SETTINGS = {
     studentTopK: 8,
     instructorTopK: 8,
@@ -154,7 +176,9 @@ const DEFAULT_SUPER_COURSE_CHAT_SETTINGS = {
     noteRetrievalRatio: 0.25,
     noteMinScore: 0.25,
     instructorPrompt: INSTRUCTOR_SUPERCOURSE_SYSTEM_PROMPT,
-    studentPrompt: STUDENT_SUPERCOURSE_SYSTEM_PROMPT
+    studentPrompt: STUDENT_SUPERCOURSE_SYSTEM_PROMPT,
+    studentLevelModifiers: { ...DEFAULT_STUDENT_LEVEL_MODIFIERS },
+    instructorLevelModifiers: { ...DEFAULT_INSTRUCTOR_LEVEL_MODIFIERS }
 };
 
 const DEFAULT_MENTAL_HEALTH_DETECTION_PROMPT = `You are a silent mental health concern detector for a university course chatbot. Your job is to analyze conversations between a student and an AI study assistant to identify signs of mental health distress.
@@ -704,6 +728,12 @@ module.exports = {
     INSTRUCTOR_SUPERCOURSE_SYSTEM_PROMPT,
     STUDENT_SUPERCOURSE_SYSTEM_PROMPT,
     DEFAULT_SUPER_COURSE_CHAT_SETTINGS,
+    STUDENT_LEVEL_KEYS,
+    INSTRUCTOR_LEVEL_KEYS,
+    DEFAULT_STUDENT_LEVEL,
+    DEFAULT_INSTRUCTOR_LEVEL,
+    DEFAULT_STUDENT_LEVEL_MODIFIERS,
+    DEFAULT_INSTRUCTOR_LEVEL_MODIFIERS,
     QUESTION_EXTRACTION_SYSTEM_PROMPT,
     buildQuestionExtractionPrompt,
     buildPracticeQuestionPrompt,

@@ -1483,6 +1483,16 @@ test.describe('Settings API authorization', () => {
                     showStudentSuperCourse: true,
                     instructorPrompt: 'API instructor super prompt',
                     studentPrompt: 'API student super prompt',
+                    studentLevelModifiers: {
+                        intro: 'API student intro modifier',
+                        undergraduate: 'API student undergrad modifier',
+                        graduate: 'API student graduate modifier',
+                    },
+                    instructorLevelModifiers: {
+                        overview: 'API instructor overview modifier',
+                        standard: 'API instructor standard modifier',
+                        deepDive: 'API instructor deep dive modifier',
+                    },
                 },
             });
             expect((await saveSuper.json()).success).toBe(true);
@@ -1493,6 +1503,16 @@ test.describe('Settings API authorization', () => {
                 showStudentSuperCourse: true,
                 instructorPrompt: 'API instructor super prompt',
                 studentPrompt: 'API student super prompt',
+                studentLevelModifiers: {
+                    intro: 'API student intro modifier',
+                    undergraduate: 'API student undergrad modifier',
+                    graduate: 'API student graduate modifier',
+                },
+                instructorLevelModifiers: {
+                    overview: 'API instructor overview modifier',
+                    standard: 'API instructor standard modifier',
+                    deepDive: 'API instructor deep dive modifier',
+                },
             });
 
             const invalidSuper = await adminApi.put('/api/settings/super-course-chat', {
@@ -1509,7 +1529,8 @@ test.describe('Settings API authorization', () => {
             expect(invalidSuper.status()).toBe(400);
 
             const resetSuper = await adminApi.post('/api/settings/super-course-chat/reset');
-            expect(await resetSuper.json()).toMatchObject({
+            const resetSuperBody = await resetSuper.json();
+            expect(resetSuperBody).toMatchObject({
                 success: true,
                 settings: {
                     studentTopK: 8,
@@ -1518,6 +1539,18 @@ test.describe('Settings API authorization', () => {
                     showStudentSuperCourse: false,
                 },
             });
+            // Reset restores the default level modifiers (non-empty for every level).
+            const resetStudentMods = resetSuperBody.settings.studentLevelModifiers;
+            const resetInstructorMods = resetSuperBody.settings.instructorLevelModifiers;
+            for (const key of ['intro', 'undergraduate', 'graduate']) {
+                expect(typeof resetStudentMods[key]).toBe('string');
+                expect(resetStudentMods[key].length).toBeGreaterThan(0);
+            }
+            for (const key of ['overview', 'standard', 'deepDive']) {
+                expect(typeof resetInstructorMods[key]).toBe('string');
+                expect(resetInstructorMods[key].length).toBeGreaterThan(0);
+            }
+            expect(resetStudentMods.intro).not.toBe('API student intro modifier');
         } finally {
             await adminApi.dispose();
         }
