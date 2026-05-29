@@ -149,6 +149,10 @@ const DEFAULT_SUPER_COURSE_CHAT_SETTINGS = {
     instructorTopK: 8,
     includeInactiveCourses: false,
     showStudentSuperCourse: false,
+    // Super Chat Notes (instructor-only shared knowledge layer)
+    includeNotesInRetrieval: true,
+    noteRetrievalRatio: 0.25,
+    noteMinScore: 0.25,
     instructorPrompt: INSTRUCTOR_SUPERCOURSE_SYSTEM_PROMPT,
     studentPrompt: STUDENT_SUPERCOURSE_SYSTEM_PROMPT
 };

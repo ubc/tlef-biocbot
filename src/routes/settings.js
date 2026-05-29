@@ -47,6 +47,13 @@ function buildAiSettingsResponse(course) {
     };
 }
 
+function normalizeNoteRatioForSettings(value, fallback) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num < 0 || num > 1) return fallback;
+    // Snap to 2 decimals to keep stored values clean.
+    return Math.round(num * 100) / 100;
+}
+
 function resolveSuperCourseChatSettings(settingsDoc = {}) {
     const defaults = prompts.DEFAULT_SUPER_COURSE_CHAT_SETTINGS;
     return {
@@ -54,6 +61,9 @@ function resolveSuperCourseChatSettings(settingsDoc = {}) {
         instructorTopK: CourseModel.normalizeRagTopK(settingsDoc.instructorTopK, defaults.instructorTopK),
         includeInactiveCourses: settingsDoc.includeInactiveCourses === true,
         showStudentSuperCourse: settingsDoc.showStudentSuperCourse === true,
+        includeNotesInRetrieval: settingsDoc.includeNotesInRetrieval !== false,
+        noteRetrievalRatio: normalizeNoteRatioForSettings(settingsDoc.noteRetrievalRatio, defaults.noteRetrievalRatio),
+        noteMinScore: normalizeNoteRatioForSettings(settingsDoc.noteMinScore, defaults.noteMinScore),
         instructorPrompt: typeof settingsDoc.instructorPrompt === 'string' && settingsDoc.instructorPrompt.trim()
             ? settingsDoc.instructorPrompt
             : defaults.instructorPrompt,
@@ -423,6 +433,15 @@ router.put('/super-course-chat', async (req, res) => {
             instructorTopK,
             includeInactiveCourses: body.includeInactiveCourses === true,
             showStudentSuperCourse: body.showStudentSuperCourse === true,
+            includeNotesInRetrieval: body.includeNotesInRetrieval !== false,
+            noteRetrievalRatio: normalizeNoteRatioForSettings(
+                body.noteRetrievalRatio,
+                prompts.DEFAULT_SUPER_COURSE_CHAT_SETTINGS.noteRetrievalRatio
+            ),
+            noteMinScore: normalizeNoteRatioForSettings(
+                body.noteMinScore,
+                prompts.DEFAULT_SUPER_COURSE_CHAT_SETTINGS.noteMinScore
+            ),
             instructorPrompt: body.instructorPrompt,
             studentPrompt: body.studentPrompt
         };

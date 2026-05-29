@@ -190,6 +190,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             const studentTopKInput = document.getElementById('super-student-topk-input');
             const includeInactiveToggle = document.getElementById('include-inactive-super-course-toggle');
             const showStudentToggle = document.getElementById('show-student-super-course-toggle');
+            const includeNotesToggle = document.getElementById('include-notes-super-course-toggle');
+            const noteRatioInput = document.getElementById('super-note-ratio-input');
+            const noteMinScoreInput = document.getElementById('super-note-min-score-input');
             const instructorPrompt = document.getElementById('super-instructor-prompt');
             const studentPrompt = document.getElementById('super-student-prompt');
 
@@ -197,6 +200,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (studentTopKInput) studentTopKInput.value = result.settings.studentTopK || 8;
             if (includeInactiveToggle) includeInactiveToggle.checked = result.settings.includeInactiveCourses === true;
             if (showStudentToggle) showStudentToggle.checked = result.settings.showStudentSuperCourse === true;
+            if (includeNotesToggle) includeNotesToggle.checked = result.settings.includeNotesInRetrieval !== false;
+            if (noteRatioInput) noteRatioInput.value = result.settings.noteRetrievalRatio ?? 0.25;
+            if (noteMinScoreInput) noteMinScoreInput.value = result.settings.noteMinScore ?? 0.25;
             if (instructorPrompt) instructorPrompt.value = result.settings.instructorPrompt || '';
             if (studentPrompt) studentPrompt.value = result.settings.studentPrompt || '';
         } catch (error) {
@@ -886,12 +892,18 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const studentTopKInput = document.getElementById('super-student-topk-input');
                 const includeInactiveToggle = document.getElementById('include-inactive-super-course-toggle');
                 const showStudentToggle = document.getElementById('show-student-super-course-toggle');
+                const includeNotesToggle = document.getElementById('include-notes-super-course-toggle');
+                const noteRatioInput = document.getElementById('super-note-ratio-input');
+                const noteMinScoreInput = document.getElementById('super-note-min-score-input');
                 const instructorPrompt = document.getElementById('super-instructor-prompt');
                 const studentPrompt = document.getElementById('super-student-prompt');
                 if (instructorTopKInput) instructorTopKInput.value = settings.instructorTopK || 8;
                 if (studentTopKInput) studentTopKInput.value = settings.studentTopK || 8;
                 if (includeInactiveToggle) includeInactiveToggle.checked = settings.includeInactiveCourses === true;
                 if (showStudentToggle) showStudentToggle.checked = settings.showStudentSuperCourse === true;
+                if (includeNotesToggle) includeNotesToggle.checked = settings.includeNotesInRetrieval !== false;
+                if (noteRatioInput) noteRatioInput.value = settings.noteRetrievalRatio ?? 0.25;
+                if (noteMinScoreInput) noteMinScoreInput.value = settings.noteMinScore ?? 0.25;
                 if (instructorPrompt) instructorPrompt.value = settings.instructorPrompt || '';
                 if (studentPrompt) studentPrompt.value = settings.studentPrompt || '';
                 showNotification('Super Course settings reset to defaults', 'success');
@@ -1080,6 +1092,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                             studentTopK: Number(document.getElementById('super-student-topk-input')?.value || 8),
                             includeInactiveCourses: document.getElementById('include-inactive-super-course-toggle')?.checked === true,
                             showStudentSuperCourse: document.getElementById('show-student-super-course-toggle')?.checked === true,
+                            includeNotesInRetrieval: document.getElementById('include-notes-super-course-toggle')?.checked !== false,
+                            noteRetrievalRatio: Number(document.getElementById('super-note-ratio-input')?.value ?? 0.25),
+                            noteMinScore: Number(document.getElementById('super-note-min-score-input')?.value ?? 0.25),
                             instructorPrompt: document.getElementById('super-instructor-prompt')?.value || '',
                             studentPrompt: document.getElementById('super-student-prompt')?.value || ''
                         })

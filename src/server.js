@@ -29,6 +29,7 @@ const quizRoutes = require('./routes/quiz');
 const studentTrackerRoutes = require('./routes/student-tracker');
 const struggleActivityRoutes = require('./routes/struggle-activity');
 const mentalHealthFlagsRoutes = require('./routes/mentalHealthFlags');
+const superChatNotesRoutes = require('./routes/superChatNotes');
 const LLMService = require('./services/llm');
 const AuthService = require('./services/authService');
 const createAuthMiddleware = require('./middleware/auth');
@@ -401,9 +402,9 @@ function setupProtectedRoutes() {
         res.sendFile(path.join(__dirname, '../public/instructor/chat.html'));
     });
 
-    // Super Chat Notes — concept demo page (clickable mockup, not yet wired to a backend)
+    // Super Chat Notes — shared instructor knowledge layer
     app.get('/instructor/notes', authMiddleware.requireInstructor, (req, res) => {
-        res.sendFile(path.join(__dirname, '../public/instructor/notes-demo.html'));
+        res.sendFile(path.join(__dirname, '../public/instructor/notes.html'));
     });
 
     app.get('/instructor/documents', authMiddleware.requireInstructorOrTA, authMiddleware.requireTAPermission('courses'), (req, res) => {
@@ -533,6 +534,7 @@ function setupAPIRoutes() {
     app.use('/api/qdrant', authMiddleware.requireAuth, qdrantRoutes);
     app.use('/api/chat', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, chatRoutes);
     app.use('/api/instructor/chat', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, instructorChatRoutes);
+    app.use('/api/superchat-notes', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, superChatNotesRoutes);
     app.use('/api/student/super-course', authMiddleware.requireAuth, authMiddleware.populateUser, studentSuperCourseRoutes);
     app.use('/api/students', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, studentsRoutes);
     app.use('/api/user-agreement', authMiddleware.requireAuth, userAgreementRoutes);

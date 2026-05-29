@@ -193,6 +193,36 @@
                                 </label>
                             </div>
                         </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <h3>Include Super Chat Notes</h3>
+                                <p>When enabled, shared instructor notes are blended into instructor Super Chat answers alongside course material. On by default. (Instructor chat only — students never see notes.)</p>
+                            </div>
+                            <div class="setting-controls">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="include-notes-super-course-toggle">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <h3>Notes Retrieval Share</h3>
+                                <p>Fraction of the instructor Top-K chunks reserved for notes. Default 0.25 (e.g. with Top-K 8, ~2 chunks come from notes and ~6 from course material). Unused note slots fall back to course material.</p>
+                            </div>
+                            <div class="setting-controls">
+                                <input type="number" id="super-note-ratio-input" class="number-input" min="0" max="1" step="0.05" value="0.25">
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <h3>Notes Minimum Similarity</h3>
+                                <p>Minimum similarity (0&ndash;1) a note must reach to be used in an answer. Default 0.25. Higher = stricter (fewer notes used); lower = more permissive. Tuned for the current embedding model; raise it if irrelevant notes appear.</p>
+                            </div>
+                            <div class="setting-controls">
+                                <input type="number" id="super-note-min-score-input" class="number-input" min="0" max="1" step="0.05" value="0.25">
+                            </div>
+                        </div>
                         <div class="setting-item vertical">
                             <div class="setting-info">
                                 <h3>Instructor Super Course Prompt</h3>
