@@ -232,7 +232,12 @@ router.post('/', async (req, res) => {
             db,
             message,
             settings.instructorTopK,
-            { includeInactiveCourses: settings.includeInactiveCourses }
+            {
+                includeInactiveCourses: settings.includeInactiveCourses,
+                includeNotes: settings.includeNotesInRetrieval,
+                noteRatio: settings.noteRetrievalRatio,
+                noteMinScore: settings.noteMinScore
+            }
         );
 
         const contextText = buildSuperCourseContext(results, pool);

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Chat Notes - BiocBot Instructor</title>
+
+    <link rel="icon" type="image/x-icon" href="../assets/images/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../assets/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../assets/images/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../assets/images/apple-touch-icon.png">
+    <link rel="manifest" href="../assets/images/site.webmanifest">
+
+    <link rel="stylesheet" href="../styles/style.css">
+    <link rel="stylesheet" href="../styles/notes.css">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="logo-container"><h2>BiocBot</h2></div>
+            <nav class="main-nav">
+                <ul>
+                    <li><a href="/instructor/home">Home</a></li>
+                    <li><a href="/instructor/chat">Super Chat</a></li>
+                    <li class="active"><a href="/instructor/notes">Super Chat Notes</a></li>
+                    <li><a href="/instructor/documents">Course Upload</a></li>
+                    <li id="onboarding-nav-item" style="display: none;"><a href="/instructor/onboarding">Onboarding</a></li>
+                    <li><a href="/instructor/flagged">Flagged Content</a></li>
+                    <li id="nav-student-hub-li"><a href="/instructor/student-hub">Student Hub</a></li>
+                    <li id="instructor-downloads-nav" style="display: none;"><a href="/instructor/downloads">Download Chats</a></li>
+                    <li><a href="/instructor/ta-hub">TA Hub</a></li>
+                </ul>
+            </nav>
+            <div class="user-info">
+                <div class="user-avatar" id="user-avatar">I</div>
+                <div class="user-name" id="user-display-name">Instructor Name</div>
+                <div class="user-role">Instructor</div>
+                <div class="user-actions">
+                    <a href="/instructor/settings" class="user-action">Settings</a>
+                    <a href="#" id="logout-btn" class="user-action">Logout</a>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="notes-header">
+                <h1>Super Chat Notes</h1>
+                <button class="btn-primary" id="new-note-btn">+ New note</button>
+            </header>
+            <div class="notes-intro">
+                A shared biochemistry knowledge base that the bot reads from. Any instructor can add notes &mdash;
+                corrections, explanations, examples, things students keep asking about &mdash; in plain language.
+                From then on, when anyone uses <strong>Super Chat</strong>, the bot draws on these notes alongside the
+                uploaded course material. It's a department-wide repository, not tied to any single course.
+                Other instructors can see your notes; students cannot.
+            </div>
+
+            <div class="hub-cards">
+                <div class="hub-card active" data-target="panel-browse" id="card-browse">
+                    <div class="hub-icon">&#128218;</div>
+                    <h3>Browse shared notes</h3>
+                    <p><span class="hub-count" id="notes-count">0 notes</span> added by the department. Read others', manage your own.</p>
+                </div>
+                <div class="hub-card" data-target="panel-new" id="card-new">
+                    <div class="hub-icon">&#9998;</div>
+                    <h3>Add a new note</h3>
+                    <p>Write something you want the bot to know. Takes about a minute, in plain English.</p>
+                </div>
+            </div>
+
+            <!-- BROWSE -->
+            <div class="notes-panel active" id="panel-browse">
+                <div class="notes-loading" id="notes-loading">Loading notes...</div>
+                <div id="notes-list-container"></div>
+            </div>
+
+            <!-- EDITOR -->
+            <div class="notes-panel" id="panel-new">
+                <h2 class="panel-heading" id="editor-heading">Write a new note</h2>
+                <div class="note-editor">
+                    <div class="duplicate-warning" id="dupe-warning">
+                        <div class="warn-title">A similar note may already exist</div>
+                        <div id="dupe-detail"></div>
+                        <div class="similar-preview" id="dupe-preview"></div>
+                        <div class="warn-actions">
+                            <button class="btn-secondary" id="dupe-dismiss">Add mine anyway</button>
+                        </div>
+                    </div>
+
+                    <input type="text" id="note-title" maxlength="120"
+                           placeholder="Title (optional — we'll generate one if you leave it blank)" />
+
+                    <textarea id="note-body" maxlength="5000"
+                              placeholder="Write this the way you'd explain it to a student..."></textarea>
+                    <div class="editor-row">
+                        <span class="placeholder-hint">Tip: write a paragraph in your own words. The bot reads it and answers in its own words &mdash; it won't quote you literally.</span>
+                        <span class="char-counter" id="char-counter">0 / 5000</span>
+                    </div>
+
+                    <div class="editor-footer">
+                        <div class="editor-tags" id="editor-tags">
+                            <input type="text" id="tag-input" placeholder="add tag + Enter" />
+                        </div>
+                        <div class="editor-actions">
+                            <button class="btn-secondary" id="cancel-note">Cancel</button>
+                            <button class="btn-primary" id="save-note">Save note</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="../common/scripts/auth.js"></script>
+    <script src="../common/scripts/notifications.js"></script>
+    <script src="./scripts/notes.js"></script>
+</body>
+</html>

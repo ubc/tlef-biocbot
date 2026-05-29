@@ -1,8 +1,26 @@
 const QdrantService = require('./qdrantService');
+const NotesQdrantService = require('./notesQdrantService');
+const SuperChatNote = require('../models/SuperChatNote');
 const prompts = require('./prompts');
 const CourseModel = require('../models/Course');
 
 const SUPER_COURSE_SETTINGS_ID = 'superCourseChat';
+
+// Default share of retrieval slots given to Super Chat Notes (1/4 of TopK).
+const DEFAULT_NOTE_RETRIEVAL_RATIO = 0.25;
+// Notes scoring below this cosine similarity are not worth a retrieval slot;
+// any unused note slots are donated back to lecture retrieval.
+// Calibrated for text-embedding-3-small, which produces low absolute cosine
+// scores (strong matches ~0.5-0.7, moderate ~0.25-0.45). A 0.25 floor keeps
+// clearly-unrelated notes out while letting moderately-relevant ones through.
+// (Lecture retrieval applies no floor, so this stays intentionally permissive.)
+const NOTE_MIN_SCORE = 0.25;
+
+function normalizeNoteRatio(value, fallback) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num < 0 || num > 1) return fallback;
+    return num;
+}
 
 function resolveSuperCourseChatSettings(settingsDoc = {}) {
     const defaults = prompts.DEFAULT_SUPER_COURSE_CHAT_SETTINGS;
@@ -12,6 +30,16 @@ function resolveSuperCourseChatSettings(settingsDoc = {}) {
         instructorTopK: CourseModel.normalizeRagTopK(settingsDoc.instructorTopK, defaults.instructorTopK),
         includeInactiveCourses: settingsDoc.includeInactiveCourses === true,
         showStudentSuperCourse: settingsDoc.showStudentSuperCourse === true,
+        // Notes are instructor-only and on by default; admins can toggle/tune.
+        includeNotesInRetrieval: settingsDoc.includeNotesInRetrieval !== false,
+        noteRetrievalRatio: normalizeNoteRatio(
+            settingsDoc.noteRetrievalRatio,
+            normalizeNoteRatio(defaults.noteRetrievalRatio, DEFAULT_NOTE_RETRIEVAL_RATIO)
+        ),
+        noteMinScore: normalizeNoteRatio(
+            settingsDoc.noteMinScore,
+            normalizeNoteRatio(defaults.noteMinScore, NOTE_MIN_SCORE)
+        ),
         instructorPrompt: typeof settingsDoc.instructorPrompt === 'string' && settingsDoc.instructorPrompt.trim()
             ? settingsDoc.instructorPrompt
             : defaults.instructorPrompt,
@@ -64,15 +92,62 @@ async function searchSuperCourse(db, query, limit, options = {}) {
     const pool = await getSuperCourseRetrievalPool(db, options);
     const courseIds = pool.map(course => course.courseId);
 
-    if (courseIds.length === 0) {
-        return { pool, results: [] };
+    const totalK = Number(limit) > 0 ? Number(limit) : 8;
+
+    // Notes only participate when the caller explicitly opts in (instructor chat).
+    // Student Super Chat never pulls instructor notes.
+    const includeNotes = options.includeNotes === true;
+    const noteRatio = includeNotes
+        ? normalizeNoteRatio(options.noteRatio, DEFAULT_NOTE_RETRIEVAL_RATIO)
+        : 0;
+
+    let noteSlots = includeNotes ? Math.round(totalK * noteRatio) : 0;
+    // Always leave at least one lecture slot when courses are available.
+    if (courseIds.length > 0 && noteSlots >= totalK) {
+        noteSlots = Math.max(0, totalK - 1);
+    }
+    const lectureSlots = totalK - noteSlots;
+
+    // --- Lecture retrieval (over-fetch so we can backfill unused note slots) ---
+    let lectureResults = [];
+    if (courseIds.length > 0 && lectureSlots > 0) {
+        const qdrant = new QdrantService();
+        await qdrant.initialize();
+        lectureResults = await qdrant.searchDocuments(query, { courseId: courseIds }, totalK);
     }
 
-    const qdrant = new QdrantService();
-    await qdrant.initialize();
-    const results = await qdrant.searchDocuments(query, { courseId: courseIds }, limit);
+    // --- Notes retrieval ---
+    let noteResults = [];
+    if (includeNotes && noteSlots > 0) {
+        try {
+            const minScore = normalizeNoteRatio(options.noteMinScore, NOTE_MIN_SCORE);
+            const notesQdrant = new NotesQdrantService();
+            noteResults = await notesQdrant.searchNotes(query, noteSlots, { minScore });
+        } catch (error) {
+            console.error('Super Course note retrieval failed:', error.message);
+            noteResults = [];
+        }
+    }
 
-    return { pool, results };
+    // Donate any unfilled note slots back to lectures.
+    const usedNoteSlots = noteResults.length;
+    const finalLectureCount = lectureSlots + (noteSlots - usedNoteSlots);
+
+    const taggedLectures = lectureResults
+        .slice(0, finalLectureCount)
+        .map(result => ({ ...result, sourceType: 'lecture' }));
+
+    const taggedNotes = noteResults.slice(0, usedNoteSlots); // already tagged sourceType: 'note'
+
+    // Fire-and-forget usage counter bump for the notes we actually used.
+    if (taggedNotes.length) {
+        const noteIds = taggedNotes.map(note => note.noteId).filter(Boolean);
+        SuperChatNote.incrementUsage(db, noteIds).catch(error =>
+            console.error('Failed to increment note usage:', error.message)
+        );
+    }
+
+    return { pool, results: [...taggedLectures, ...taggedNotes] };
 }
 
 function buildCourseNameLookup(pool = []) {
@@ -82,10 +157,25 @@ function buildCourseNameLookup(pool = []) {
     ]));
 }
 
+function formatNoteDate(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('en-CA');
+}
+
 function buildSuperCourseContext(searchResults = [], pool = []) {
     const courseNameById = buildCourseNameLookup(pool);
     return searchResults
         .map(result => {
+            if (result.sourceType === 'note') {
+                const author = result.authorName || 'an instructor';
+                const dateLabel = formatNoteDate(result.createdAt);
+                const header = dateLabel
+                    ? `From an instructor note by ${author} (${dateLabel})`
+                    : `From an instructor note by ${author}`;
+                return `${header}:\n${result.chunkText || ''}`;
+            }
             const courseName = courseNameById.get(result.courseId) || result.courseId || 'Unknown course';
             const lectureName = result.lectureName || 'Unknown unit';
             const fileName = result.fileName || 'Unknown source';
@@ -106,14 +196,29 @@ function buildSuperCoursePoolSummary(pool = []) {
 
 function buildSuperCourseCitations(searchResults = [], pool = []) {
     const courseNameById = buildCourseNameLookup(pool);
-    return searchResults.map(result => ({
-        courseId: result.courseId || null,
-        courseName: courseNameById.get(result.courseId) || result.courseId || null,
-        lectureName: result.lectureName || null,
-        fileName: result.fileName || null,
-        documentId: result.documentId || null,
-        score: result.score
-    }));
+    return searchResults.map(result => {
+        if (result.sourceType === 'note') {
+            const dateLabel = formatNoteDate(result.createdAt);
+            return {
+                sourceType: 'note',
+                noteId: result.noteId || null,
+                authorName: result.authorName || null,
+                title: result.title || null,
+                createdAt: result.createdAt || null,
+                label: `Note by ${result.authorName || 'instructor'}${dateLabel ? `, ${dateLabel}` : ''}`,
+                score: result.score
+            };
+        }
+        return {
+            sourceType: 'lecture',
+            courseId: result.courseId || null,
+            courseName: courseNameById.get(result.courseId) || result.courseId || null,
+            lectureName: result.lectureName || null,
+            fileName: result.fileName || null,
+            documentId: result.documentId || null,
+            score: result.score
+        };
+    });
 }
 
 function buildSuperCourseSourceAttribution(searchResults = [], pool = []) {
@@ -139,11 +244,31 @@ function buildSuperCourseSourceAttribution(searchResults = [], pool = []) {
     const documents = [];
 
     for (const result of searchResults) {
+        if (result.sourceType === 'note') {
+            const key = `note:${result.noteId || result.id}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+
+            const dateLabel = formatNoteDate(result.createdAt);
+            documents.push({
+                sourceType: 'note',
+                courseId: null,
+                courseName: `Note by ${result.authorName || 'instructor'}`,
+                unitName: dateLabel || 'Instructor note',
+                noteId: result.noteId || null,
+                fileName: result.title || null,
+                documentType: 'note',
+                score: result.score
+            });
+            continue;
+        }
+
         const key = result.documentId || `${result.courseId}:${result.lectureName}:${result.fileName}`;
         if (seen.has(key)) continue;
         seen.add(key);
 
         documents.push({
+            sourceType: 'lecture',
             courseId: result.courseId || null,
             courseName: courseNameById.get(result.courseId) || result.courseId || null,
             unitName: result.lectureName || null,
