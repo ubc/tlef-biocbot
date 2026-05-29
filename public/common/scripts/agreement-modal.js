@@ -65,9 +65,16 @@ class AgreementModal {
                             <li><strong>Academic Integrity:</strong> Use BiocBot to enhance your learning, not to replace your own work</li>
                             <li><strong>Respectful Communication:</strong> Maintain a professional and respectful tone in all interactions</li>
                             <li><strong>Appropriate Content:</strong> Ask questions related to your course material and biology topics</li>
-                            <li><strong>Privacy Respect:</strong> Do not share personal information about yourself or others</li>
+                            <li><strong>Privacy Respect:</strong> Do not share personal or private information about yourself or others</li>
+                            <li><strong>Copyright Respect:</strong> Do not enter copyrighted information or materials that you do not have permission to use</li>
                             <li><strong>Constructive Use:</strong> Use BiocBot to ask thoughtful questions that help you learn</li>
                         </ul>
+                    </div>
+
+                    <div class="agreement-section">
+                        <h3>AI Service Notice</h3>
+                        <p>BiocBot sends your conversations to a UBC-approved AI service so it can respond to your questions. That AI service does not store your conversations.</p>
+                        <p>Please do not enter personal, private, confidential, or copyrighted information into BiocBot.</p>
                     </div>
 
                     <div class="agreement-checkbox-container">
