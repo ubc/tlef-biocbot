@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const messages = document.getElementById('chat-messages');
     const sendButton = document.getElementById('send-button');
     const newChatButton = document.getElementById('new-super-course-chat');
+    const levelSelect = document.getElementById('answer-level');
     const scopeLabel = document.getElementById('super-course-scope');
     const poolPanel = document.getElementById('super-course-pool-panel');
     const poolList = document.getElementById('super-course-pool-list');
@@ -30,6 +31,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (!form || !input || !messages || !sendButton) {
         return;
+    }
+
+    // Persist the user's chosen answer depth across sessions.
+    const levelStorageKey = `biocbot_instructor_super_level_${instructorId}`;
+    if (levelSelect) {
+        const savedLevel = localStorage.getItem(levelStorageKey);
+        if (savedLevel && [...levelSelect.options].some(opt => opt.value === savedLevel)) {
+            levelSelect.value = savedLevel;
+        }
+        levelSelect.addEventListener('change', () => {
+            localStorage.setItem(levelStorageKey, levelSelect.value);
+        });
     }
 
     loadSourcePool();
@@ -78,7 +91,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 credentials: 'include',
                 body: JSON.stringify({
                     message: text,
-                    conversationMessages
+                    conversationMessages,
+                    level: levelSelect ? levelSelect.value : undefined
                 })
             });
 

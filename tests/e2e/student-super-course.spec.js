@@ -13,7 +13,7 @@ require('dotenv').config();
 const { MongoClient } = require('mongodb');
 const { test, expect, request } = require('./fixtures/monocart');
 const { TEST_USERS, loadCredentials, storageStatePath } = require('./helpers/users');
-const { resetLlmStub, enqueueLlmResponses } = require('./helpers/llm-stub');
+const { resetLlmStub, enqueueLlmResponses, addLlmStubRule } = require('./helpers/llm-stub');
 
 const SUPER_OPTED_IN_ID = 'BIOC-E2E-SUPER-OPTED-IN';
 const SUPER_OPTED_OUT_ID = 'BIOC-E2E-SUPER-OPTED-OUT';
@@ -62,20 +62,28 @@ async function restoreSettingDoc(id, originalDoc) {
     });
 }
 
-async function setSuperCourseSettings({ showStudentSuperCourse, includeInactiveCourses = false }) {
+async function setSuperCourseSettings({
+    showStudentSuperCourse,
+    includeInactiveCourses = false,
+    studentLevelModifiers,
+    instructorLevelModifiers,
+}) {
     await withDb(async (db) => {
+        const set = {
+            studentTopK: 5,
+            instructorTopK: 5,
+            includeInactiveCourses,
+            showStudentSuperCourse,
+            instructorPrompt: 'E2E instructor super prompt',
+            studentPrompt: 'E2E student super prompt',
+            updatedAt: new Date(),
+        };
+        if (studentLevelModifiers) set.studentLevelModifiers = studentLevelModifiers;
+        if (instructorLevelModifiers) set.instructorLevelModifiers = instructorLevelModifiers;
         await db.collection('settings').updateOne(
                 { _id: SETTINGS_ID },
                 {
-                    $set: {
-                        studentTopK: 5,
-                        instructorTopK: 5,
-                        includeInactiveCourses,
-                        showStudentSuperCourse,
-                        instructorPrompt: 'E2E instructor super prompt',
-                        studentPrompt: 'E2E student super prompt',
-                        updatedAt: new Date(),
-                    },
+                    $set: set,
                     $setOnInsert: { createdAt: new Date() },
                 },
                 { upsert: true }
@@ -346,6 +354,44 @@ test.describe('Super Course API', () => {
             expect(Array.isArray(body.sourceAttribution.poolCourses)).toBe(true);
             const poolCourseIds = body.sourceAttribution.poolCourses.map((c) => c.courseId);
             expect(poolCourseIds).toContain(SUPER_OPTED_IN_ID);
+        } finally {
+            await api.dispose();
+        }
+    });
+
+    test('/chat appends the selected answer-level modifier to the student system prompt', async ({ baseURL }) => {
+        await setSuperCourseSettings({
+            showStudentSuperCourse: true,
+            studentLevelModifiers: {
+                intro: 'STUDENT-LEVEL-MARKER-INTRO',
+                undergraduate: 'STUDENT-LEVEL-MARKER-UNDERGRAD',
+                graduate: 'STUDENT-LEVEL-MARKER-GRADUATE',
+            },
+        });
+
+        const api = await request.newContext({ baseURL, storageState: storageStatePath('student') });
+        try {
+            await resetLlmStub(api);
+            // The rule only fires when the marker is present in the system prompt,
+            // proving the graduate modifier was appended for level=graduate.
+            await addLlmStubRule(api, {
+                matchSystemPrompt: 'STUDENT-LEVEL-MARKER-GRADUATE',
+                content: 'GRADUATE-LEVEL-REPLY',
+            });
+            await enqueueLlmResponses(api, ['FALLBACK-REPLY', 'FALLBACK-REPLY']);
+
+            const gradResp = await api.post('/api/student/super-course/chat', {
+                data: { message: 'Explain glycolysis.', level: 'graduate' },
+            });
+            expect(gradResp.status()).toBe(200);
+            expect((await gradResp.json()).message).toBe('GRADUATE-LEVEL-REPLY');
+
+            // A different level must not pick up the graduate marker.
+            const introResp = await api.post('/api/student/super-course/chat', {
+                data: { message: 'Explain glycolysis.', level: 'intro' },
+            });
+            expect(introResp.status()).toBe(200);
+            expect((await introResp.json()).message).toBe('FALLBACK-REPLY');
         } finally {
             await api.dispose();
         }

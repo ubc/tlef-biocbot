@@ -54,6 +54,16 @@ function normalizeNoteRatioForSettings(value, fallback) {
     return Math.round(num * 100) / 100;
 }
 
+// Keep only known level keys; empty strings are allowed (middle = neutral baseline).
+function normalizeLevelModifiersForSettings(value, keys, defaults) {
+    const source = value && typeof value === 'object' ? value : {};
+    const result = {};
+    for (const key of keys) {
+        result[key] = typeof source[key] === 'string' ? source[key] : defaults[key];
+    }
+    return result;
+}
+
 function resolveSuperCourseChatSettings(settingsDoc = {}) {
     const defaults = prompts.DEFAULT_SUPER_COURSE_CHAT_SETTINGS;
     return {
@@ -69,7 +79,17 @@ function resolveSuperCourseChatSettings(settingsDoc = {}) {
             : defaults.instructorPrompt,
         studentPrompt: typeof settingsDoc.studentPrompt === 'string' && settingsDoc.studentPrompt.trim()
             ? settingsDoc.studentPrompt
-            : defaults.studentPrompt
+            : defaults.studentPrompt,
+        studentLevelModifiers: normalizeLevelModifiersForSettings(
+            settingsDoc.studentLevelModifiers,
+            prompts.STUDENT_LEVEL_KEYS,
+            defaults.studentLevelModifiers
+        ),
+        instructorLevelModifiers: normalizeLevelModifiersForSettings(
+            settingsDoc.instructorLevelModifiers,
+            prompts.INSTRUCTOR_LEVEL_KEYS,
+            defaults.instructorLevelModifiers
+        )
     };
 }
 
@@ -443,7 +463,17 @@ router.put('/super-course-chat', async (req, res) => {
                 prompts.DEFAULT_SUPER_COURSE_CHAT_SETTINGS.noteMinScore
             ),
             instructorPrompt: body.instructorPrompt,
-            studentPrompt: body.studentPrompt
+            studentPrompt: body.studentPrompt,
+            studentLevelModifiers: normalizeLevelModifiersForSettings(
+                body.studentLevelModifiers,
+                prompts.STUDENT_LEVEL_KEYS,
+                prompts.DEFAULT_SUPER_COURSE_CHAT_SETTINGS.studentLevelModifiers
+            ),
+            instructorLevelModifiers: normalizeLevelModifiersForSettings(
+                body.instructorLevelModifiers,
+                prompts.INSTRUCTOR_LEVEL_KEYS,
+                prompts.DEFAULT_SUPER_COURSE_CHAT_SETTINGS.instructorLevelModifiers
+            )
         };
 
         await db.collection('settings').updateOne(

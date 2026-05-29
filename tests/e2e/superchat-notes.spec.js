@@ -24,7 +24,7 @@ require('dotenv').config();
 const { test, expect, request } = require('./fixtures/monocart');
 const { TEST_USERS, storageStatePath } = require('./helpers/users');
 const { withDb, getUserIdByUsername } = require('./helpers/courses-test');
-const { resetLlmStub, enqueueLlmResponses } = require('./helpers/llm-stub');
+const { resetLlmStub, enqueueLlmResponses, addLlmStubRule } = require('./helpers/llm-stub');
 
 const NOTES = '/api/superchat-notes';
 const SETTINGS_ID = 'superCourseChat';
@@ -357,6 +357,40 @@ test.describe('Super Chat retrieval with notes (stubbed LLM)', () => {
             const body = await res.json();
             const noteCitations = (body.citations || []).filter((c) => c.sourceType === 'note');
             expect(noteCitations.length).toBe(0);
+        } finally {
+            await api.dispose();
+        }
+    });
+
+    test('instructor chat appends the selected answer-depth modifier to the system prompt', async ({ baseURL }) => {
+        await setNotesSettings({
+            instructorLevelModifiers: {
+                overview: 'INSTRUCTOR-DEPTH-MARKER-OVERVIEW',
+                standard: 'INSTRUCTOR-DEPTH-MARKER-STANDARD',
+                deepDive: 'INSTRUCTOR-DEPTH-MARKER-DEEPDIVE',
+            },
+        });
+        const api = await ctx(baseURL, 'instructor');
+        try {
+            await resetLlmStub(api);
+            // Rule only fires when the deep-dive marker reaches the system prompt.
+            await addLlmStubRule(api, {
+                matchSystemPrompt: 'INSTRUCTOR-DEPTH-MARKER-DEEPDIVE',
+                content: 'DEEP-DIVE-REPLY',
+            });
+            await enqueueLlmResponses(api, ['FALLBACK-REPLY', 'FALLBACK-REPLY']);
+
+            const deepResp = await api.post('/api/instructor/chat', {
+                data: { message: 'Explain enzyme kinetics.', level: 'deepDive', conversationMessages: [] },
+            });
+            expect(deepResp.status()).toBe(200);
+            expect((await deepResp.json()).message).toBe('DEEP-DIVE-REPLY');
+
+            const overviewResp = await api.post('/api/instructor/chat', {
+                data: { message: 'Explain enzyme kinetics.', level: 'overview', conversationMessages: [] },
+            });
+            expect(overviewResp.status()).toBe(200);
+            expect((await overviewResp.json()).message).toBe('FALLBACK-REPLY');
         } finally {
             await api.dispose();
         }

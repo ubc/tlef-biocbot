@@ -9,6 +9,16 @@ const {
     buildSuperCourseCitations,
     buildSuperCourseSourceAttribution
 } = require('../services/superCourseService');
+const prompts = require('../services/prompts');
+
+// Resolve a user-selected answer level to its configured modifier, falling back
+// to the default level when the requested one is unknown. Empty modifier (the
+// neutral middle level) appends nothing.
+function appendLevelModifier(basePrompt, requestedLevel, validKeys, defaultLevel, modifiers) {
+    const level = validKeys.includes(requestedLevel) ? requestedLevel : defaultLevel;
+    const modifier = modifiers && typeof modifiers[level] === 'string' ? modifiers[level].trim() : '';
+    return modifier ? `${basePrompt}\n\n${modifier}` : basePrompt;
+}
 
 async function ensureStudentSuperCourseEnabled(req, res) {
     const db = req.app.locals.db;
@@ -257,10 +267,18 @@ router.post('/chat', async (req, res) => {
             `Student question: ${message}`
         ].filter(Boolean).join('\n\n');
 
+        const systemPrompt = appendLevelModifier(
+            ctx.settings.studentPrompt,
+            req.body && req.body.level,
+            prompts.STUDENT_LEVEL_KEYS,
+            prompts.DEFAULT_STUDENT_LEVEL,
+            ctx.settings.studentLevelModifiers
+        );
+
         const response = await llmService.sendMessage(prompt, {
             temperature: 0.4,
             maxTokens: 32768,
-            systemPrompt: ctx.settings.studentPrompt
+            systemPrompt
         });
 
         res.json({

@@ -259,6 +259,27 @@ input.is-invalid {
     box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.1);
 }
 
+/* Level modifier fields: stack each label above its textarea */
+.level-modifier-fields {
+    display: flex;
+    flex-direction: column;
+}
+
+.level-modifier-fields label {
+    display: block;
+    font-weight: 600;
+    font-size: 13px;
+    margin: 16px 0 6px;
+}
+
+.level-modifier-fields label:first-child {
+    margin-top: 0;
+}
+
+.level-modifier-fields textarea {
+    min-height: 90px;
+}
+
 /* Testable Units Checkboxes */
 #testable-units-container {
     display: flex;

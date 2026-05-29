@@ -241,6 +241,34 @@
                                 <textarea id="super-student-prompt" rows="10" placeholder="Enter student Super Course prompt..."></textarea>
                             </div>
                         </div>
+                        <div class="setting-item vertical">
+                            <div class="setting-info">
+                                <h3>Student Answer-Level Modifiers</h3>
+                                <p>Appended to the student prompt based on the level the student picks in chat. Undergraduate is the default selection.</p>
+                            </div>
+                            <div class="setting-controls full-width-control level-modifier-fields">
+                                <label for="super-student-level-intro">Introductory</label>
+                                <textarea id="super-student-level-intro" rows="4" placeholder="Modifier appended for the introductory level..."></textarea>
+                                <label for="super-student-level-undergraduate">Undergraduate (default)</label>
+                                <textarea id="super-student-level-undergraduate" rows="4" placeholder="Modifier appended for the undergraduate level..."></textarea>
+                                <label for="super-student-level-graduate">Graduate</label>
+                                <textarea id="super-student-level-graduate" rows="4" placeholder="Modifier appended for the graduate level..."></textarea>
+                            </div>
+                        </div>
+                        <div class="setting-item vertical">
+                            <div class="setting-info">
+                                <h3>Instructor Answer-Depth Modifiers</h3>
+                                <p>Appended to the instructor prompt based on the depth the instructor picks in chat. Standard is the default selection.</p>
+                            </div>
+                            <div class="setting-controls full-width-control level-modifier-fields">
+                                <label for="super-instructor-level-overview">Overview</label>
+                                <textarea id="super-instructor-level-overview" rows="4" placeholder="Modifier appended for the overview depth..."></textarea>
+                                <label for="super-instructor-level-standard">Standard (default)</label>
+                                <textarea id="super-instructor-level-standard" rows="4" placeholder="Modifier appended for the standard depth..."></textarea>
+                                <label for="super-instructor-level-deepDive">Deep dive</label>
+                                <textarea id="super-instructor-level-deepDive" rows="4" placeholder="Modifier appended for the deep-dive depth..."></textarea>
+                            </div>
+                        </div>
                     </div>
                     <div class="settings-actions" style="margin-top: 1rem;">
                         <button id="reset-super-course-settings" class="secondary-button">Reset Super Course Settings to Default</button>
