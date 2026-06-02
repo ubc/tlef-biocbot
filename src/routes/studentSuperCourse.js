@@ -14,6 +14,41 @@ const prompts = require('../services/prompts');
 const TrackerService = require('../services/tracker');
 const User = require('../models/User');
 const StruggleActivity = require('../models/StruggleActivity');
+const CourseModel = require('../models/Course');
+
+// Resolve a course's effective year level: prefer the stored value, fall back to
+// deriving it from the course name (covers courses created before yearLevel
+// existed). Returns null when neither yields a usable level.
+function resolveCourseYearLevel(course = {}) {
+    return CourseModel.normalizeYearLevel(course.yearLevel)
+        ?? CourseModel.parseYearLevelFromName(course.courseName);
+}
+
+// Highest year level among the courses a student is actively enrolled in. This
+// is the student's effective "level" for the Super Course (which spans many
+// courses). Returns null when the student has no enrolled course with a level.
+async function getStudentYearLevel(db, studentId) {
+    if (!db || !studentId) return null;
+
+    const enrolledCourses = await db.collection('courses')
+        .find(
+            {
+                status: { $ne: 'deleted' },
+                [`studentEnrollment.${studentId}.enrolled`]: true
+            },
+            { projection: { yearLevel: 1, courseName: 1 } }
+        )
+        .toArray();
+
+    let maxLevel = null;
+    for (const course of enrolledCourses) {
+        const level = resolveCourseYearLevel(course);
+        if (level !== null && (maxLevel === null || level > maxLevel)) {
+            maxLevel = level;
+        }
+    }
+    return maxLevel;
+}
 
 // Lazily-initialized tracker, shared across requests once the LLM is ready
 // (mirrors the per-course chat route in src/routes/chat.js).
@@ -135,6 +170,25 @@ router.get('/pool', async (req, res) => {
             includeInactiveCourses: ctx.settings.includeInactiveCourses
         });
 
+        // Determine whether the source pool reaches above the student's own
+        // level so the client can reassure them that some material may be
+        // ahead of where they are. Highest pool level vs. the student's highest
+        // enrolled-course level.
+        const studentId = req.user && req.user.userId;
+        const studentYearLevel = await getStudentYearLevel(ctx.db, studentId);
+
+        let poolMaxYearLevel = null;
+        for (const course of pool) {
+            const level = resolveCourseYearLevel(course);
+            if (level !== null && (poolMaxYearLevel === null || level > poolMaxYearLevel)) {
+                poolMaxYearLevel = level;
+            }
+        }
+
+        const hasHigherLevelCourses = studentYearLevel !== null
+            && poolMaxYearLevel !== null
+            && poolMaxYearLevel > studentYearLevel;
+
         res.json({
             success: true,
             courses: pool.map(course => ({
@@ -142,7 +196,10 @@ router.get('/pool', async (req, res) => {
                 courseName: course.courseName || course.courseCode || course.courseId,
                 status: course.status || null
             })),
-            topK: ctx.settings.studentTopK
+            topK: ctx.settings.studentTopK,
+            studentYearLevel,
+            poolMaxYearLevel,
+            hasHigherLevelCourses
         });
     } catch (error) {
         console.error('Error loading student Super Course pool:', error);

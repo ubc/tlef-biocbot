@@ -94,6 +94,55 @@ function normalizeCode(code) {
     return code.trim().toUpperCase();
 }
 
+// Year level is an integer 1-5, where 1-4 are years of undergraduate study and
+// 5 represents Graduate. null means "not set / could not be determined".
+const MIN_YEAR_LEVEL = 1;
+const MAX_YEAR_LEVEL = 5; // 5 = Graduate
+
+/**
+ * Coerce an arbitrary value into a valid year level (1-5) or null.
+ * @param {*} value - Raw value
+ * @returns {number|null} Normalized year level or null
+ */
+function normalizeYearLevel(value) {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < MIN_YEAR_LEVEL || parsed > MAX_YEAR_LEVEL) {
+        return null;
+    }
+    return parsed;
+}
+
+/**
+ * Derive a default year level from a course name using the standard course-code
+ * convention (the leading digit of the course number is the year). For example
+ * "BIOC 401" -> 4, "CHEM 121" -> 1, "BIOC 530" -> 5 (Graduate). Numbers >= 500
+ * map to Graduate (5). Returns null when no usable number is present so callers
+ * can apply their own fallback.
+ * @param {string} courseName - Course name/title
+ * @returns {number|null} Derived year level or null
+ */
+function parseYearLevelFromName(courseName) {
+    if (typeof courseName !== 'string') {
+        return null;
+    }
+
+    // Prefer a standard 3-4 digit course number; fall back to any integer.
+    const match = courseName.match(/\b(\d{3,4})\b/) || courseName.match(/(\d+)/);
+    if (!match) {
+        return null;
+    }
+
+    // The leading digit of a course number is the year of study, for both the
+    // common 3-digit convention ("401" -> 4) and 4-digit codes ("1010" -> 1).
+    // Anything 5+ (e.g. "530") maps to Graduate.
+    const firstDigit = parseInt(match[1][0], 10);
+    if (!firstDigit || firstDigit < MIN_YEAR_LEVEL) {
+        return null;
+    }
+
+    return Math.min(firstDigit, MAX_YEAR_LEVEL);
+}
+
 /**
  * Normalize a topic label for storage/display consistency
  * @param {string} topic - Raw topic text
@@ -956,6 +1005,7 @@ async function createCourseFromOnboarding(db, onboardingData) {
         const course = {
             courseId,
             courseName,
+            yearLevel: parseYearLevelFromName(courseName), // Derived from course number; editable in settings
             courseCode: studentCourseCode, // Generate student course code
             instructorCourseCode, // Generate instructor course code
             instructorId,
@@ -2088,5 +2138,9 @@ module.exports = {
     getRagSettings,
     updateRagSettings,
     getAllowInSuperCourse,
-    updateAllowInSuperCourse
+    updateAllowInSuperCourse,
+    MIN_YEAR_LEVEL,
+    MAX_YEAR_LEVEL,
+    normalizeYearLevel,
+    parseYearLevelFromName
 };

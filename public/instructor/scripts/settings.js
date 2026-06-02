@@ -43,6 +43,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Load quiz practice settings
             await loadQuizSettings();
 
+            // Load course year level
+            await loadCourseLevel();
+
             // Load privacy settings (anonymize students)
             await loadAnonymizeStudentsSetting();
 
@@ -418,6 +421,27 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         } catch (error) {
             console.error('Error loading quiz settings:', error);
+        }
+    }
+
+    /**
+     * Load the course's year level into the Course Level select.
+     */
+    async function loadCourseLevel() {
+        const select = document.getElementById('course-year-level-select');
+        if (!select) return;
+        try {
+            const courseId = await getCurrentCourseId();
+            if (!courseId) return;
+
+            const response = await fetch(`/api/courses/${courseId}`);
+            const result = await response.json();
+            if (result.success && result.data) {
+                const level = result.data.yearLevel;
+                select.value = (level === null || level === undefined) ? '' : String(level);
+            }
+        } catch (error) {
+            console.error('Error loading course year level:', error);
         }
     }
 
@@ -1153,6 +1177,19 @@ document.addEventListener('DOMContentLoaded', async () => {
                         allowSourceAttributionDownloads: sourceAttributionDownloads === true
                     })
                 });
+
+                // Save course year level
+                const yearLevelSelect = document.getElementById('course-year-level-select');
+                if (yearLevelSelect && courseId) {
+                    const rawLevel = yearLevelSelect.value;
+                    const yearLevel = rawLevel === '' ? null : Number(rawLevel);
+                    const instructorId = getCurrentInstructorId();
+                    await fetch(`/api/courses/${courseId}?instructorId=${encodeURIComponent(instructorId)}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ instructorId, yearLevel })
+                    });
+                }
 
                 // Save mental health detection prompt
                 const mhDetectionPrompt = document.getElementById('mental-health-detection-prompt')?.value;
