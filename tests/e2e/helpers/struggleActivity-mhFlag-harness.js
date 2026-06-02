@@ -127,6 +127,89 @@ async function run() {
         const out = await StruggleActivity.getWeeklyActiveTopics(makeDb({ struggleActivity: coll }), 'C');
         assert.equal(out.length, 1);
         assert.ok(coll.lastPipeline);
+        // course-scoped: $match includes courseId, no source filter
+        assert.equal(coll.lastPipeline[0].$match.courseId, 'C');
+        assert.equal(coll.lastPipeline[0].$match.source, undefined);
+    }
+
+    // ---- StruggleActivity.createActivityEntry: source defaults to 'course' ----
+    {
+        const coll = new FakeCollection();
+        await StruggleActivity.createActivityEntry(
+            makeDb({ struggleActivity: coll }),
+            { userId: 'u1', studentName: 'A', courseId: 'C1', topic: 'X', state: 'Active' }
+        );
+        assert.equal(coll.docs[0].source, 'course');
+    }
+
+    // ---- StruggleActivity.createActivityEntry: explicit superCourse source ----
+    {
+        const coll = new FakeCollection();
+        await StruggleActivity.createActivityEntry(
+            makeDb({ struggleActivity: coll }),
+            { userId: 'u1', studentName: 'A', courseId: 'C1', topic: 'X', state: 'Active', source: 'superCourse' }
+        );
+        assert.equal(coll.docs[0].source, 'superCourse');
+    }
+
+    // ---- StruggleActivity.createActivityEntry: unknown source coerced to 'course' ----
+    {
+        const coll = new FakeCollection();
+        await StruggleActivity.createActivityEntry(
+            makeDb({ struggleActivity: coll }),
+            { userId: 'u1', studentName: 'A', courseId: 'C1', topic: 'X', state: 'Active', source: 'bogus' }
+        );
+        assert.equal(coll.docs[0].source, 'course');
+    }
+
+    // ---- StruggleActivity.getActivityByCourse: source filter applied ----
+    {
+        const coll = new FakeCollection();
+        coll.docs = [
+            { courseId: 'C', state: 'Active', source: 'superCourse' },
+            { courseId: 'C', state: 'Active', source: 'course' }
+        ];
+        const out = await StruggleActivity.getActivityByCourse(
+            makeDb({ struggleActivity: coll }), 'C', { source: 'superCourse' }
+        );
+        assert.equal(out.length, 1);
+        assert.equal(coll.lastFind.source, 'superCourse');
+    }
+
+    // ---- StruggleActivity.getSuperCourseActivity: default (all courses, source superCourse) ----
+    {
+        const coll = new FakeCollection();
+        coll.docs = [
+            { courseId: 'C1', source: 'superCourse', state: 'Active' },
+            { courseId: 'C2', source: 'superCourse', state: 'Active' },
+            { courseId: 'C1', source: 'course', state: 'Active' }
+        ];
+        const out = await StruggleActivity.getSuperCourseActivity(makeDb({ struggleActivity: coll }));
+        assert.equal(out.length, 2); // only superCourse rows, across courses
+        assert.deepEqual(coll.lastFind, { source: 'superCourse' });
+    }
+
+    // ---- StruggleActivity.getSuperCourseActivity: with state filter + limit ----
+    {
+        const coll = new FakeCollection();
+        coll.docs = [{ source: 'superCourse', state: 'Active' }];
+        const out = await StruggleActivity.getSuperCourseActivity(
+            makeDb({ struggleActivity: coll }), { state: 'Active', limit: 10 }
+        );
+        assert.equal(out.length, 1);
+        assert.equal(coll.lastFind.state, 'Active');
+    }
+
+    // ---- StruggleActivity.getWeeklyActiveTopics: null courseId + source → global Super Chat ----
+    {
+        const coll = new FakeCollection();
+        coll.aggregateResults = [];
+        await StruggleActivity.getWeeklyActiveTopics(
+            makeDb({ struggleActivity: coll }), null, { source: 'superCourse' }
+        );
+        const match = coll.lastPipeline[0].$match;
+        assert.equal(match.courseId, undefined); // not course-scoped
+        assert.equal(match.source, 'superCourse');
     }
 
     // ---- MentalHealthFlag.createMentalHealthFlag: minimal fields use defaults ----

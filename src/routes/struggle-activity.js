@@ -138,6 +138,77 @@ router.get('/weekly/:courseId', async (req, res) => {
 });
 
 /**
+ * GET /api/struggle-activity/super-course/weekly
+ * Fetch weekly Super Chat struggle topics aggregated across ALL courses.
+ *
+ * Query params:
+ * - weeks: Number of weeks to look back (default: 8)
+ *
+ * NOTE: Must be defined BEFORE /:courseId and is more specific than
+ * /super-course, so it is registered first.
+ */
+router.get('/super-course/weekly', async (req, res) => {
+    try {
+        const weeks = parseInt(req.query.weeks) || 8;
+        const db = req.app.locals.db;
+
+        const weeklyData = await StruggleActivity.getWeeklyActiveTopics(db, null, {
+            weeks,
+            source: 'superCourse'
+        });
+
+        res.json({
+            success: true,
+            data: weeklyData,
+            count: weeklyData.length
+        });
+    } catch (error) {
+        console.error('Error fetching weekly Super Chat struggle topics:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch weekly Super Chat struggle topics',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/struggle-activity/super-course
+ * Fetch Super Chat struggle activity aggregated across ALL courses.
+ *
+ * Query params:
+ * - limit: Maximum number of entries to return (default: 100)
+ * - state: Filter by state ('Active' or 'Inactive')
+ *
+ * NOTE: Must be defined BEFORE the /:courseId catch-all route.
+ */
+router.get('/super-course', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 100;
+        const state = req.query.state;
+        const db = req.app.locals.db;
+
+        const activities = await StruggleActivity.getSuperCourseActivity(db, {
+            limit,
+            state
+        });
+
+        res.json({
+            success: true,
+            data: activities,
+            count: activities.length
+        });
+    } catch (error) {
+        console.error('Error fetching Super Chat struggle activity:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch Super Chat struggle activity',
+            error: error.message
+        });
+    }
+});
+
+/**
  * GET /api/struggle-activity/:courseId
  * Fetch struggle activity history for a specific course
  *

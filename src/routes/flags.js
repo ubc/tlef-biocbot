@@ -146,6 +146,26 @@ router.get('/my', async (req, res) => {
         const visibleFlags = courseId
             ? flags
             : await filterStudentFlagsByEnrollment(db, user.userId, flags);
+
+        // Super Course flags belong to the student but aren't tied to a real
+        // course, so they never match a course filter or the enrollment check.
+        // Always fold in the student's own Super Course flags (deduped) so they
+        // appear in the Flagged page regardless of the selected course.
+        if (courseId !== SUPER_COURSE_FLAG_COURSE_ID) {
+            const superFlags = await FlaggedQuestionModel.getFlaggedQuestionsForStudent(
+                db, user.userId, SUPER_COURSE_FLAG_COURSE_ID
+            );
+            const seen = new Set(visibleFlags.map(f => f.flagId || String(f._id)));
+            for (const sf of superFlags) {
+                const key = sf.flagId || String(sf._id);
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    visibleFlags.push(sf);
+                }
+            }
+            visibleFlags.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        }
+
         return res.json({ success: true, data: { flags: visibleFlags, count: visibleFlags.length } });
     } catch (error) {
         console.error('Error retrieving student flags:', error);
