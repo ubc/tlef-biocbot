@@ -23,14 +23,19 @@
 require('dotenv').config();
 const { test, expect, request } = require('./fixtures/monocart');
 const { TEST_USERS, storageStatePath } = require('./helpers/users');
-const { withDb, getUserIdByUsername } = require('./helpers/courses-test');
+const { withDb, getUserIdByUsername, seedCourse, cleanupCourses } = require('./helpers/courses-test');
+const { seedSuperchat, cleanupSuperchats } = require('./helpers/superchats-test');
 const { resetLlmStub, enqueueLlmResponses, addLlmStubRule } = require('./helpers/llm-stub');
 
 const NOTES = '/api/superchat-notes';
 const SETTINGS_ID = 'superCourseChat';
+// Student-visible bucket + enrolled course, used by the "students never see notes" test.
+const NOTES_BUCKET_ID = 'BIOC-E2E-NOTES-BUCKET';
+const NOTES_COURSE_ID = 'BIOC-E2E-NOTES-COURSE';
 
 let instructorId;
 let instructorFreshId;
+let studentId;
 let originalSuperCourseSettings = null;
 
 async function readSetting(id) {
@@ -90,6 +95,7 @@ function ctx(baseURL, role) {
 test.beforeAll(async () => {
     instructorId = await getUserIdByUsername(TEST_USERS.instructor.username);
     instructorFreshId = await getUserIdByUsername(TEST_USERS.instructor_fresh.username);
+    studentId = await getUserIdByUsername(TEST_USERS.student.username);
     originalSuperCourseSettings = await readSetting(SETTINGS_ID);
 });
 
@@ -99,6 +105,8 @@ test.beforeEach(async () => {
 
 test.afterAll(async () => {
     await cleanupTestNotes();
+    await cleanupCourses([NOTES_COURSE_ID]);
+    await cleanupSuperchats([NOTES_BUCKET_ID]);
     await restoreSettingDoc(SETTINGS_ID, originalSuperCourseSettings);
 });
 
@@ -397,9 +405,16 @@ test.describe('Super Chat retrieval with notes (stubbed LLM)', () => {
     });
 
     test('student Super Chat never surfaces instructor notes', async ({ baseURL }) => {
-        // Notes enabled for instructors AND the student page enabled — students
-        // should still never see notes (gated at the retrieval call site).
-        await setNotesSettings({ includeNotesInRetrieval: true, showStudentSuperCourse: true });
+        // Notes are enabled for instructors. A student-visible bucket the student
+        // is enrolled in lets them open Super Chat — but notes are gated at the
+        // retrieval call site and must never reach the student answer.
+        await setNotesSettings({ includeNotesInRetrieval: true });
+        await seedSuperchat({ superchatId: NOTES_BUCKET_ID, name: 'Notes Bucket', yearLevel: 2, showToStudents: true });
+        await seedCourse({
+            courseId: NOTES_COURSE_ID, instructorId, courseName: 'BIOC 202 Notes',
+            overrides: { yearLevel: 2, superchatIds: [NOTES_BUCKET_ID] },
+            studentEnrollment: { [studentId]: { enrolled: true, enrolledAt: new Date() } },
+        });
 
         const instructorApi = await ctx(baseURL, 'instructor');
         const studentApi = await ctx(baseURL, 'student');
@@ -415,7 +430,7 @@ test.describe('Super Chat retrieval with notes (stubbed LLM)', () => {
             await enqueueLlmResponses(studentApi, ['Student answer about wuzzleforp.']);
 
             const res = await studentApi.post('/api/student/super-course/chat', {
-                data: { message: 'What does wuzzleforp grindlewax do to florbnak?' },
+                data: { superchatId: NOTES_BUCKET_ID, message: 'What does wuzzleforp grindlewax do to florbnak?' },
                 failOnStatusCode: false,
             });
             expect(res.status()).toBe(200);
