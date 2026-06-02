@@ -416,11 +416,14 @@ function applyMode(mode) {
                 instructorPrompt: 'Harness instructor super prompt',
                 studentPrompt: 'Harness student super prompt',
             }]),
+            // Membership is now course-side via superchatIds. The instructor super
+            // chat (no superchatId) pools every course that's in >=1 bucket.
+            // BIOC-C is opted out -> omit superchatIds so the $exists matcher drops it.
             courses: new MemoryCollection([
-                { courseId: 'BIOC-A', courseName: 'Biochemistry A', status: 'active', allowInSuperCourse: true },
-                { courseId: 'BIOC-B', courseName: 'Biochemistry B', status: 'inactive', allowInSuperCourse: true },
-                { courseId: 'BIOC-C', courseName: 'Biochemistry C', status: 'active', allowInSuperCourse: false },
-                { courseId: 'BIOC-D', courseName: 'Biochemistry D', status: 'deleted', allowInSuperCourse: true },
+                { courseId: 'BIOC-A', courseName: 'Biochemistry A', status: 'active', superchatIds: ['harness-bucket'] },
+                { courseId: 'BIOC-B', courseName: 'Biochemistry B', status: 'inactive', superchatIds: ['harness-bucket'] },
+                { courseId: 'BIOC-C', courseName: 'Biochemistry C', status: 'active' },
+                { courseId: 'BIOC-D', courseName: 'Biochemistry D', status: 'deleted', superchatIds: ['harness-bucket'] },
             ]),
         });
         state.llm = {

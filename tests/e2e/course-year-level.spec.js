@@ -21,16 +21,17 @@ const {
     seedCourse,
     cleanupCourses,
 } = require('./helpers/courses-test');
+const { seedSuperchat, cleanupSuperchats } = require('./helpers/superchats-test');
 const CourseModel = require('../../src/models/Course');
 
 const PREFIX = 'BIOC-E2E-YEARLEVEL';
 const COURSE_LEGACY = `${PREFIX}-LEGACY`;     // no stored yearLevel
 const COURSE_STORED = `${PREFIX}-STORED`;     // explicit yearLevel
 const COURSE_INVALID = `${PREFIX}-INVALID`;   // PUT with out-of-range value
-const POOL_HIGH = `${PREFIX}-POOL-HIGH`;      // opted-in, 4th-year
-const ENROLL_LOW = `${PREFIX}-ENROLL-LOW`;    // student enrolled, 2nd-year
-const ENROLL_HIGH = `${PREFIX}-ENROLL-HIGH`;  // student enrolled, grad-level
-const SUPER_SETTINGS_ID = 'superCourseChat';
+const POOL_HIGH = `${PREFIX}-POOL-HIGH`;      // in bucket, 4th-year (not enrolled)
+const ENROLL_LOW = `${PREFIX}-ENROLL-LOW`;    // student enrolled, 2nd-year, in bucket
+const ENROLL_HIGH = `${PREFIX}-ENROLL-HIGH`;  // student enrolled, grad-level, in bucket
+const SUPER_BUCKET_ID = `${PREFIX}-BUCKET`;   // the superchat the student chats
 
 const ALL_COURSE_IDS = [
     COURSE_LEGACY,
@@ -151,72 +152,48 @@ test.describe('Course year-level API', () => {
 
 // ---------------------------------------------------------------------------
 // 3. Super Course — "above your level" detection
+//
+// Under the multi-superchat model the pool comes from a bucket's member courses,
+// and the student must be enrolled in >=1 of those courses to access it. The
+// student's effective level is the highest year among their enrolled courses.
 // ---------------------------------------------------------------------------
 test.describe('Super Course year-level detection', () => {
     test.use({ storageState: storageStatePath('student') });
 
     let studentId;
-    let originalSuperSettings = null;
-
-    async function enableSuperCourse() {
-        await withDb(async (db) => {
-            await db.collection('settings').updateOne(
-                { _id: SUPER_SETTINGS_ID },
-                {
-                    $set: {
-                        studentTopK: 5,
-                        instructorTopK: 5,
-                        includeInactiveCourses: false,
-                        showStudentSuperCourse: true,
-                        instructorPrompt: 'E2E instructor super prompt',
-                        studentPrompt: 'E2E student super prompt',
-                        updatedAt: new Date(),
-                    },
-                    $setOnInsert: { createdAt: new Date() },
-                },
-                { upsert: true }
-            );
-        });
-    }
 
     test.beforeAll(async () => {
         studentId = await getUserIdByUsername(TEST_USERS.student.username);
-        originalSuperSettings = await withDb((db) => db.collection('settings').findOne({ _id: SUPER_SETTINGS_ID }));
     });
 
     test.afterAll(async () => {
         await cleanupCourses(ALL_COURSE_IDS);
-        await withDb(async (db) => {
-            if (originalSuperSettings) {
-                await db.collection('settings').replaceOne({ _id: SUPER_SETTINGS_ID }, originalSuperSettings, { upsert: true });
-            } else {
-                await db.collection('settings').deleteOne({ _id: SUPER_SETTINGS_ID });
-            }
-        });
+        await cleanupSuperchats([SUPER_BUCKET_ID]);
     });
 
     test.beforeEach(async () => {
-        await enableSuperCourse();
-        // A 4th-year course in the Super Course pool.
+        // A student-visible bucket; a 4th-year course already sits in it.
+        await seedSuperchat({ superchatId: SUPER_BUCKET_ID, name: 'Year-Level E2E Bucket', yearLevel: 4, showToStudents: true });
         await seedCourse({
             courseId: POOL_HIGH,
             instructorId: studentId, // owner irrelevant for the pool
             courseName: 'BIOC 401 Advanced',
-            overrides: { allowInSuperCourse: true, yearLevel: 4 },
+            overrides: { yearLevel: 4, superchatIds: [SUPER_BUCKET_ID] },
         });
     });
 
     test('hasHigherLevelCourses is true when the pool reaches above the student level', async ({ request: api }) => {
-        // Student is enrolled in a 2nd-year course only.
+        // Student is enrolled in a 2nd-year course that's also in the bucket
+        // (enrollment is what grants bucket access).
         await seedCourse({
             courseId: ENROLL_LOW,
             instructorId: studentId,
             courseName: 'BIOC 200 Intro',
-            overrides: { yearLevel: 2 },
+            overrides: { yearLevel: 2, superchatIds: [SUPER_BUCKET_ID] },
             studentEnrollment: { [studentId]: { enrolled: true, enrolledAt: new Date() } },
         });
 
-        const res = await api.get('/api/student/super-course/pool');
+        const res = await api.get(`/api/student/super-course/pool?superchatId=${encodeURIComponent(SUPER_BUCKET_ID)}`);
         expect(res.status()).toBe(200);
         const body = await res.json();
         expect(body.success).toBe(true);
@@ -226,19 +203,21 @@ test.describe('Super Course year-level detection', () => {
     });
 
     test('hasHigherLevelCourses is false when the student is already at/above the pool level', async ({ request: api }) => {
-        // Student is enrolled in a graduate-level course (>= the pool's max).
+        // Student is enrolled in a graduate-level course (also in the bucket), so
+        // the pool's max no longer exceeds the student's level.
         await seedCourse({
             courseId: ENROLL_HIGH,
             instructorId: studentId,
             courseName: 'BIOC 530 Graduate Seminar',
-            overrides: { yearLevel: 5 },
+            overrides: { yearLevel: 5, superchatIds: [SUPER_BUCKET_ID] },
             studentEnrollment: { [studentId]: { enrolled: true, enrolledAt: new Date() } },
         });
 
-        const res = await api.get('/api/student/super-course/pool');
+        const res = await api.get(`/api/student/super-course/pool?superchatId=${encodeURIComponent(SUPER_BUCKET_ID)}`);
         const body = await res.json();
         expect(body.studentYearLevel).toBe(5);
-        expect(body.poolMaxYearLevel).toBe(4);
+        // Pool now contains the grad course too, so its max is 5 (not above the student).
+        expect(body.poolMaxYearLevel).toBe(5);
         expect(body.hasHigherLevelCourses).toBe(false);
     });
 });

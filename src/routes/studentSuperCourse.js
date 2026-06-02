@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const {
-    getSuperCourseChatSettings,
+    getSuperchat,
+    listSuperchats,
+    getStudentAccessibleSuperchatIds,
     getSuperCourseRetrievalPool,
     getSuperCourseApprovedTopics,
     searchSuperCourse,
@@ -59,10 +61,10 @@ let localTrackerService;
  * source course that owns the matched topic. See build spec — Option B (per-event
  * logging). Never throws: on any error it resolves to a "no directive" result.
  *
- * @param {Object} params - { db, llmService, user, message, includeInactiveCourses }
+ * @param {Object} params - { db, llmService, user, message, superchatId, includeInactiveCourses }
  * @returns {Promise<{directiveModeActive: boolean, identifiedTopic: string|null}>}
  */
-async function trackSuperCourseStruggle({ db, llmService, user, message, includeInactiveCourses }) {
+async function trackSuperCourseStruggle({ db, llmService, user, message, superchatId, includeInactiveCourses }) {
     const noDirective = { directiveModeActive: false, identifiedTopic: null };
     try {
         if (!db || !llmService || !user || !user.userId || !message) return noDirective;
@@ -71,7 +73,9 @@ async function trackSuperCourseStruggle({ db, llmService, user, message, include
             localTrackerService = new TrackerService(llmService);
         }
 
-        const courseTopics = await getSuperCourseApprovedTopics(db, { includeInactiveCourses });
+        // Scope candidate topics to THIS bucket's courses — fewer candidates means
+        // more accurate cross-course attribution.
+        const courseTopics = await getSuperCourseApprovedTopics(db, { superchatId, includeInactiveCourses });
         if (!courseTopics.length) return noDirective;
 
         const analysis = await localTrackerService.analyzeMessageAcrossCourses(message, courseTopics);
@@ -97,14 +101,16 @@ async function trackSuperCourseStruggle({ db, llmService, user, message, include
         // instead of always writing 'Active'.
         const isActive = !!(updateResult && updateResult.success && updateResult.state && updateResult.state.isActive);
 
-        // Per-event record, attributed to the source course and tagged superCourse.
+        // Per-event record, attributed to the source course and tagged superCourse,
+        // plus the bucket it came from (for per-superchat dashboards).
         await StruggleActivity.createActivityEntry(db, {
             userId: user.userId,
             studentName,
             courseId: analysis.courseId,
             topic: analysis.topic,
             state: isActive ? 'Active' : 'Inactive',
-            source: 'superCourse'
+            source: 'superCourse',
+            superchatId: superchatId || null
         });
 
         console.log(`🕵️ [SUPER_STRUGGLE] Recorded "${analysis.topic}" (${isActive ? 'Active' : 'Inactive'}) for ${studentName} → course ${analysis.courseId} (conf ${analysis.matchConfidence})`);
@@ -130,22 +136,46 @@ function appendLevelModifier(basePrompt, requestedLevel, validKeys, defaultLevel
     return modifier ? `${basePrompt}\n\n${modifier}` : basePrompt;
 }
 
-async function ensureStudentSuperCourseEnabled(req, res) {
+// Resolve and authorize the superchat bucket for a student request. Reads the
+// bucket id from query (?superchatId=) or body, confirms it is student-visible,
+// and confirms the student is enrolled in ≥1 of its courses. Returns
+// { db, superchat, settings } or null (after sending an error response).
+async function resolveStudentSuperchat(req, res) {
     const db = req.app.locals.db;
     if (!db) {
         res.status(503).json({ success: false, message: 'Database connection not available' });
         return null;
     }
 
-    const settings = await getSuperCourseChatSettings(db);
-    if (!settings.showStudentSuperCourse) {
-        res.status(403).json({ success: false, message: 'Student Super Course is not enabled' });
+    const studentId = req.user && req.user.userId;
+    if (!studentId) {
+        res.status(401).json({ success: false, message: 'Authentication required' });
         return null;
     }
 
-    return { db, settings };
+    const superchatId = (req.query && req.query.superchatId) || (req.body && req.body.superchatId);
+    if (!superchatId) {
+        res.status(400).json({ success: false, message: 'superchatId is required' });
+        return null;
+    }
+
+    const superchat = await getSuperchat(db, superchatId);
+    if (!superchat || superchat.showToStudents !== true) {
+        res.status(404).json({ success: false, message: 'Super Course not found' });
+        return null;
+    }
+
+    const accessibleIds = await getStudentAccessibleSuperchatIds(db, studentId);
+    if (!accessibleIds.has(superchatId)) {
+        res.status(403).json({ success: false, message: 'You do not have access to this Super Course' });
+        return null;
+    }
+
+    return { db, superchat, settings: superchat.settings, superchatId };
 }
 
+// GET /status — used by the nav to decide whether to show the Super Course link.
+// "enabled" means the student can access at least one bucket.
 router.get('/status', async (req, res) => {
     try {
         const db = req.app.locals.db;
@@ -153,20 +183,78 @@ router.get('/status', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        const settings = await getSuperCourseChatSettings(db);
-        res.json({ success: true, enabled: settings.showStudentSuperCourse === true });
+        const studentId = req.user && req.user.userId;
+        if (!studentId) {
+            return res.json({ success: true, enabled: false });
+        }
+
+        const accessibleIds = await getStudentAccessibleSuperchatIds(db, studentId);
+        if (!accessibleIds.size) {
+            return res.json({ success: true, enabled: false });
+        }
+        const visible = await listSuperchats(db, { studentVisibleOnly: true });
+        const enabled = visible.some(b => accessibleIds.has(b.superchatId));
+        res.json({ success: true, enabled });
     } catch (error) {
         console.error('Error checking student Super Course status:', error);
         res.status(500).json({ success: false, message: 'Failed to check status' });
     }
 });
 
+// GET /list — the buckets this student can pick from (enrollment-derived +
+// student-visible), ordered by year level with the student's own year first.
+router.get('/list', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const studentId = req.user && req.user.userId;
+        if (!studentId) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        const [accessibleIds, visible, studentYearLevel] = await Promise.all([
+            getStudentAccessibleSuperchatIds(db, studentId),
+            listSuperchats(db, { studentVisibleOnly: true }),
+            getStudentYearLevel(db, studentId)
+        ]);
+
+        const superchats = visible
+            .filter(b => accessibleIds.has(b.superchatId))
+            .map(b => ({
+                superchatId: b.superchatId,
+                name: b.name,
+                description: b.description || '',
+                yearLevel: b.yearLevel ?? null,
+                // Flag buckets aimed above the student's level so the UI can hint
+                // "ahead of your year" without blocking access.
+                aboveStudentLevel: studentYearLevel !== null && b.yearLevel !== null && b.yearLevel > studentYearLevel
+            }));
+
+        // Order: the student's own year first, then ascending year (nulls last).
+        superchats.sort((a, b) => {
+            const av = a.yearLevel === studentYearLevel ? -1 : (a.yearLevel ?? 99);
+            const bv = b.yearLevel === studentYearLevel ? -1 : (b.yearLevel ?? 99);
+            if (av !== bv) return av - bv;
+            return a.name.localeCompare(b.name);
+        });
+
+        res.json({ success: true, superchats, studentYearLevel });
+    } catch (error) {
+        console.error('Error listing student Super Courses:', error);
+        res.status(500).json({ success: false, message: 'Failed to list Super Courses' });
+    }
+});
+
 router.get('/pool', async (req, res) => {
     try {
-        const ctx = await ensureStudentSuperCourseEnabled(req, res);
+        const ctx = await resolveStudentSuperchat(req, res);
         if (!ctx) return;
 
         const pool = await getSuperCourseRetrievalPool(ctx.db, {
+            superchatId: ctx.superchatId,
             includeInactiveCourses: ctx.settings.includeInactiveCourses
         });
 
@@ -191,6 +279,8 @@ router.get('/pool', async (req, res) => {
 
         res.json({
             success: true,
+            superchatId: ctx.superchatId,
+            superchatName: ctx.superchat.name,
             courses: pool.map(course => ({
                 courseId: course.courseId,
                 courseName: course.courseName || course.courseCode || course.courseId,
@@ -209,7 +299,7 @@ router.get('/pool', async (req, res) => {
 
 router.post('/save', async (req, res) => {
     try {
-        const ctx = await ensureStudentSuperCourseEnabled(req, res);
+        const ctx = await resolveStudentSuperchat(req, res);
         if (!ctx) return;
 
         const {
@@ -236,6 +326,7 @@ router.post('/save', async (req, res) => {
         const sessionData = {
             sessionId,
             studentId,
+            superchatId: ctx.superchatId,
             studentName: req.user.displayName || req.user.username || req.user.email || studentId,
             title: title || `Super Course Chat ${new Date().toLocaleDateString()}`,
             messageCount: messageCount || 0,
@@ -266,7 +357,7 @@ router.post('/save', async (req, res) => {
 
 router.get('/sessions', async (req, res) => {
     try {
-        const ctx = await ensureStudentSuperCourseEnabled(req, res);
+        const ctx = await resolveStudentSuperchat(req, res);
         if (!ctx) return;
 
         const studentId = req.user && req.user.userId;
@@ -277,6 +368,7 @@ router.get('/sessions', async (req, res) => {
         const sessions = await ctx.db.collection('student_super_course_chat_sessions')
             .find({
                 studentId,
+                superchatId: ctx.superchatId,
                 $or: [
                     { isDeleted: { $exists: false } },
                     { isDeleted: false }
@@ -307,7 +399,7 @@ router.get('/sessions', async (req, res) => {
 
 router.get('/sessions/:sessionId', async (req, res) => {
     try {
-        const ctx = await ensureStudentSuperCourseEnabled(req, res);
+        const ctx = await resolveStudentSuperchat(req, res);
         if (!ctx) return;
 
         const studentId = req.user && req.user.userId;
@@ -333,7 +425,7 @@ router.get('/sessions/:sessionId', async (req, res) => {
 
 router.delete('/sessions/:sessionId', async (req, res) => {
     try {
-        const ctx = await ensureStudentSuperCourseEnabled(req, res);
+        const ctx = await resolveStudentSuperchat(req, res);
         if (!ctx) return;
 
         const studentId = req.user && req.user.userId;
@@ -355,7 +447,7 @@ router.delete('/sessions/:sessionId', async (req, res) => {
 
 router.post('/chat', async (req, res) => {
     try {
-        const ctx = await ensureStudentSuperCourseEnabled(req, res);
+        const ctx = await resolveStudentSuperchat(req, res);
         if (!ctx) return;
 
         const llmService = req.app.locals.llm;
@@ -381,6 +473,7 @@ router.post('/chat', async (req, res) => {
                 llmService,
                 user: req.user,
                 message,
+                superchatId: ctx.superchatId,
                 includeInactiveCourses: ctx.settings.includeInactiveCourses
             })
             : Promise.resolve({ directiveModeActive: false, identifiedTopic: null });
@@ -389,7 +482,7 @@ router.post('/chat', async (req, res) => {
             ctx.db,
             message,
             ctx.settings.studentTopK,
-            { includeInactiveCourses: ctx.settings.includeInactiveCourses }
+            { superchatId: ctx.superchatId, includeInactiveCourses: ctx.settings.includeInactiveCourses }
         );
 
         const { directiveModeActive, identifiedTopic } = await strugglePromise;

@@ -109,6 +109,54 @@
     align-items: center;
 }
 
+/* Super Course bucket management controls (admin) */
+.superchat-manage-controls {
+    gap: 8px;
+}
+
+.text-input,
+.select-input {
+    padding: 8px 10px;
+    border: 1px solid var(--border-color, #ccc);
+    border-radius: 6px;
+    font-size: 14px;
+    background-color: var(--card-bg, #fff);
+    color: inherit;
+    min-width: 180px;
+}
+
+.text-input:disabled,
+.select-input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Per-course Super Course bucket checklist */
+.superchat-checklist {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+
+.superchat-checklist-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.superchat-checklist-item input {
+    width: auto;
+    margin: 0;
+}
+
+.superchat-checklist-empty {
+    color: var(--text-muted, #888);
+    font-style: italic;
+    margin: 0;
+}
+
 /* Danger button styling */
 .danger-button {
     background-color: var(--danger-color);

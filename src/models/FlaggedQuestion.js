@@ -25,6 +25,7 @@ const { MongoClient } = require('mongodb');
  *   sourceCourseIds: Array,      // Source course IDs cited by a Super Course answer
  *   sourceCourseNames: Array,    // Source course names cited by a Super Course answer
  *   isSuperCourseFlag: Boolean,  // True when submitted from a Super Course chat
+ *   superchatId: String,         // Which superchat bucket the flag came from (super-course flags only; null = legacy/all)
  *   flagStatus: String,          // "pending", "reviewed", "resolved", "dismissed"
  *   instructorResponse: String,  // Instructor's response/explanation
  *   instructorId: String,        // ID of instructor who responded

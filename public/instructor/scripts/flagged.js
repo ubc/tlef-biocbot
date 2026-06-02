@@ -26,6 +26,32 @@ let courseIdPromise = null;
 let redirectInProgress = false;
 const SUPER_COURSE_FLAG_COURSE_ID = 'SUPER_COURSE';
 
+// superchatId -> bucket name, for labeling super-course flags by their bucket.
+const superchatNameById = new Map();
+
+async function loadSuperchatNames() {
+    try {
+        const response = await fetch('/api/superchats', { credentials: 'include' });
+        const result = await response.json();
+        if (response.ok && result.success && Array.isArray(result.superchats)) {
+            superchatNameById.clear();
+            result.superchats.forEach(b => superchatNameById.set(b.superchatId, b.name));
+        }
+    } catch (error) {
+        console.error('Error loading superchat names for flags:', error);
+    }
+}
+
+// Human-readable bucket label for a super-course flag (falls back gracefully for
+// legacy flags that have no superchatId or whose bucket was deleted).
+function getSuperchatLabel(flag) {
+    if (!flag || flag.isSuperCourseFlag !== true) return '';
+    if (flag.superchatId && superchatNameById.has(flag.superchatId)) {
+        return superchatNameById.get(flag.superchatId);
+    }
+    return flag.superchatId ? 'Super Course (archived bucket)' : 'Super Course (all)';
+}
+
 function redirectToOnboardingForMissingCourse() {
     if (redirectInProgress) {
         return;
@@ -236,6 +262,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     // Load content directly
     initializeFilters();
+    await loadSuperchatNames();
     loadFlaggedContent();
     loadFlagStats();
 
@@ -806,9 +833,12 @@ function createFlagElement(flag) {
     const questionText = questionContent.question || 'Question content not available';
     const unitName = flag.unitName || 'Unknown Unit';
     const courseName = flag.courseName || '';
-    const courseTagHtml = courseName
-        ? `<span class="context-tag">Course: ${escapeHtml(courseName)}</span>`
-        : '';
+    const superchatLabel = getSuperchatLabel(flag);
+    const courseTagHtml = superchatLabel
+        ? `<span class="context-tag">Bucket: ${escapeHtml(superchatLabel)}</span>`
+        : (courseName
+            ? `<span class="context-tag">Course: ${escapeHtml(courseName)}</span>`
+            : '');
     const reporterName = flag.reporterName || flag.studentName || `Student ${flag.studentId}`;
     const reporterRole = flag.reporterRole ? `${flag.reporterRole.charAt(0).toUpperCase()}${flag.reporterRole.slice(1)}` : 'Student';
     const concernTitle = flag.reporterRole === 'instructor' ? "Instructor's Concern" : "Student's Concern";
