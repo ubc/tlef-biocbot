@@ -1109,6 +1109,21 @@
     text-align: center;
 }
 
+/* Super Course "above your level" reassurance notice.
+   Sits as a sibling above #chat-messages, so margins align it with the
+   conversation area (which has 20px padding). */
+.super-course-level-notice {
+    margin: 16px 20px 0;
+    padding: 12px 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-secondary, #555);
+    background: var(--info-bg, #eef4ff);
+    border: 1px solid var(--border-color, #cdddf5);
+    border-left: 4px solid var(--primary-color, #3b82f6);
+    border-radius: 8px;
+}
+
 /* Answer Level Selector (user-selectable output level for Super Chat) */
 .answer-level-selector {
     display: inline-flex;

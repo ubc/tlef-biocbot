@@ -847,6 +847,10 @@ router.get('/:courseId', async (req, res) => {
             approvedStruggleTopicDetails: CourseModel.normalizeTopicObjectList(course.approvedStruggleTopics || []),
             weeks: course.courseStructure?.weeks || 0,
             lecturesPerWeek: course.courseStructure?.lecturesPerWeek || 0,
+            // Stored year level, or a sensible default derived from the course
+            // name for courses created before this field existed.
+            yearLevel: CourseModel.normalizeYearLevel(course.yearLevel)
+                ?? CourseModel.parseYearLevelFromName(course.courseName),
             isAdditiveRetrieval: !!course.isAdditiveRetrieval,
             instructorId: course.instructorId,
             createdAt: course.createdAt?.toISOString() || new Date().toISOString(),
@@ -1228,6 +1232,10 @@ async function getCourseForStudent(req, res, courseId) {
             approvedStruggleTopicDetails: CourseModel.normalizeTopicObjectList(course.approvedStruggleTopics || []),
             weeks: course.courseStructure?.weeks || 0,
             lecturesPerWeek: course.courseStructure?.lecturesPerWeek || 0,
+            // Stored year level, or a sensible default derived from the course
+            // name for courses created before this field existed.
+            yearLevel: CourseModel.normalizeYearLevel(course.yearLevel)
+                ?? CourseModel.parseYearLevelFromName(course.courseName),
             isAdditiveRetrieval: !!course.isAdditiveRetrieval,
             studentIdleTimeout: course.prompts?.studentIdleTimeout || 240, // Default 4 minutes
             createdAt: course.createdAt?.toISOString() || new Date().toISOString(),
@@ -1286,7 +1294,7 @@ async function getCourseForStudent(req, res, courseId) {
 router.put('/:courseId', async (req, res) => {
     try {
         const { courseId } = req.params;
-        const { name, weeks, lecturesPerWeek, status, isAdditiveRetrieval, lectures, instructorId: bodyInstructorId } = req.body;
+        const { name, weeks, lecturesPerWeek, status, isAdditiveRetrieval, lectures, yearLevel, instructorId: bodyInstructorId } = req.body;
         // Accept instructorId from query param or body (for compatibility)
         const instructorId = req.query.instructorId || bodyInstructorId;
         
@@ -1336,6 +1344,10 @@ router.put('/:courseId', async (req, res) => {
         if (name) updateData.courseName = name;
         if (status) updateData.status = status;
         if (typeof isAdditiveRetrieval === 'boolean') updateData.isAdditiveRetrieval = isAdditiveRetrieval;
+        // Year level: accept 1-5 (5 = Graduate), or null to clear back to "not set"
+        if (yearLevel !== undefined) {
+            updateData.yearLevel = yearLevel === null ? null : CourseModel.normalizeYearLevel(yearLevel);
+        }
         if (weeks || lecturesPerWeek) {
             updateData.courseStructure = {
                 weeks: weeks || 0,

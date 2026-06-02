@@ -101,6 +101,7 @@ async function getSuperCourseRetrievalPool(db, options = {}) {
                 courseName: 1,
                 courseCode: 1,
                 status: 1,
+                yearLevel: 1,
                 approvedStruggleTopics: 1
             }
         })

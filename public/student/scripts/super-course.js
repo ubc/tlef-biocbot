@@ -809,6 +809,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             const courses = Array.isArray(result.courses) ? result.courses : [];
             renderSourcePool(courses);
+            maybeShowLevelNotice(result.hasHigherLevelCourses === true);
         } catch (error) {
             console.error('Source pool load error:', error);
             if (scopeLabel) scopeLabel.textContent = 'Source pool unavailable';
@@ -850,6 +851,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function formatPoolCourseName(course) {
         return course.courseName || course.courseId || 'Untitled course';
+    }
+
+    // When the source pool reaches above the student's own level, show a
+    // reassurance notice. It is informational only — not part of the chat
+    // transcript, so it is never auto-saved or restored.
+    //
+    // It is inserted as a SIBLING above #chat-messages (not inside it) so that
+    // rebuilding the conversation — restoreRecentSession()/loadChatData() and
+    // startNewChat() both do `messages.innerHTML = ...` — never wipes it. That
+    // also removes the race with the (un-awaited) source-pool fetch.
+    function maybeShowLevelNotice(hasHigherLevelCourses) {
+        if (!hasHigherLevelCourses || !messages || !messages.parentNode) return;
+        if (document.getElementById('super-course-level-notice')) return;
+
+        const notice = document.createElement('div');
+        notice.id = 'super-course-level-notice';
+        notice.className = 'super-course-level-notice';
+        notice.setAttribute('role', 'note');
+        notice.textContent = 'Heads up: this chat can pull from courses above your level. '
+            + "Don't worry if a concept doesn't make sense yet — just ask and I'll explain it.";
+
+        messages.parentNode.insertBefore(notice, messages);
     }
 });
 
