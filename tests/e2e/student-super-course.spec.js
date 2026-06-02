@@ -122,9 +122,11 @@ test.describe('Super Course nav + page gating', () => {
         await page.goto('/student/super-course');
         const picker = page.locator('#superchat-picker');
         await expect(picker).toBeVisible({ timeout: 10_000 });
-        // Only the visible+accessible bucket is offered.
-        await expect(picker.locator('option')).toHaveCount(1);
-        await expect(picker).toContainText('2nd Year Biochem');
+        // The visible+accessible bucket is offered; the hidden and not-enrolled
+        // buckets are not.
+        await expect(picker.locator(`option[value="${BUCKET_VISIBLE}"]`)).toHaveCount(1);
+        await expect(picker.locator(`option[value="${BUCKET_HIDDEN}"]`)).toHaveCount(0);
+        await expect(picker.locator(`option[value="${BUCKET_NOACCESS}"]`)).toHaveCount(0);
 
         const poolList = page.locator('#super-course-pool-list');
         await expect(poolList).toContainText('BIOC 202 Opted In', { timeout: 10_000 });

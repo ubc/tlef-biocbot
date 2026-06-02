@@ -9,7 +9,7 @@
  */
 
 require('dotenv').config();
-const { test, expect, request } = require('./fixtures/monocart');
+const { test, expect } = require('./fixtures/monocart');
 const { TEST_USERS, storageStatePath } = require('./helpers/users');
 const {
     withDb,
