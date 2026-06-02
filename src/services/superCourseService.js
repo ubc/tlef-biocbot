@@ -100,13 +100,35 @@ async function getSuperCourseRetrievalPool(db, options = {}) {
                 courseId: 1,
                 courseName: 1,
                 courseCode: 1,
-                status: 1
+                status: 1,
+                approvedStruggleTopics: 1
             }
         })
         .sort({ courseName: 1, courseId: 1 })
         .toArray();
 
     return courses.filter(course => course && course.courseId);
+}
+
+/**
+ * Gather each Super Course pool course's approved struggle topics, tagged with
+ * the owning course. Feeds the cross-course struggle tracker so a struggle in
+ * the Super Chat can be mapped to a topic and attributed back to its course.
+ *
+ * @param {Object} db - MongoDB database instance
+ * @param {Object} options - { includeInactiveCourses }
+ * @returns {Promise<Array<{courseId: string, courseName: string, approvedTopics: Array<string>}>>}
+ */
+async function getSuperCourseApprovedTopics(db, options = {}) {
+    const pool = await getSuperCourseRetrievalPool(db, options);
+
+    return pool
+        .map(course => ({
+            courseId: course.courseId,
+            courseName: course.courseName || course.courseCode || course.courseId,
+            approvedTopics: CourseModel.normalizeTopicList(course.approvedStruggleTopics || [])
+        }))
+        .filter(entry => entry.approvedTopics.length > 0);
 }
 
 async function searchSuperCourse(db, query, limit, options = {}) {
@@ -319,6 +341,7 @@ module.exports = {
     getSuperCourseChatSettings,
     buildSuperCoursePoolQuery,
     getSuperCourseRetrievalPool,
+    getSuperCourseApprovedTopics,
     searchSuperCourse,
     buildSuperCourseContext,
     buildSuperCoursePoolSummary,

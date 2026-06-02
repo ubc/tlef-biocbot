@@ -559,9 +559,15 @@ module.exports = {
  * @param {string} courseId - Course ID context (from current chat/session)
  * @returns {Promise<Object>} Update result and current state
  */
-async function updateUserStruggleState(db, userId, struggleData, courseId = null) {
+async function updateUserStruggleState(db, userId, struggleData, courseId = null, options = {}) {
     const collection = getUsersCollection(db);
     const { topic, isStruggling } = struggleData || {};
+    // source: tags any activity record this call writes ('course' default, or
+    //   'superCourse' for cross-course Super Chat struggles).
+    // skipActivityLog: when true, update the global counter/persistence but do
+    //   NOT write a StruggleActivity row here. The Super Chat path uses this so
+    //   it can log its own per-event row instead of an activation-only row.
+    const { source = 'course', skipActivityLog = false } = options || {};
     const now = new Date();
 
     // 1. Get current user to find existing topic state
@@ -650,7 +656,7 @@ async function updateUserStruggleState(db, userId, struggleData, courseId = null
         }
     }
 
-    if (isNewActivation) {
+    if (isNewActivation && !skipActivityLog) {
         // Persist to activity history for permanent record
         await StruggleActivity.createActivityEntry(db, {
             userId: user.userId,
@@ -658,9 +664,10 @@ async function updateUserStruggleState(db, userId, struggleData, courseId = null
             courseId: activeCourseId,
             topic: normalizedTopic,
             state: 'Active',
+            source,
             timestamp: now
         });
-        
+
         console.log(`💾 [DB] Persisted Active state for ${studentName} - Topic: ${normalizedTopic}`);
     }
 

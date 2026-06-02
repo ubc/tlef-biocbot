@@ -125,6 +125,25 @@ test.describe('GET /api/flags/my', () => {
         }
     });
 
+    test('includes the student\'s Super Course flags even when scoped to a real course', async ({ baseURL }) => {
+        const courseFlagId = await seedFlagDoc({ courseId: COURSE_A });
+        const superFlagId = await seedFlagDoc({ courseId: 'SUPER_COURSE' });
+        const api = await request.newContext({ baseURL, storageState: storageStatePath('student') });
+        try {
+            // Scoped to a real course the student is enrolled in...
+            const res = await api.get(`/api/flags/my?courseId=${COURSE_A}`);
+            expect(res.ok()).toBeTruthy();
+            const body = await res.json();
+            const ids = body.data.flags.map((f) => f.flagId);
+            expect(ids).toContain(courseFlagId);   // the course flag
+            expect(ids).toContain(superFlagId);    // ...and the Super Course flag still shows
+        } finally {
+            await api.dispose();
+            // SUPER_COURSE flags aren't covered by cleanupFlags([COURSE_A, COURSE_B]).
+            await withDb((db) => db.collection('flaggedQuestions').deleteMany({ flagId: superFlagId }));
+        }
+    });
+
     test('403 when an instructor calls /my', async ({ baseURL }) => {
         const api = await request.newContext({ baseURL, storageState: storageStatePath('instructor') });
         try {

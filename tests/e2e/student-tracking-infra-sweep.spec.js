@@ -769,3 +769,7 @@ test('QuizAttempt unused export + branches are exercised in a coverage harness',
 test('StruggleActivity + MentalHealthFlag model edge branches are exercised in a coverage harness', async () => {
     await expectHarnessClean('struggleActivity-mhFlag-harness.js');
 });
+
+test('Super Chat struggle attribution (updateUserStruggleState options + service helper) is exercised in a coverage harness', async () => {
+    await expectHarnessClean('superCourseStruggle-harness.js');
+});

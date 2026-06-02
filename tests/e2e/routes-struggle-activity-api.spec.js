@@ -28,8 +28,9 @@ const {
 } = require('./helpers/courses-test');
 
 const COURSE_SA = 'BIOC-E2E-API-STRUGGLE-A';
+const COURSE_SB = 'BIOC-E2E-API-STRUGGLE-B';
 const COURSE_SA_INACTIVE = 'BIOC-E2E-API-STRUGGLE-INACTIVE';
-const ALL_COURSES = [COURSE_SA, COURSE_SA_INACTIVE];
+const ALL_COURSES = [COURSE_SA, COURSE_SB, COURSE_SA_INACTIVE];
 
 let instructorId;
 let studentId;
@@ -221,6 +222,71 @@ test.describe('GET /api/struggle-activity/weekly/:courseId', () => {
         const body = await res.json();
         expect(body.success).toBe(true);
         // The 3-day-old activity should fall inside a 2-week window.
+        expect(body.data.length).toBeGreaterThanOrEqual(1);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/struggle-activity/super-course  (cross-course Super Chat aggregate)
+// ---------------------------------------------------------------------------
+test.describe('GET /api/struggle-activity/super-course', () => {
+    test.use({ storageState: storageStatePath('instructor') });
+
+    test.beforeEach(async () => {
+        await seedCourse({ courseId: COURSE_SA, instructorId });
+        await seedCourse({ courseId: COURSE_SB, instructorId });
+        // Two Super Chat struggles attributed to DIFFERENT source courses, plus
+        // one normal in-course struggle that must NOT appear in the aggregate.
+        await withDb((db) =>
+            db.collection('struggleActivity').insertMany([
+                { userId: studentId, studentName: 'E2E Student', courseId: COURSE_SA, topic: 'plant diagnostics', state: 'Active', source: 'superCourse', timestamp: new Date('2026-05-01T00:00:00Z') },
+                { userId: studentId, studentName: 'E2E Student', courseId: COURSE_SB, topic: 'glycolysis',        state: 'Active', source: 'superCourse', timestamp: new Date('2026-05-02T00:00:00Z') },
+                { userId: studentId, studentName: 'E2E Student', courseId: COURSE_SA, topic: 'krebs cycle',       state: 'Active', source: 'course',      timestamp: new Date('2026-05-03T00:00:00Z') },
+            ])
+        );
+    });
+
+    test('returns only superCourse-sourced rows, aggregated across courses', async ({ request: api }) => {
+        const res = await api.get('/api/struggle-activity/super-course');
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.success).toBe(true);
+        expect(body.count).toBe(body.data.length);
+
+        // Invariant: every returned row is Super-Chat-sourced.
+        expect(body.data.every((e) => e.source === 'superCourse')).toBe(true);
+
+        // Our two seeded superCourse rows (across two courses) are present...
+        const mine = body.data.filter((e) => [COURSE_SA, COURSE_SB].includes(e.courseId));
+        const topics = mine.map((e) => e.topic);
+        expect(topics).toContain('plant diagnostics');
+        expect(topics).toContain('glycolysis');
+        // ...and the normal in-course row is excluded.
+        expect(topics).not.toContain('krebs cycle');
+    });
+
+    test('honours the `state` filter', async ({ request: api }) => {
+        const res = await api.get('/api/struggle-activity/super-course?state=Active');
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.data.every((e) => e.state === 'Active' && e.source === 'superCourse')).toBe(true);
+    });
+
+    test('weekly aggregate returns buckets across courses', async ({ request: api }) => {
+        // Seed a recent superCourse row so the weekly window has data.
+        const recent = new Date(Date.now() - 1000 * 60 * 60 * 24 * 3);
+        await withDb((db) =>
+            db.collection('struggleActivity').insertOne({
+                userId: studentId, studentName: 'E2E Student', courseId: COURSE_SB,
+                topic: 'plant diagnostics', state: 'Active', source: 'superCourse', timestamp: recent,
+            })
+        );
+
+        const res = await api.get('/api/struggle-activity/super-course/weekly?weeks=4');
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.success).toBe(true);
+        expect(Array.isArray(body.data)).toBe(true);
         expect(body.data.length).toBeGreaterThanOrEqual(1);
     });
 });

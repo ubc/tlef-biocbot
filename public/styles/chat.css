@@ -937,6 +937,15 @@
     font-size: 1rem;
 }
 
+/* Inline variant: rendered inside a bot message footer (not the header). */
+.directive-mode-badge.directive-mode-inline {
+    font-size: 0.75rem;
+    padding: 3px 10px;
+    margin-right: 8px;
+    align-self: center;
+    animation: none;
+}
+
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(5px); }
     to { opacity: 1; transform: translateY(0); }

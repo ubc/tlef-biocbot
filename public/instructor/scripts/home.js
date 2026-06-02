@@ -11,6 +11,29 @@ let canBypassInstructorCourseCodes = false;
 // mid-cascade, causing per-course fetches to fire against a stale course.
 let _pinnedCourseId = null;
 
+// Sentinel courseId for the cross-course "Super Chat" struggle view. Selecting
+// it in the course dropdown shows Super Chat struggles aggregated across ALL
+// courses (source: 'superCourse') instead of a single course's data.
+const SUPER_COURSE_FILTER_ID = '__super_course__';
+
+function isSuperCourseSelected() {
+    return getSelectedCourseId() === SUPER_COURSE_FILTER_ID;
+}
+
+// Resolve the struggle-activity endpoints, swapping in the cross-course
+// aggregate routes when the Super Chat filter is active.
+function struggleActivityEndpoint(limit) {
+    return isSuperCourseSelected()
+        ? `/api/struggle-activity/super-course?limit=${limit}`
+        : `/api/struggle-activity/${getSelectedCourseId()}?limit=${limit}`;
+}
+
+function weeklyStruggleEndpoint(weeks) {
+    return isSuperCourseSelected()
+        ? `/api/struggle-activity/super-course/weekly?weeks=${weeks}`
+        : `/api/struggle-activity/weekly/${getSelectedCourseId()}?weeks=${weeks}`;
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // Wait for auth to be ready before initializing
     // This ensures getCurrentInstructorId() is available
@@ -977,8 +1000,8 @@ async function pollStruggleActivity() {
         if (!courseId) return;
         
         // Fetch latest activity from API
-        const response = await authenticatedFetch(`/api/struggle-activity/${courseId}?limit=100`);
-        
+        const response = await authenticatedFetch(struggleActivityEndpoint(100));
+
         if (!response.ok) {
             console.warn('Failed to poll struggle activity');
             return;
@@ -1008,8 +1031,8 @@ async function loadInitialStruggleActivity() {
         if (!courseId) return;
         
         // Fetch from persistent history API
-        const response = await authenticatedFetch(`/api/struggle-activity/${courseId}?limit=100`);
-        
+        const response = await authenticatedFetch(struggleActivityEndpoint(100));
+
         if (!response.ok) {
             console.warn('Failed to load struggle activity history');
             return;
@@ -1078,11 +1101,17 @@ function renderLiveStruggleTable() {
             ? '<span class="state-badge active">Active</span>'
             : '<span class="state-badge inactive">Inactive</span>';
 
+        // Distinguish struggles that originated in the cross-course Super Chat
+        // (attributed here) from ones raised in this course's own chat.
+        const sourceBadge = item.source === 'superCourse'
+            ? ' <span class="state-badge" style="background:#6f42c1; color:#fff;" title="Raised in the cross-course Super Chat">via Super Chat</span>'
+            : '';
+
         html += `
             <tr>
                 <td>${timestamp}</td>
                 ${anonymizeStudentsEnabled ? '' : `<td>${escapeHtml(item.studentName)}</td>`}
-                <td>${escapeHtml(capitalizeFirst(item.topic))}</td>
+                <td>${escapeHtml(capitalizeFirst(item.topic))}${sourceBadge}</td>
                 <td>${stateBadge}</td>
             </tr>
         `;
@@ -1195,9 +1224,7 @@ async function loadWeeklyStruggleChart() {
         // Always fetch a generous window so we can paginate client-side
         const fetchWeeks = Math.max(52, (weeklyChartOffset + 1) * WEEKS_PER_PAGE + WEEKS_PER_PAGE);
 
-        const response = await authenticatedFetch(
-            `/api/struggle-activity/weekly/${courseId}?weeks=${fetchWeeks}`
-        );
+        const response = await authenticatedFetch(weeklyStruggleEndpoint(fetchWeeks));
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const result = await response.json();
@@ -1568,6 +1595,22 @@ function appendCourseGroup(selectElement, label, courses) {
     selectElement.appendChild(optgroup);
 }
 
+// Add the cross-course "Super Chat" filter as its own option group at the end
+// of the course dropdown (only on the main course selector, not the join one).
+function appendSuperCourseOption(selectElement) {
+    if (!selectElement) return;
+
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = 'Cross-Course';
+
+    const option = document.createElement('option');
+    option.value = SUPER_COURSE_FILTER_ID;
+    option.textContent = '🌐 Super Chat (all courses)';
+    optgroup.appendChild(option);
+
+    selectElement.appendChild(optgroup);
+}
+
 function populateCourseDropdown(selectElement, courses, placeholderText) {
     selectElement.innerHTML = '';
 
@@ -1671,7 +1714,8 @@ async function loadAvailableCourses() {
         const courses = result.data || [];
 
         populateCourseDropdown(courseSelectDropdown, courses, 'Choose one of your courses...');
-        
+        appendSuperCourseOption(courseSelectDropdown);
+
         console.log('Available courses loaded:', dedupeCourses(courses).length);
         
     } catch (error) {
@@ -1833,7 +1877,24 @@ async function setSelectedCourse(courseId, courseName, courseData = null) {
         urlParams.set('courseId', courseId);
         window.history.replaceState({}, '', `${window.location.pathname}?${urlParams.toString()}`);
     }
-    
+
+    // Cross-course Super Chat struggle view: skip every per-course loader (they
+    // would 404 against the sentinel id) and show only the aggregated widgets.
+    if (courseId === SUPER_COURSE_FILTER_ID) {
+        await enterSuperCourseStruggleView();
+        if (_pinnedCourseId === courseId) {
+            _pinnedCourseId = null;
+        }
+        return;
+    }
+
+    // Returning to a real course: restore the flagged card the Super Chat view
+    // hides (other cards are re-shown by their own loaders below).
+    const flaggedSectionEl = document.querySelector('.flagged-section');
+    if (flaggedSectionEl) {
+        flaggedSectionEl.style.display = '';
+    }
+
     if (!resolvedCourseData) {
         const response = await authenticatedFetch(`/api/courses/${courseId}`);
         if (!response.ok) {
@@ -1912,6 +1973,53 @@ async function setSelectedCourse(courseId, courseName, courseData = null) {
     if (_pinnedCourseId === courseId) {
         _pinnedCourseId = null;
     }
+}
+
+/**
+ * Enter the cross-course Super Chat struggle view.
+ * Hides per-course cards and shows the struggle widgets fed by the
+ * source: 'superCourse' aggregate endpoints.
+ */
+async function enterSuperCourseStruggleView() {
+    const courseNameDisplay = document.getElementById('course-name-display');
+    if (courseNameDisplay) {
+        courseNameDisplay.textContent = '🌐 Super Chat (all courses)';
+    }
+
+    const courseSelectionContainer = document.getElementById('course-selection-container');
+    if (courseSelectionContainer) {
+        courseSelectionContainer.style.display = 'block';
+    }
+
+    hideCourseSelector();
+    updateNavigationLinks();
+
+    // Names span courses here, so default to anonymized to avoid cross-course
+    // exposure in the aggregated table.
+    anonymizeStudentsEnabled = true;
+
+    // Hide course-specific cards that don't apply to a cross-course view.
+    ['statistics-section', 'approved-topics-section', 'persistence-topics-section', 'missing-items-section']
+        .forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+    const flaggedSection = document.querySelector('.flagged-section');
+    if (flaggedSection) flaggedSection.style.display = 'none';
+
+    // Show the struggle section; swap the per-student snapshot for an explainer.
+    const struggleSection = document.getElementById('struggle-topics-section');
+    if (struggleSection) struggleSection.style.display = 'block';
+    const struggleContent = document.getElementById('struggle-topics-content');
+    if (struggleContent) {
+        struggleContent.innerHTML = '<p style="color:#666; padding:10px 0;">Struggles students raised in the cross-course Super Chat, aggregated across all courses. Each is also recorded on the course that owns the topic.</p>';
+    }
+
+    // Aggregated Super Chat widgets.
+    startPollingStruggleActivity();
+    await loadInitialStruggleActivity();
+    weeklyChartOffset = 0;
+    await loadWeeklyStruggleChart();
 }
 
 /**
