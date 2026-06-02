@@ -15,22 +15,39 @@ let _pinnedCourseId = null;
 // it in the course dropdown shows Super Chat struggles aggregated across ALL
 // courses (source: 'superCourse') instead of a single course's data.
 const SUPER_COURSE_FILTER_ID = '__super_course__';
+// Per-bucket filter ids look like "__super_course__::<superchatId>". The bare
+// sentinel means "all buckets" (legacy/global aggregate).
+const SUPER_COURSE_BUCKET_PREFIX = `${SUPER_COURSE_FILTER_ID}::`;
 
 function isSuperCourseSelected() {
-    return getSelectedCourseId() === SUPER_COURSE_FILTER_ID;
+    const id = getSelectedCourseId();
+    return id === SUPER_COURSE_FILTER_ID || (typeof id === 'string' && id.startsWith(SUPER_COURSE_BUCKET_PREFIX));
+}
+
+// Extract the superchatId from a per-bucket filter id, or '' for the all-buckets view.
+function selectedSuperchatId() {
+    const id = getSelectedCourseId();
+    return (typeof id === 'string' && id.startsWith(SUPER_COURSE_BUCKET_PREFIX))
+        ? id.slice(SUPER_COURSE_BUCKET_PREFIX.length)
+        : '';
+}
+
+function superCourseQuerySuffix() {
+    const scId = selectedSuperchatId();
+    return scId ? `&superchatId=${encodeURIComponent(scId)}` : '';
 }
 
 // Resolve the struggle-activity endpoints, swapping in the cross-course
 // aggregate routes when the Super Chat filter is active.
 function struggleActivityEndpoint(limit) {
     return isSuperCourseSelected()
-        ? `/api/struggle-activity/super-course?limit=${limit}`
+        ? `/api/struggle-activity/super-course?limit=${limit}${superCourseQuerySuffix()}`
         : `/api/struggle-activity/${getSelectedCourseId()}?limit=${limit}`;
 }
 
 function weeklyStruggleEndpoint(weeks) {
     return isSuperCourseSelected()
-        ? `/api/struggle-activity/super-course/weekly?weeks=${weeks}`
+        ? `/api/struggle-activity/super-course/weekly?weeks=${weeks}${superCourseQuerySuffix()}`
         : `/api/struggle-activity/weekly/${getSelectedCourseId()}?weeks=${weeks}`;
 }
 
@@ -1595,18 +1612,36 @@ function appendCourseGroup(selectElement, label, courses) {
     selectElement.appendChild(optgroup);
 }
 
-// Add the cross-course "Super Chat" filter as its own option group at the end
-// of the course dropdown (only on the main course selector, not the join one).
-function appendSuperCourseOption(selectElement) {
+// Add the cross-course "Super Chat" filters as their own option group at the end
+// of the course dropdown (only on the main course selector, not the join one):
+// one "all buckets" aggregate plus one entry per superchat bucket.
+async function appendSuperCourseOption(selectElement) {
     if (!selectElement) return;
 
     const optgroup = document.createElement('optgroup');
-    optgroup.label = 'Cross-Course';
+    optgroup.label = 'Super Chat';
 
-    const option = document.createElement('option');
-    option.value = SUPER_COURSE_FILTER_ID;
-    option.textContent = '🌐 Super Chat (all courses)';
-    optgroup.appendChild(option);
+    // All-buckets aggregate (legacy/global view).
+    const allOption = document.createElement('option');
+    allOption.value = SUPER_COURSE_FILTER_ID;
+    allOption.textContent = '🌐 Super Chat (all buckets)';
+    optgroup.appendChild(allOption);
+
+    // One entry per bucket.
+    try {
+        const response = await fetch('/api/superchats', { credentials: 'include' });
+        const result = await response.json();
+        if (response.ok && result.success && Array.isArray(result.superchats)) {
+            result.superchats.forEach(bucket => {
+                const option = document.createElement('option');
+                option.value = `${SUPER_COURSE_BUCKET_PREFIX}${bucket.superchatId}`;
+                option.textContent = `🌐 ${bucket.name}`;
+                optgroup.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('Error loading superchat buckets for filter:', error);
+    }
 
     selectElement.appendChild(optgroup);
 }
@@ -1714,7 +1749,7 @@ async function loadAvailableCourses() {
         const courses = result.data || [];
 
         populateCourseDropdown(courseSelectDropdown, courses, 'Choose one of your courses...');
-        appendSuperCourseOption(courseSelectDropdown);
+        await appendSuperCourseOption(courseSelectDropdown);
 
         console.log('Available courses loaded:', dedupeCourses(courses).length);
         

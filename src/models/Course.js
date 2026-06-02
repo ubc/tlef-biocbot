@@ -415,6 +415,67 @@ async function updateAllowInSuperCourse(db, courseId, allowInSuperCourse, update
 }
 
 /**
+ * Normalize an arbitrary value into a clean array of superchat IDs (deduped,
+ * trimmed strings). Used by both reads and writes of course.superchatIds.
+ * @param {*} value
+ * @returns {string[]}
+ */
+function normalizeSuperchatIds(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const raw of value) {
+        const id = typeof raw === 'string' ? raw.trim() : '';
+        if (id && !seen.has(id)) {
+            seen.add(id);
+            out.push(id);
+        }
+    }
+    return out;
+}
+
+/**
+ * Get the superchat buckets a course belongs to.
+ * @param {Object} courseDoc
+ * @returns {string[]}
+ */
+function getCourseSuperchatIds(courseDoc = {}) {
+    return normalizeSuperchatIds(courseDoc.superchatIds);
+}
+
+/**
+ * Replace the set of superchat buckets a course belongs to.
+ * @param {Object} db
+ * @param {string} courseId
+ * @param {string[]} superchatIds
+ * @param {string|null} updatedById
+ * @returns {Promise<Object>} { success, superchatIds, error }
+ */
+async function updateCourseSuperchats(db, courseId, superchatIds, updatedById = null) {
+    const collection = getCoursesCollection(db);
+    const normalized = normalizeSuperchatIds(superchatIds);
+    const update = {
+        superchatIds: normalized,
+        updatedAt: new Date()
+    };
+
+    if (updatedById) {
+        update.lastUpdatedById = updatedById;
+    }
+
+    const result = await collection.updateOne(
+        { courseId, status: { $ne: 'deleted' } },
+        { $set: update }
+    );
+
+    return {
+        success: result.matchedCount > 0,
+        superchatIds: normalized,
+        error: result.matchedCount > 0 ? null : 'Course not found'
+    };
+}
+
+/**
  * Ensure all courses have both student and instructor course codes (Migration)
  * @param {Object} db - MongoDB database instance
  */
@@ -1006,6 +1067,7 @@ async function createCourseFromOnboarding(db, onboardingData) {
             courseId,
             courseName,
             yearLevel: parseYearLevelFromName(courseName), // Derived from course number; editable in settings
+            superchatIds: [], // Superchat buckets this course belongs to (instructor-managed)
             courseCode: studentCourseCode, // Generate student course code
             instructorCourseCode, // Generate instructor course code
             instructorId,
@@ -2139,6 +2201,9 @@ module.exports = {
     updateRagSettings,
     getAllowInSuperCourse,
     updateAllowInSuperCourse,
+    normalizeSuperchatIds,
+    getCourseSuperchatIds,
+    updateCourseSuperchats,
     MIN_YEAR_LEVEL,
     MAX_YEAR_LEVEL,
     normalizeYearLevel,

@@ -7,6 +7,7 @@ const express = require('express');
 const router = express.Router();
 const prompts = require('../services/prompts');
 const CourseModel = require('../models/Course');
+const SuperchatModel = require('../models/Superchat');
 const { hasSystemAdminAccess, normalizeEmail } = require('../services/authorization');
 const {
     listSystemAdmins,
@@ -36,10 +37,9 @@ function normalizeTopKForSettings(value) {
 
 function buildAiSettingsResponse(course) {
     return {
-        allowInSuperCourse: CourseModel.getAllowInSuperCourse(course),
+        superchatIds: CourseModel.getCourseSuperchatIds(course),
         ragSettings: CourseModel.resolveRagSettings(course),
         defaults: {
-            allowInSuperCourse: false,
             studentTopK: CourseModel.DEFAULT_STUDENT_RAG_TOP_K,
             minTopK: CourseModel.MIN_RAG_TOP_K,
             maxTopK: CourseModel.MAX_RAG_TOP_K
@@ -99,6 +99,13 @@ function buildSuperCourseChatDefaults() {
         minTopK: CourseModel.MIN_RAG_TOP_K,
         maxTopK: CourseModel.MAX_RAG_TOP_K
     };
+}
+
+// Allow the course's own instructor OR a system admin to manage a course's
+// settings. Admins short-circuit; otherwise ownership is verified.
+async function requireCourseSettingsAccess(db, req, res, courseId) {
+    if (req.user && hasSystemAdminAccess(req.user)) return true;
+    return requireInstructorForCourseSettings(db, req, res, courseId);
 }
 
 async function requireInstructorForCourseSettings(db, req, res, courseId) {
@@ -265,28 +272,37 @@ router.get('/ai-settings', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        if (!requireSystemAdmin(req, res)) {
-            return;
-        }
-
         const courseId = req.query.courseId;
         if (!courseId) {
             return res.status(400).json({ success: false, message: 'courseId is required' });
         }
 
+        if (!(await requireCourseSettingsAccess(db, req, res, courseId))) {
+            return;
+        }
+
         const course = await db.collection('courses').findOne(
             { courseId, status: { $ne: 'deleted' } },
-            { projection: { courseId: 1, ragSettings: 1, allowInSuperCourse: 1 } }
+            { projection: { courseId: 1, ragSettings: 1, superchatIds: 1 } }
         );
 
         if (!course) {
             return res.status(404).json({ success: false, message: 'Course not found' });
         }
 
+        // Include the available buckets so the per-course checklist can render
+        // names + current membership in one round-trip.
+        const buckets = await SuperchatModel.listSuperchats(db);
+
         res.json({
             success: true,
             courseId,
-            settings: buildAiSettingsResponse(course)
+            settings: buildAiSettingsResponse(course),
+            availableSuperchats: buckets.map(b => ({
+                superchatId: b.superchatId,
+                name: b.name,
+                yearLevel: b.yearLevel ?? null
+            }))
         });
     } catch (error) {
         console.error('Error fetching AI settings:', error);
@@ -301,13 +317,13 @@ router.put('/ai-settings', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        if (!requireSystemAdmin(req, res)) {
-            return;
-        }
-
-        const { courseId, allowInSuperCourse, studentTopK } = req.body || {};
+        const { courseId, superchatIds, studentTopK } = req.body || {};
         if (!courseId) {
             return res.status(400).json({ success: false, message: 'courseId is required' });
+        }
+
+        if (!(await requireCourseSettingsAccess(db, req, res, courseId))) {
+            return;
         }
 
         const topK = normalizeTopKForSettings(studentTopK);
@@ -318,11 +334,13 @@ router.put('/ai-settings', async (req, res) => {
             });
         }
 
+        const normalizedSuperchatIds = CourseModel.normalizeSuperchatIds(superchatIds);
+
         const result = await db.collection('courses').updateOne(
             { courseId, status: { $ne: 'deleted' } },
             {
                 $set: {
-                    allowInSuperCourse: allowInSuperCourse === true,
+                    superchatIds: normalizedSuperchatIds,
                     'ragSettings.student.topK': topK,
                     updatedAt: new Date(),
                     lastUpdatedById: req.user.userId
@@ -339,7 +357,7 @@ router.put('/ai-settings', async (req, res) => {
             courseId,
             message: 'AI settings saved',
             settings: {
-                allowInSuperCourse: allowInSuperCourse === true,
+                superchatIds: normalizedSuperchatIds,
                 ragSettings: { student: { topK } },
                 defaults: buildAiSettingsResponse({}).defaults
             }
@@ -357,20 +375,20 @@ router.post('/ai-settings/reset', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        if (!requireSystemAdmin(req, res)) {
-            return;
-        }
-
         const { courseId } = req.body || {};
         if (!courseId) {
             return res.status(400).json({ success: false, message: 'courseId is required' });
+        }
+
+        if (!(await requireCourseSettingsAccess(db, req, res, courseId))) {
+            return;
         }
 
         const result = await db.collection('courses').updateOne(
             { courseId, status: { $ne: 'deleted' } },
             {
                 $set: {
-                    allowInSuperCourse: false,
+                    superchatIds: [],
                     'ragSettings.student.topK': CourseModel.DEFAULT_STUDENT_RAG_TOP_K,
                     updatedAt: new Date(),
                     lastUpdatedById: req.user.userId
@@ -387,7 +405,7 @@ router.post('/ai-settings/reset', async (req, res) => {
             courseId,
             message: 'AI settings reset to defaults',
             settings: {
-                allowInSuperCourse: false,
+                superchatIds: [],
                 ragSettings: { student: { topK: CourseModel.DEFAULT_STUDENT_RAG_TOP_K } },
                 defaults: buildAiSettingsResponse({}).defaults
             }

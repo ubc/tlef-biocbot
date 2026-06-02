@@ -3,6 +3,7 @@ const NotesQdrantService = require('./notesQdrantService');
 const SuperChatNote = require('../models/SuperChatNote');
 const prompts = require('./prompts');
 const CourseModel = require('../models/Course');
+const SuperchatModel = require('../models/Superchat');
 
 const SUPER_COURSE_SETTINGS_ID = 'superCourseChat';
 
@@ -75,9 +76,98 @@ async function getSuperCourseChatSettings(db) {
     return resolveSuperCourseChatSettings(settingsDoc || {});
 }
 
-function buildSuperCoursePoolQuery(includeInactiveCourses = false) {
+/**
+ * Resolve a single superchat bucket: its identity (name/yearLevel/showToStudents)
+ * plus its normalized chat settings. Returns null when the bucket is missing or
+ * soft-deleted.
+ * @param {Object} db
+ * @param {string} superchatId
+ * @returns {Promise<Object|null>}
+ */
+async function getSuperchat(db, superchatId) {
+    const doc = await SuperchatModel.getSuperchatById(db, superchatId);
+    if (!doc) return null;
+    return {
+        superchatId: doc.superchatId,
+        name: doc.name,
+        description: doc.description || '',
+        yearLevel: doc.yearLevel ?? null,
+        showToStudents: doc.showToStudents === true,
+        settings: resolveSuperCourseChatSettings(doc)
+    };
+}
+
+/**
+ * List superchat buckets as lightweight summaries (no resolved settings).
+ * @param {Object} db
+ * @param {Object} options - { studentVisibleOnly: boolean }
+ * @returns {Promise<Array<{superchatId, name, description, yearLevel, showToStudents}>>}
+ */
+async function listSuperchats(db, options = {}) {
+    const docs = await SuperchatModel.listSuperchats(db);
+    return docs
+        .filter(doc => !options.studentVisibleOnly || doc.showToStudents === true)
+        .map(doc => ({
+            superchatId: doc.superchatId,
+            name: doc.name,
+            description: doc.description || '',
+            yearLevel: doc.yearLevel ?? null,
+            showToStudents: doc.showToStudents === true
+        }));
+}
+
+/**
+ * Course IDs a student is actively enrolled in (studentEnrollment.<id>.enrolled).
+ * Drives both the student superchat picker and per-request access checks.
+ * @param {Object} db
+ * @param {string} studentId
+ * @returns {Promise<string[]>}
+ */
+async function getEnrolledCourseIds(db, studentId) {
+    if (!db || !studentId) return [];
+    const courses = await db.collection('courses')
+        .find(
+            {
+                status: { $ne: 'deleted' },
+                [`studentEnrollment.${studentId}.enrolled`]: true
+            },
+            { projection: { courseId: 1 } }
+        )
+        .toArray();
+    return courses.map(course => course.courseId).filter(Boolean);
+}
+
+/**
+ * Set of superchat bucket IDs a student can access: the union of superchatIds
+ * across every course they are actively enrolled in. This is the enrollment-derived
+ * visibility gate (a student sees a bucket if enrolled in ≥1 of its courses).
+ * @param {Object} db
+ * @param {string} studentId
+ * @returns {Promise<Set<string>>}
+ */
+async function getStudentAccessibleSuperchatIds(db, studentId) {
+    const enrolledCourseIds = await getEnrolledCourseIds(db, studentId);
+    if (!enrolledCourseIds.length) return new Set();
+
+    const courses = await db.collection('courses')
+        .find(
+            { courseId: { $in: enrolledCourseIds } },
+            { projection: { superchatIds: 1 } }
+        )
+        .toArray();
+
+    const ids = new Set();
+    for (const course of courses) {
+        for (const id of CourseModel.getCourseSuperchatIds(course)) ids.add(id);
+    }
+    return ids;
+}
+
+function buildSuperCoursePoolQuery(superchatId, includeInactiveCourses = false) {
     const query = {
-        allowInSuperCourse: true,
+        // A specific bucket filters to its members; no bucket id means "any bucket"
+        // (used by instructor chat, which spans all opted-in courses).
+        superchatIds: superchatId ? superchatId : { $exists: true, $ne: [] },
         status: { $ne: 'deleted' }
     };
 
@@ -95,7 +185,7 @@ function buildSuperCoursePoolQuery(includeInactiveCourses = false) {
 async function getSuperCourseRetrievalPool(db, options = {}) {
     const includeInactiveCourses = options.includeInactiveCourses === true;
     const courses = await db.collection('courses')
-        .find(buildSuperCoursePoolQuery(includeInactiveCourses), {
+        .find(buildSuperCoursePoolQuery(options.superchatId, includeInactiveCourses), {
             projection: {
                 courseId: 1,
                 courseName: 1,
@@ -340,6 +430,10 @@ module.exports = {
     SUPER_COURSE_SETTINGS_ID,
     resolveSuperCourseChatSettings,
     getSuperCourseChatSettings,
+    getSuperchat,
+    listSuperchats,
+    getEnrolledCourseIds,
+    getStudentAccessibleSuperchatIds,
     buildSuperCoursePoolQuery,
     getSuperCourseRetrievalPool,
     getSuperCourseApprovedTopics,

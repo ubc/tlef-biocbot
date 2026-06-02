@@ -202,7 +202,7 @@ function buildSettingsCourse({
             shortAnswer: 'Seed short answer prompt',
         };
         course.mentalHealthDetectionPrompt = 'Seed mental health detection prompt';
-        course.allowInSuperCourse = false;
+        course.superchatIds = [];
         course.ragSettings = {
             student: { topK: 6 },
         };
@@ -388,14 +388,14 @@ async function setupMockedSettingsRoutes(page, options = {}) {
         },
         promptSaveResult: { success: true },
         aiSettings: {
-            allowInSuperCourse: false,
+            superchatIds: [],
             ragSettings: { student: { topK: 6 } },
-            defaults: { allowInSuperCourse: false, studentTopK: 3, minTopK: 1, maxTopK: 20 },
+            defaults: { studentTopK: 3, minTopK: 1, maxTopK: 20 },
         },
         aiSettingsResetResult: {
             success: true,
             settings: {
-                allowInSuperCourse: false,
+                superchatIds: [],
                 ragSettings: { student: { topK: 3 } },
             },
         },
@@ -418,6 +418,9 @@ async function setupMockedSettingsRoutes(page, options = {}) {
                 studentPrompt: 'Default student super prompt',
             },
         },
+        // Buckets returned by GET /api/superchats. Empty by default; mocked tests
+        // that exercise bucket management can override state.superchats.
+        superchats: [],
         transferStatus: 200,
         transferResult: {
             success: true,
@@ -588,7 +591,31 @@ async function setupMockedSettingsRoutes(page, options = {}) {
                 return;
             }
 
-            await route.fulfill(jsonResponse({ success: true, settings: state.aiSettings }));
+            await route.fulfill(jsonResponse({
+                success: true,
+                settings: state.aiSettings,
+                availableSuperchats: state.superchats || [],
+            }));
+            return;
+        }
+
+        // Superchat bucket CRUD (instructor/admin). The mocked settings page calls
+        // GET /api/superchats (list) and GET /api/superchats/:id (editor) on load.
+        if (pathname === '/api/superchats') {
+            await route.fulfill(jsonResponse({ success: true, superchats: state.superchats || [] }));
+            return;
+        }
+        if (pathname.startsWith('/api/superchats/')) {
+            if (method === 'GET') {
+                const id = pathname.split('/').pop();
+                const bucket = (state.superchats || []).find((b) => b.superchatId === id);
+                await route.fulfill(jsonResponse(
+                    bucket ? { success: true, superchat: { ...bucket, settings: state.superCourseSettings } } : { success: false, message: 'Not found' },
+                    bucket ? 200 : 404
+                ));
+                return;
+            }
+            await route.fulfill(jsonResponse({ success: true }));
             return;
         }
 
@@ -738,8 +765,10 @@ test.describe('Instructor settings UI', () => {
         await expect(page.locator('#mental-health-detection-section')).toBeHidden();
         await expect(page.locator('#system-admin-section')).toBeHidden();
         await expect(page.locator('#llm-model-section')).toBeHidden();
-        await expect(page.locator('#ai-settings-section')).toBeHidden();
-        await expect(page.locator('#super-course-chat-section')).toBeHidden();
+        // Super Course settings (per-course bucket membership + bucket management)
+        // are open to instructors, not just admins.
+        await expect(page.locator('#ai-settings-section')).toBeVisible();
+        await expect(page.locator('#super-course-chat-section')).toBeVisible();
 
         await expect(page.locator('#idle-timeout-input')).toHaveValue('3');
         await expect(page.locator('#additive-retrieval-toggle')).not.toBeChecked();
@@ -811,14 +840,10 @@ test.describe('Instructor settings UI', () => {
         await expect(page.locator('#super-course-chat-section')).toBeVisible();
         await expect(page.locator('#mental-health-detection-prompt')).toHaveValue('Seed mental health detection prompt');
         await expect(page.locator('#question-system-prompt')).toHaveValue('Seed question system prompt');
-        await expect(page.locator('#allow-super-course-toggle')).not.toBeChecked();
         await expect(page.locator('#student-chat-topk-input')).toHaveValue('6');
-        await expect(page.locator('#super-instructor-topk-input')).toHaveValue('10');
-        await expect(page.locator('#super-student-topk-input')).toHaveValue('9');
-        await expect(page.locator('#include-inactive-super-course-toggle')).toBeChecked();
-        await expect(page.locator('#show-student-super-course-toggle')).toBeChecked();
-        await expect(page.locator('#super-instructor-prompt')).toHaveValue('Seed instructor super prompt');
-        await expect(page.locator('#super-student-prompt')).toHaveValue('Seed student super prompt');
+        // NOTE: Super Course bucket membership + bucket management are covered by
+        // the dedicated superchats specs; this test focuses on the admin-only
+        // controls (LLM model rules, login restriction) plus per-course Top-K.
 
         await expect(page.locator('#llm-model-select')).toHaveValue('gpt-5-nano');
         await expect(page.locator('#llm-reasoning-item')).toBeVisible();
@@ -828,14 +853,7 @@ test.describe('Instructor settings UI', () => {
         await expect(page.locator('#llm-reasoning-select')).toHaveValue('low');
         await expect(page.locator('#llm-reasoning-select option[value="minimal"]')).toBeDisabled();
         await setInputChecked(page, '#allow-local-login-toggle', false);
-        await setInputChecked(page, '#allow-super-course-toggle', true);
         await page.locator('#student-chat-topk-input').fill('4');
-        await page.locator('#super-instructor-topk-input').fill('7');
-        await page.locator('#super-student-topk-input').fill('8');
-        await setInputChecked(page, '#include-inactive-super-course-toggle', false);
-        await setInputChecked(page, '#show-student-super-course-toggle', false);
-        await page.locator('#super-instructor-prompt').fill('Updated instructor super prompt');
-        await page.locator('#super-student-prompt').fill('Updated student super prompt');
 
         await page.locator('#save-settings').click();
         await expect(page.locator('.notification.success', { hasText: 'Settings saved successfully' })).toBeVisible({
@@ -843,37 +861,22 @@ test.describe('Instructor settings UI', () => {
         });
 
         await expect.poll(async () => {
-            const [globalSettings, llmSettings, course, superCourseSettings] = await Promise.all([
+            const [globalSettings, llmSettings, course] = await Promise.all([
                 readSetting('global'),
                 readSetting('llm'),
                 readCourse(),
-                readSetting('superCourseChat'),
             ]);
             return {
                 allowLocalLogin: globalSettings?.allowLocalLogin,
                 model: llmSettings?.model,
                 reasoningEffort: llmSettings?.reasoningEffort,
-                allowInSuperCourse: course?.allowInSuperCourse,
                 studentTopK: course?.ragSettings?.student?.topK,
-                superInstructorTopK: superCourseSettings?.instructorTopK,
-                superStudentTopK: superCourseSettings?.studentTopK,
-                includeInactiveCourses: superCourseSettings?.includeInactiveCourses,
-                showStudentSuperCourse: superCourseSettings?.showStudentSuperCourse,
-                instructorPrompt: superCourseSettings?.instructorPrompt,
-                studentPrompt: superCourseSettings?.studentPrompt,
             };
         }, { timeout: 10_000 }).toMatchObject({
             allowLocalLogin: false,
             model: 'gpt-5.4-nano',
             reasoningEffort: 'low',
-            allowInSuperCourse: true,
             studentTopK: 4,
-            superInstructorTopK: 7,
-            superStudentTopK: 8,
-            includeInactiveCourses: false,
-            showStudentSuperCourse: false,
-            instructorPrompt: 'Updated instructor super prompt',
-            studentPrompt: 'Updated student super prompt',
         });
     });
 
@@ -1037,19 +1040,10 @@ test.describe('Instructor settings UI', () => {
 
         page.once('dialog', (dialog) => dialog.accept());
         await page.locator('#reset-ai-settings').click();
-        await expect(page.locator('#allow-super-course-toggle')).not.toBeChecked();
         await expect(page.locator('#student-chat-topk-input')).toHaveValue('3');
         await expect(page.locator('.notification.success', { hasText: 'AI settings reset to defaults' })).toBeVisible();
-
-        page.once('dialog', (dialog) => dialog.accept());
-        await page.locator('#reset-super-course-settings').click();
-        await expect(page.locator('#super-instructor-topk-input')).toHaveValue('8');
-        await expect(page.locator('#super-student-topk-input')).toHaveValue('8');
-        await expect(page.locator('#include-inactive-super-course-toggle')).not.toBeChecked();
-        await expect(page.locator('#show-student-super-course-toggle')).not.toBeChecked();
-        await expect(page.locator('#super-instructor-prompt')).toHaveValue('Default instructor super prompt');
-        await expect(page.locator('#super-student-prompt')).toHaveValue('Default student super prompt');
-        await expect(page.locator('.notification.success', { hasText: 'Super Course settings reset to defaults' })).toBeVisible();
+        // (Super Course bucket reset/management is covered by the dedicated
+        // superchats specs; the standalone "reset super course" button is gone.)
 
         page.once('dialog', (dialog) => dialog.dismiss());
         await page.locator('#delete-collection').click();
@@ -1419,13 +1413,18 @@ test.describe('Settings API authorization', () => {
         }
     });
 
-    test('AI and Super Course settings are system-admin-only and round-trip defaults', async ({ baseURL }) => {
+    test('AI settings enforce course access and round-trip bucket membership; Super Course chat settings round-trip defaults', async ({ baseURL }) => {
+        const SUPER_BUCKET = 'BIOC-E2E-SETTINGS-BUCKET';
         const regularApi = await request.newContext({
             baseURL,
             storageState: storageStatePath('instructor'),
         });
         try {
-            const denied = await regularApi.get(`/api/settings/ai-settings?courseId=${SETTINGS_COURSE_ID}`, {
+            // A regular instructor may read their OWN course's AI settings...
+            const ownCourse = await regularApi.get(`/api/settings/ai-settings?courseId=${SETTINGS_COURSE_ID}`);
+            expect(ownCourse.status()).toBe(200);
+            // ...but not a course they don't own.
+            const denied = await regularApi.get(`/api/settings/ai-settings?courseId=${SETTINGS_OTHER_COURSE_ID}`, {
                 failOnStatusCode: false,
             });
             expect(denied.status()).toBe(403);
@@ -1444,23 +1443,23 @@ test.describe('Settings API authorization', () => {
             expect(await defaultAi.json()).toMatchObject({
                 success: true,
                 settings: {
-                    allowInSuperCourse: false,
+                    superchatIds: [],
                     ragSettings: { student: { topK: 3 } },
                 },
             });
 
             const invalidAi = await adminApi.put('/api/settings/ai-settings', {
-                data: { courseId: SETTINGS_OTHER_COURSE_ID, allowInSuperCourse: true, studentTopK: 21 },
+                data: { courseId: SETTINGS_OTHER_COURSE_ID, superchatIds: [SUPER_BUCKET], studentTopK: 21 },
                 failOnStatusCode: false,
             });
             expect(invalidAi.status()).toBe(400);
 
             const saveAi = await adminApi.put('/api/settings/ai-settings', {
-                data: { courseId: SETTINGS_OTHER_COURSE_ID, allowInSuperCourse: true, studentTopK: 5 },
+                data: { courseId: SETTINGS_OTHER_COURSE_ID, superchatIds: [SUPER_BUCKET], studentTopK: 5 },
             });
             expect((await saveAi.json()).success).toBe(true);
             expect(await readCourse(SETTINGS_OTHER_COURSE_ID)).toMatchObject({
-                allowInSuperCourse: true,
+                superchatIds: [SUPER_BUCKET],
                 ragSettings: { student: { topK: 5 } },
             });
 
@@ -1470,7 +1469,7 @@ test.describe('Settings API authorization', () => {
             expect(await resetAi.json()).toMatchObject({
                 success: true,
                 settings: {
-                    allowInSuperCourse: false,
+                    superchatIds: [],
                     ragSettings: { student: { topK: 3 } },
                 },
             });

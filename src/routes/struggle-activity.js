@@ -154,7 +154,9 @@ router.get('/super-course/weekly', async (req, res) => {
 
         const weeklyData = await StruggleActivity.getWeeklyActiveTopics(db, null, {
             weeks,
-            source: 'superCourse'
+            source: 'superCourse',
+            // Optional: scope to a single bucket; omit for the all-buckets view.
+            superchatId: req.query.superchatId || null
         });
 
         res.json({
@@ -190,7 +192,9 @@ router.get('/super-course', async (req, res) => {
 
         const activities = await StruggleActivity.getSuperCourseActivity(db, {
             limit,
-            state
+            state,
+            // Optional: scope to a single bucket; omit for the all-buckets view.
+            superchatId: req.query.superchatId || null
         });
 
         res.json({

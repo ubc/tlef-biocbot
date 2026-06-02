@@ -7,6 +7,7 @@ const cors = require('cors');
 
 const { MongoClient } = require('mongodb');
 const { ensureCourseCodes } = require('./models/Course');
+const { ensureSuperchatsFromLegacy } = require('./models/Superchat');
 const coursesRoutes = require('./routes/courses');
 const flagsRoutes = require('./routes/flags');
 const lecturesRoutes = require('./routes/lectures');
@@ -30,6 +31,7 @@ const studentTrackerRoutes = require('./routes/student-tracker');
 const struggleActivityRoutes = require('./routes/struggle-activity');
 const mentalHealthFlagsRoutes = require('./routes/mentalHealthFlags');
 const superChatNotesRoutes = require('./routes/superChatNotes');
+const superchatsRoutes = require('./routes/superchats');
 const LLMService = require('./services/llm');
 const AuthService = require('./services/authService');
 const createAuthMiddleware = require('./middleware/auth');
@@ -535,6 +537,7 @@ function setupAPIRoutes() {
     app.use('/api/chat', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, chatRoutes);
     app.use('/api/instructor/chat', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, instructorChatRoutes);
     app.use('/api/superchat-notes', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, superChatNotesRoutes);
+    app.use('/api/superchats', authMiddleware.requireAuth, authMiddleware.populateUser, superchatsRoutes);
     app.use('/api/student/super-course', authMiddleware.requireAuth, authMiddleware.populateUser, studentSuperCourseRoutes);
     app.use('/api/students', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, studentsRoutes);
     app.use('/api/user-agreement', authMiddleware.requireAuth, userAgreementRoutes);
@@ -580,6 +583,7 @@ async function startServer() {
 
         // Run migrations
         await ensureCourseCodes(db);
+        await ensureSuperchatsFromLegacy(db);
 
         // Set up routes after authentication is initialized
         setupProtectedRoutes();

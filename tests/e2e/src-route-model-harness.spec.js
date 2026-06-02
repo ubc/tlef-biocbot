@@ -144,6 +144,13 @@ test('Course RAG settings helpers default and validate Top-K without database mi
     expect(CourseModel.getAllowInSuperCourse({})).toBe(false);
     expect(CourseModel.getAllowInSuperCourse({ allowInSuperCourse: false })).toBe(false);
     expect(CourseModel.getAllowInSuperCourse({ allowInSuperCourse: true })).toBe(true);
+
+    // Superchat membership (the multi-bucket replacement for the boolean).
+    expect(CourseModel.getCourseSuperchatIds({})).toEqual([]);
+    expect(CourseModel.getCourseSuperchatIds({ superchatIds: ['a', 'b'] })).toEqual(['a', 'b']);
+    // normalizeSuperchatIds trims, drops non-strings/empties, and dedupes.
+    expect(CourseModel.normalizeSuperchatIds(['a', ' a ', '', null, 7, 'b'])).toEqual(['a', 'b']);
+    expect(CourseModel.normalizeSuperchatIds('not-an-array')).toEqual([]);
 });
 
 test('chat route sends the course RAG Top-K to Qdrant search', async () => {

@@ -206,7 +206,8 @@ router.post('/', async (req, res) => {
             questionContent,
             sourceCourseIds,
             sourceCourseNames,
-            isSuperCourseFlag
+            isSuperCourseFlag,
+            superchatId
         } = req.body;
         
         // Get authenticated user information
@@ -295,7 +296,9 @@ router.post('/', async (req, res) => {
             questionContent,
             sourceCourseIds: normalizeStringArray(sourceCourseIds),
             sourceCourseNames: normalizeStringArray(sourceCourseNames),
-            isSuperCourseFlag: superCourseFlag
+            isSuperCourseFlag: superCourseFlag,
+            // Which superchat bucket the flag came from (super-course flags only).
+            superchatId: superCourseFlag && typeof superchatId === 'string' ? superchatId : null
         });
         
         if (!result.success) {

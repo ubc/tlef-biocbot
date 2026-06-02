@@ -27,6 +27,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     let lifecycleCourseData = null;
     let pendingTransferPayload = null;
     let isTransferInProgress = false;
+    // Currently-selected Super Course bucket in the admin editor (null = none yet).
+    let selectedSuperchatId = null;
     
     // Check if user has system admin access
     await waitForAuth();
@@ -36,6 +38,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadSettings(canManageDB);
 
     async function loadSettings(canManageDB) {
+        // Super Course settings (per-course bucket membership + bucket management)
+        // are available to instructors, not just admins, so they can curate their
+        // own Super Course groupings. Reveal + load these FIRST and independently,
+        // so a failure in an unrelated section below can never hide them.
+        showSuperCourseSettingsSections();
+        try {
+            await loadAiSettings();
+            await loadSuperCourseChatSettings();
+        } catch (error) {
+            console.error('Error loading Super Course settings:', error);
+        }
+
         try {
             // Load global config (prompts and additive retrieval)
             await loadGlobalConfig();
@@ -60,8 +74,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (canManageDB) {
                 await loadAdminSettings();
                 await loadLLMSettings();
-                await loadAiSettings();
-                await loadSuperCourseChatSettings();
                 await loadQuestionPrompts();
                 await loadSystemAdmins();
             }
@@ -163,6 +175,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    // Reveal the Super Course settings sections. These are open to instructors
+    // (not admin-only), so they are shown here rather than gated behind
+    // checkDeleteAllPermission.
+    function showSuperCourseSettingsSections() {
+    }
+
     async function loadAiSettings() {
         try {
             const courseId = await getCurrentCourseId();
@@ -174,13 +192,46 @@ document.addEventListener('DOMContentLoaded', async () => {
             const result = await response.json();
             if (!result.success || !result.settings) return;
 
-            const allowToggle = document.getElementById('allow-super-course-toggle');
             const topKInput = document.getElementById('student-chat-topk-input');
-            if (allowToggle) allowToggle.checked = result.settings.allowInSuperCourse === true;
             if (topKInput) topKInput.value = result.settings.ragSettings?.student?.topK || 3;
+
+            renderCourseSuperchatChecklist(
+                result.availableSuperchats || [],
+                result.settings.superchatIds || []
+            );
         } catch (error) {
             console.error('Error loading AI settings:', error);
         }
+    }
+
+    // Render the per-course bucket checklist. Each bucket is a checkbox; checked
+    // state reflects the course's current superchatIds. Read on save.
+    function renderCourseSuperchatChecklist(buckets, selectedIds) {
+        const container = document.getElementById('course-superchat-checklist');
+        if (!container) return;
+
+        if (!buckets.length) {
+            container.innerHTML = '<p class="superchat-checklist-empty">No Super Course buckets exist yet. An admin can create them under Super Course Chat Settings.</p>';
+            return;
+        }
+
+        const selected = new Set(selectedIds || []);
+        container.innerHTML = buckets.map(b => {
+            const id = `course-superchat-${b.superchatId}`;
+            const checked = selected.has(b.superchatId) ? 'checked' : '';
+            return `
+                <label class="superchat-checklist-item" for="${id}">
+                    <input type="checkbox" id="${id}" class="course-superchat-checkbox" value="${escapeHtml(b.superchatId)}" ${checked}>
+                    <span>${escapeHtml(b.name)}</span>
+                </label>`;
+        }).join('');
+    }
+
+    // Collect the checked bucket ids from the per-course checklist.
+    function collectCourseSuperchatIds() {
+        return Array.from(document.querySelectorAll('.course-superchat-checkbox'))
+            .filter(cb => cb.checked)
+            .map(cb => cb.value);
     }
 
     function applyLevelModifiersToFields(prefix, levels, modifiers) {
@@ -200,38 +251,154 @@ document.addEventListener('DOMContentLoaded', async () => {
         return result;
     }
 
-    async function loadSuperCourseChatSettings() {
-        try {
-            const response = await fetch('/api/settings/super-course-chat', {
-                credentials: 'include'
-            });
-            const result = await response.json();
-            if (!result.success || !result.settings) return;
+    // Fill the bucket editor form from a superchat object ({ name, yearLevel,
+    // showToStudents, settings }).
+    function fillSuperchatForm(superchat) {
+        const s = (superchat && superchat.settings) || {};
+        const nameInput = document.getElementById('superchat-name-input');
+        const yearSelect = document.getElementById('superchat-year-select');
+        const instructorTopKInput = document.getElementById('super-instructor-topk-input');
+        const studentTopKInput = document.getElementById('super-student-topk-input');
+        const includeInactiveToggle = document.getElementById('include-inactive-super-course-toggle');
+        const showStudentToggle = document.getElementById('show-student-super-course-toggle');
+        const includeNotesToggle = document.getElementById('include-notes-super-course-toggle');
+        const noteRatioInput = document.getElementById('super-note-ratio-input');
+        const noteMinScoreInput = document.getElementById('super-note-min-score-input');
+        const instructorPrompt = document.getElementById('super-instructor-prompt');
+        const studentPrompt = document.getElementById('super-student-prompt');
 
-            const instructorTopKInput = document.getElementById('super-instructor-topk-input');
-            const studentTopKInput = document.getElementById('super-student-topk-input');
-            const includeInactiveToggle = document.getElementById('include-inactive-super-course-toggle');
-            const showStudentToggle = document.getElementById('show-student-super-course-toggle');
-            const includeNotesToggle = document.getElementById('include-notes-super-course-toggle');
-            const noteRatioInput = document.getElementById('super-note-ratio-input');
-            const noteMinScoreInput = document.getElementById('super-note-min-score-input');
-            const instructorPrompt = document.getElementById('super-instructor-prompt');
-            const studentPrompt = document.getElementById('super-student-prompt');
+        if (nameInput) nameInput.value = (superchat && superchat.name) || '';
+        if (yearSelect) yearSelect.value = (superchat && superchat.yearLevel) ? String(superchat.yearLevel) : '';
+        if (instructorTopKInput) instructorTopKInput.value = s.instructorTopK || 8;
+        if (studentTopKInput) studentTopKInput.value = s.studentTopK || 8;
+        if (includeInactiveToggle) includeInactiveToggle.checked = s.includeInactiveCourses === true;
+        if (showStudentToggle) showStudentToggle.checked = superchat && superchat.showToStudents === true;
+        if (includeNotesToggle) includeNotesToggle.checked = s.includeNotesInRetrieval !== false;
+        if (noteRatioInput) noteRatioInput.value = s.noteRetrievalRatio ?? 0.25;
+        if (noteMinScoreInput) noteMinScoreInput.value = s.noteMinScore ?? 0.25;
+        if (instructorPrompt) instructorPrompt.value = s.instructorPrompt || '';
+        if (studentPrompt) studentPrompt.value = s.studentPrompt || '';
+        applyLevelModifiersToFields('super-student-level', SUPER_STUDENT_LEVELS, s.studentLevelModifiers);
+        applyLevelModifiersToFields('super-instructor-level', SUPER_INSTRUCTOR_LEVELS, s.instructorLevelModifiers);
+    }
 
-            if (instructorTopKInput) instructorTopKInput.value = result.settings.instructorTopK || 8;
-            if (studentTopKInput) studentTopKInput.value = result.settings.studentTopK || 8;
-            if (includeInactiveToggle) includeInactiveToggle.checked = result.settings.includeInactiveCourses === true;
-            if (showStudentToggle) showStudentToggle.checked = result.settings.showStudentSuperCourse === true;
-            if (includeNotesToggle) includeNotesToggle.checked = result.settings.includeNotesInRetrieval !== false;
-            if (noteRatioInput) noteRatioInput.value = result.settings.noteRetrievalRatio ?? 0.25;
-            if (noteMinScoreInput) noteMinScoreInput.value = result.settings.noteMinScore ?? 0.25;
-            if (instructorPrompt) instructorPrompt.value = result.settings.instructorPrompt || '';
-            if (studentPrompt) studentPrompt.value = result.settings.studentPrompt || '';
-            applyLevelModifiersToFields('super-student-level', SUPER_STUDENT_LEVELS, result.settings.studentLevelModifiers);
-            applyLevelModifiersToFields('super-instructor-level', SUPER_INSTRUCTOR_LEVELS, result.settings.instructorLevelModifiers);
-        } catch (error) {
-            console.error('Error loading Super Course chat settings:', error);
+    // Enable/disable the editor fields based on whether a bucket is selected.
+    function setSuperchatEditorEnabled(enabled) {
+        const ids = [
+            'superchat-name-input', 'superchat-year-select', 'delete-superchat-btn',
+            'super-instructor-topk-input', 'super-student-topk-input',
+            'include-inactive-super-course-toggle', 'show-student-super-course-toggle',
+            'include-notes-super-course-toggle', 'super-note-ratio-input', 'super-note-min-score-input',
+            'super-instructor-prompt', 'super-student-prompt'
+        ];
+        for (const id of ids) {
+            const el = document.getElementById(id);
+            if (el) el.disabled = !enabled;
         }
+    }
+
+    // Load a single bucket into the editor by id.
+    async function loadSuperchatIntoForm(superchatId) {
+        if (!superchatId) {
+            selectedSuperchatId = null;
+            setSuperchatEditorEnabled(false);
+            return;
+        }
+        try {
+            const response = await fetch(`/api/superchats/${encodeURIComponent(superchatId)}`, { credentials: 'include' });
+            const result = await response.json();
+            if (!response.ok || !result.success) throw new Error(result.message || 'Failed to load bucket');
+            selectedSuperchatId = superchatId;
+            setSuperchatEditorEnabled(true);
+            fillSuperchatForm(result.superchat);
+        } catch (error) {
+            console.error('Error loading superchat:', error);
+        }
+    }
+
+    // Populate the bucket <select> from the list endpoint and load the first one.
+    async function loadSuperchatList(preferredId) {
+        const select = document.getElementById('superchat-select');
+        if (!select) return;
+        try {
+            const response = await fetch('/api/superchats', { credentials: 'include' });
+            const result = await response.json();
+            if (!response.ok || !result.success) throw new Error(result.message || 'Failed to list buckets');
+
+            const buckets = result.superchats || [];
+            select.innerHTML = buckets.length
+                ? buckets.map(b => `<option value="${escapeHtml(b.superchatId)}">${escapeHtml(b.name)} (${b.courseCount} course${b.courseCount === 1 ? '' : 's'})</option>`).join('')
+                : '<option value="">No buckets yet — click New</option>';
+
+            if (!buckets.length) {
+                await loadSuperchatIntoForm(null);
+                return;
+            }
+
+            const toSelect = (preferredId && buckets.some(b => b.superchatId === preferredId))
+                ? preferredId
+                : buckets[0].superchatId;
+            select.value = toSelect;
+            await loadSuperchatIntoForm(toSelect);
+        } catch (error) {
+            console.error('Error loading superchat list:', error);
+        }
+    }
+
+    // Wire up bucket management controls (select / new / delete).
+    function initSuperchatManagement() {
+        const select = document.getElementById('superchat-select');
+        const newBtn = document.getElementById('new-superchat-btn');
+        const deleteBtn = document.getElementById('delete-superchat-btn');
+
+        if (select) {
+            select.addEventListener('change', () => loadSuperchatIntoForm(select.value || null));
+        }
+        if (newBtn) {
+            newBtn.addEventListener('click', async () => {
+                const name = (prompt('Name for the new Super Course bucket:') || '').trim();
+                if (!name) return;
+                try {
+                    const response = await fetch('/api/superchats', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ name })
+                    });
+                    const result = await response.json();
+                    if (!response.ok || !result.success) throw new Error(result.message || 'Failed to create bucket');
+                    await loadSuperchatList(result.superchat.superchatId);
+                    showNotification('Super Course bucket created', 'success');
+                } catch (error) {
+                    console.error('Error creating bucket:', error);
+                    showNotification(error.message || 'Failed to create bucket', 'error');
+                }
+            });
+        }
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', async () => {
+                if (!selectedSuperchatId) return;
+                if (!confirm('Delete this Super Course bucket? It will be removed from every course and hidden from students.')) return;
+                try {
+                    const response = await fetch(`/api/superchats/${encodeURIComponent(selectedSuperchatId)}`, {
+                        method: 'DELETE',
+                        credentials: 'include'
+                    });
+                    const result = await response.json();
+                    if (!response.ok || !result.success) throw new Error(result.message || 'Failed to delete bucket');
+                    await loadSuperchatList();
+                    showNotification('Super Course bucket deleted', 'success');
+                } catch (error) {
+                    console.error('Error deleting bucket:', error);
+                    showNotification(error.message || 'Failed to delete bucket', 'error');
+                }
+            });
+        }
+    }
+
+    async function loadSuperCourseChatSettings() {
+        initSuperchatManagement();
+        await loadSuperchatList();
     }
 
     function formatSystemAdminTimestamp(value) {
@@ -898,11 +1065,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                     throw new Error(result.message || 'Failed to reset AI settings');
                 }
 
-                const allowToggle = document.getElementById('allow-super-course-toggle');
                 const topKInput = document.getElementById('student-chat-topk-input');
                 const settings = result.settings || {};
-                if (allowToggle) allowToggle.checked = settings.allowInSuperCourse === true;
                 if (topKInput) topKInput.value = settings.ragSettings?.student?.topK ?? 3;
+                // Reset clears bucket membership — uncheck every bucket in place
+                // (no re-fetch, so the reset defaults stay visible).
+                document.querySelectorAll('.course-superchat-checkbox').forEach((cb) => { cb.checked = false; });
                 showNotification('AI settings reset to defaults', 'success');
             } catch (error) {
                 console.error('Error resetting AI settings:', error);
@@ -1114,13 +1282,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 const aiSettingsSection = document.getElementById('ai-settings-section');
                 if (aiSettingsSection && aiSettingsSection.style.display !== 'none') {
-                    const allowInSuperCourse = document.getElementById('allow-super-course-toggle')?.checked === true;
+                    const superchatIds = collectCourseSuperchatIds();
                     const studentTopK = Number(document.getElementById('student-chat-topk-input')?.value || 3);
                     const aiResponse = await fetch('/api/settings/ai-settings', {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         credentials: 'include',
-                        body: JSON.stringify({ courseId, allowInSuperCourse, studentTopK })
+                        body: JSON.stringify({ courseId, superchatIds, studentTopK })
                     });
                     const aiResult = await aiResponse.json();
                     if (!aiResponse.ok || !aiResult.success) {
@@ -1129,16 +1297,19 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
 
                 const superCourseSection = document.getElementById('super-course-chat-section');
-                if (superCourseSection && superCourseSection.style.display !== 'none') {
-                    const superResponse = await fetch('/api/settings/super-course-chat', {
+                if (superCourseSection && superCourseSection.style.display !== 'none' && selectedSuperchatId) {
+                    const yearValue = document.getElementById('superchat-year-select')?.value || '';
+                    const superResponse = await fetch(`/api/superchats/${encodeURIComponent(selectedSuperchatId)}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         credentials: 'include',
                         body: JSON.stringify({
+                            name: document.getElementById('superchat-name-input')?.value || '',
+                            yearLevel: yearValue ? Number(yearValue) : null,
+                            showToStudents: document.getElementById('show-student-super-course-toggle')?.checked === true,
                             instructorTopK: Number(document.getElementById('super-instructor-topk-input')?.value || 8),
                             studentTopK: Number(document.getElementById('super-student-topk-input')?.value || 8),
                             includeInactiveCourses: document.getElementById('include-inactive-super-course-toggle')?.checked === true,
-                            showStudentSuperCourse: document.getElementById('show-student-super-course-toggle')?.checked === true,
                             includeNotesInRetrieval: document.getElementById('include-notes-super-course-toggle')?.checked !== false,
                             noteRetrievalRatio: Number(document.getElementById('super-note-ratio-input')?.value ?? 0.25),
                             noteMinScore: Number(document.getElementById('super-note-min-score-input')?.value ?? 0.25),
@@ -1152,6 +1323,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     if (!superResponse.ok || !superResult.success) {
                         throw new Error(superResult.message || 'Failed to save Super Course settings');
                     }
+                    // Refresh the select label (name/course count may have changed).
+                    await loadSuperchatList(selectedSuperchatId);
                 }
 
                 // Save quiz practice settings
@@ -1556,8 +1729,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             const mhDetectionSection = document.getElementById('mental-health-detection-section');
             const adminSection = document.getElementById('system-admin-section');
             const llmModelSection = document.getElementById('llm-model-section');
-            const aiSettingsSection = document.getElementById('ai-settings-section');
-            const superCourseChatSection = document.getElementById('super-course-chat-section');
 
             if (result.success && result.canDeleteAll) {
                 // User has permission, ensure the sections are visible
@@ -1567,8 +1738,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (mhDetectionSection) mhDetectionSection.style.display = '';
                 if (adminSection) adminSection.style.display = '';
                 if (llmModelSection) llmModelSection.style.display = '';
-                if (aiSettingsSection) aiSettingsSection.style.display = '';
-                if (superCourseChatSection) superCourseChatSection.style.display = '';
                 return true;
             } else {
                 // User doesn't have permission, hide the sections
@@ -1578,8 +1747,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (mhDetectionSection) mhDetectionSection.style.display = 'none';
                 if (adminSection) adminSection.style.display = 'none';
                 if (llmModelSection) llmModelSection.style.display = 'none';
-                if (aiSettingsSection) aiSettingsSection.style.display = 'none';
-                if (superCourseChatSection) superCourseChatSection.style.display = 'none';
                 return false;
             }
         } catch (error) {
@@ -1591,16 +1758,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             const mhDetectionSection = document.getElementById('mental-health-detection-section');
             const adminSection = document.getElementById('system-admin-section');
             const llmModelSection = document.getElementById('llm-model-section');
-            const aiSettingsSection = document.getElementById('ai-settings-section');
-            const superCourseChatSection = document.getElementById('super-course-chat-section');
             if (databaseSection) databaseSection.style.display = 'none';
             if (loginRestrictionSection) loginRestrictionSection.style.display = 'none';
             if (questionGenerationSection) questionGenerationSection.style.display = 'none';
             if (mhDetectionSection) mhDetectionSection.style.display = 'none';
             if (adminSection) adminSection.style.display = 'none';
             if (llmModelSection) llmModelSection.style.display = 'none';
-            if (aiSettingsSection) aiSettingsSection.style.display = 'none';
-            if (superCourseChatSection) superCourseChatSection.style.display = 'none';
             return false;
         }
     }

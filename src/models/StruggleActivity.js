@@ -41,6 +41,9 @@ async function createActivityEntry(db, data) {
         topic: data.topic.toLowerCase().trim(),
         state: data.state,
         source: data.source === 'superCourse' ? 'superCourse' : 'course',
+        // Which superchat bucket this struggle came from (superCourse source only).
+        // null for normal in-course struggles and legacy super-course rows.
+        superchatId: data.source === 'superCourse' && data.superchatId ? data.superchatId : null,
         timestamp: data.timestamp || new Date(),
         createdAt: new Date()
     };
@@ -93,6 +96,8 @@ async function getActivityByCourse(db, courseId, options = {}) {
  * @param {Object} options - Query options
  * @param {number} options.limit - Maximum number of entries to return (default: 100)
  * @param {string} options.state - Filter by state ('Active' or 'Inactive')
+ * @param {string} options.superchatId - Filter to a single superchat bucket. Omit
+ *        (or pass falsy) to aggregate across every bucket (legacy/global view).
  * @returns {Promise<Array>} Array of activity entries, sorted by timestamp (newest first)
  */
 async function getSuperCourseActivity(db, options = {}) {
@@ -102,6 +107,9 @@ async function getSuperCourseActivity(db, options = {}) {
     const query = { source: 'superCourse' };
     if (options.state) {
         query.state = options.state;
+    }
+    if (options.superchatId) {
+        query.superchatId = options.superchatId;
     }
 
     return collection
@@ -166,6 +174,10 @@ async function getWeeklyActiveTopics(db, courseId, options = {}) {
     }
     if (options.source) {
         match.source = options.source;
+    }
+    // Scope to a single superchat bucket when requested (per-bucket weekly view).
+    if (options.superchatId) {
+        match.superchatId = options.superchatId;
     }
 
     const pipeline = [

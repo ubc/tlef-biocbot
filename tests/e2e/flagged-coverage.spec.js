@@ -507,7 +507,9 @@ test.describe('flagged.js — instructor render & moderation', () => {
 
         const card = page.locator('[data-flag-id="flag_super_instructor"]');
         await expect(card).toBeVisible({ timeout: 15_000 });
-        await expect(card).toContainText('Course: Super Course');
+        // Super-course flags are labelled by their bucket. This flag has no
+        // superchatId, so it falls back to the "all buckets" label.
+        await expect(card).toContainText('Bucket: Super Course (all)');
         await expect(card).toContainText('Super Course Instructor mode');
         await expect(card).toContainText('Reporter: Instructor');
         await expect(card).toContainText("Instructor's Concern");

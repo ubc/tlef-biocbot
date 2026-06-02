@@ -7,9 +7,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
     }
 
-    const statusResponse = await fetch('/api/student/super-course/status', { credentials: 'include' });
-    const statusResult = await statusResponse.json().catch(() => ({}));
-    if (!statusResult.success || !statusResult.enabled) {
+    // Load the buckets this student can pick from. No buckets → no Super Course.
+    const listResponse = await fetch('/api/student/super-course/list', { credentials: 'include' });
+    const listResult = await listResponse.json().catch(() => ({}));
+    const availableSuperchats = (listResult && listResult.success && Array.isArray(listResult.superchats))
+        ? listResult.superchats
+        : [];
+    if (!availableSuperchats.length) {
         window.location.href = '/student';
         return;
     }
@@ -27,15 +31,69 @@ document.addEventListener('DOMContentLoaded', async () => {
     const historyList = document.getElementById('super-course-history-list');
     const toggleHistoryButton = document.getElementById('toggle-super-course-history');
     const refreshHistoryButton = document.getElementById('refresh-super-course-history');
+    const superchatPicker = document.getElementById('superchat-picker');
     const conversationMessages = [];
     const studentId = user?.userId || 'unknown-student';
     const studentName = user?.displayName || user?.username || user?.email || 'Student';
-    const currentChatKey = `biocbot_student_super_current_chat_${studentId}`;
-    const sessionKey = `biocbot_student_super_session_${studentId}`;
+    // The active bucket. Persisted so the student returns to their last pick.
+    const lastSuperchatKey = `biocbot_student_super_last_${studentId}`;
+    const savedSuperchatId = localStorage.getItem(lastSuperchatKey);
+    let currentSuperchatId = availableSuperchats.some(s => s.superchatId === savedSuperchatId)
+        ? savedSuperchatId
+        : availableSuperchats[0].superchatId;
+    // Current-chat and session storage are per-bucket so switching keeps each
+    // bucket's draft separate. History disclosure state stays per-student.
+    let currentChatKey = `biocbot_student_super_current_chat_${studentId}_${currentSuperchatId}`;
+    let sessionKey = `biocbot_student_super_session_${studentId}_${currentSuperchatId}`;
     const historyStateKey = `biocbot_student_super_history_open_${studentId}`;
     const SUPER_COURSE_FLAG_COURSE_ID = 'SUPER_COURSE';
 
     if (!form || !input || !messages || !sendButton) return;
+
+    // Recompute the per-bucket storage keys after the active bucket changes.
+    function applySuperchatKeys() {
+        currentChatKey = `biocbot_student_super_current_chat_${studentId}_${currentSuperchatId}`;
+        sessionKey = `biocbot_student_super_session_${studentId}_${currentSuperchatId}`;
+    }
+
+    // Populate the picker and wire switching between buckets.
+    function initSuperchatPicker() {
+        if (!superchatPicker) return;
+        superchatPicker.innerHTML = availableSuperchats.map(s => {
+            const hint = s.aboveStudentLevel ? ' (ahead of your year)' : '';
+            return `<option value="${s.superchatId}">${escapeHtmlSafe(s.name)}${hint}</option>`;
+        }).join('');
+        superchatPicker.value = currentSuperchatId;
+        // Always interactive — even with one bucket the student can open it to see
+        // what's available (a disabled control reads as "broken").
+        superchatPicker.disabled = false;
+
+        superchatPicker.addEventListener('change', () => {
+            const next = superchatPicker.value;
+            if (!next || next === currentSuperchatId) return;
+            currentSuperchatId = next;
+            localStorage.setItem(lastSuperchatKey, currentSuperchatId);
+            applySuperchatKeys();
+            // Reset the conversation for the newly-selected bucket.
+            conversationMessages.length = 0;
+            messages.innerHTML = '';
+            loadSourcePool();
+            loadHistoryList();
+            restoreRecentSession();
+        });
+    }
+
+    // Minimal HTML-escape for option labels.
+    function escapeHtmlSafe(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    localStorage.setItem(lastSuperchatKey, currentSuperchatId);
+    initSuperchatPicker();
 
     // Persist the user's chosen answer level across sessions.
     const levelStorageKey = `biocbot_student_super_level_${studentId}`;
@@ -105,6 +163,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
                 body: JSON.stringify({
+                    superchatId: currentSuperchatId,
                     message: text,
                     conversationMessages,
                     level: levelSelect ? levelSelect.value : undefined
@@ -279,6 +338,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             flagDescription: `Student flagged Super Course response as ${flagReason}`,
             botMode: 'supercourse-student',
             isSuperCourseFlag: true,
+            superchatId: currentSuperchatId,
             sourceCourseIds: sourceCourses.map(course => course.courseId),
             sourceCourseNames: sourceCourses.map(course => course.courseName),
             questionContent: {
@@ -553,6 +613,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function syncAutoSaveWithServer(chatData) {
         const sessionId = ensureSessionId(chatData);
         const serverData = {
+            superchatId: currentSuperchatId,
             sessionId,
             title: generateChatTitle(chatData),
             messageCount: chatData.metadata.totalMessages,
@@ -606,7 +667,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         try {
-            const response = await fetch('/api/student/super-course/sessions', { credentials: 'include' });
+            const response = await fetch(`/api/student/super-course/sessions?superchatId=${encodeURIComponent(currentSuperchatId)}`, { credentials: 'include' });
             const result = await response.json();
             if (!response.ok || !result.success) {
                 throw new Error(result.message || 'Failed to load Super Course history');
@@ -695,7 +756,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!sessionId) return;
 
         try {
-            const response = await fetch(`/api/student/super-course/sessions/${encodeURIComponent(sessionId)}`, {
+            const response = await fetch(`/api/student/super-course/sessions/${encodeURIComponent(sessionId)}?superchatId=${encodeURIComponent(currentSuperchatId)}`, {
                 credentials: 'include'
             });
             const result = await response.json();
@@ -716,7 +777,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!sessionId || !confirm('Delete this Super Chat session?')) return;
 
         try {
-            const response = await fetch(`/api/student/super-course/sessions/${encodeURIComponent(sessionId)}`, {
+            const response = await fetch(`/api/student/super-course/sessions/${encodeURIComponent(sessionId)}?superchatId=${encodeURIComponent(currentSuperchatId)}`, {
                 method: 'DELETE',
                 credentials: 'include'
             });
@@ -800,7 +861,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!poolList) return;
 
         try {
-            const response = await fetch('/api/student/super-course/pool', { credentials: 'include' });
+            const response = await fetch(`/api/student/super-course/pool?superchatId=${encodeURIComponent(currentSuperchatId)}`, { credentials: 'include' });
             const result = await response.json();
 
             if (!response.ok || !result.success) {
