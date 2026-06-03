@@ -27,6 +27,15 @@ const monocartFixtures = /** @type {any} */ ({
 
         if (!started) return;
 
+        // Stopping coverage and flushing the per-test report takes several
+        // seconds on script-heavy pages (the instructor bundles especially), and
+        // this teardown runs inside the test's own timeout window. Late in a full
+        // run that overhead can tip an otherwise-passing test over the 30s default
+        // ("Tearing down monocartCoverage exceeded the test timeout"). Extend the
+        // timeout here so the coverage flush gets its own headroom rather than
+        // competing with the test body's budget.
+        testInfo.setTimeout(testInfo.timeout + 30_000);
+
         try {
             const [jsCoverage, cssCoverage] = await Promise.all([
                 page.coverage.stopJSCoverage(),
