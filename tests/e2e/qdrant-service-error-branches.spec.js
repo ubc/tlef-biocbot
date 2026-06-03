@@ -156,6 +156,22 @@ test('searchDocuments covers empty hits, filter combinations, embedding wrappers
     expect(result.calls.invalidShape).toContain('Invalid query embedding shape');
 });
 
+test('searchDocumentsByCourse fans out one filtered search per course and embeds once', async () => {
+    const result = await runCase('by-course-branches');
+
+    // Empty course list short-circuits with no work done.
+    expect(result.noCourses).toEqual({ size: 0, embedCalls: 0, searchCalls: 0 });
+
+    // One search per course, each scoped to a single courseId (value, not any-of),
+    // and the query embedded exactly once for the whole fan-out.
+    expect(result.multi.keys).toEqual(['BIOC-202', 'BIOC-302']);
+    expect(result.multi.resultLengths).toEqual([1, 1]);
+    expect(result.multi.embedCalls).toBe(1);
+    expect(result.multi.searchCalls).toBe(2);
+    expect(result.multi.filterCourseIds).toEqual(['BIOC-202', 'BIOC-302']);
+    expect(result.multi.perCourseLimit).toBe(6);
+});
+
 test('scroll, clone, delete, status, and LLM helper branches are covered directly', async () => {
     const result = await runCase('scroll-clone-delete-branches');
 

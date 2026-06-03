@@ -493,6 +493,64 @@ class QdrantService {
     }
 
     /**
+     * Embed a query string and normalize the result to a flat number[] vector.
+     * Shared by searchDocuments and the multi-course search so a single query is
+     * only embedded once even when fanned out across several course filters.
+     * @param {string} query - Search query text
+     * @returns {Promise<number[]>} Normalized query embedding
+     */
+    async generateQueryVector(query) {
+        const rawEmbedding = await this.embeddings.embed(query);
+        let queryVector = rawEmbedding;
+        if (Array.isArray(rawEmbedding)) {
+            // If provider returns a batch ([[...]]), unwrap the first vector
+            if (rawEmbedding.length > 0 && Array.isArray(rawEmbedding[0])) {
+                if (rawEmbedding.length !== 1) {
+                    console.warn(`Embed returned ${rawEmbedding.length} vectors for a single query; using the first`);
+                }
+                queryVector = rawEmbedding[0];
+            }
+        } else if (rawEmbedding && typeof rawEmbedding === 'object') {
+            // Handle possible object wrappers
+            if (Array.isArray(rawEmbedding.embedding)) {
+                queryVector = rawEmbedding.embedding;
+            } else if (Array.isArray(rawEmbedding.data) && Array.isArray(rawEmbedding.data[0])) {
+                queryVector = rawEmbedding.data[0];
+            }
+        }
+
+        if (!Array.isArray(queryVector) || !queryVector.every(n => typeof n === 'number')) {
+            throw new Error('Invalid query embedding shape: expected number[]');
+        }
+        if (this.vectorSize && queryVector.length !== this.vectorSize) {
+            console.warn(`Query embedding size (${queryVector.length}) does not match expected collection size (${this.vectorSize})`);
+        }
+        return queryVector;
+    }
+
+    /**
+     * Transform a raw Qdrant search hit into the flattened result shape the rest
+     * of the app expects.
+     * @param {Object} result - Raw Qdrant point with score + payload
+     * @returns {Object} Flattened result
+     */
+    transformSearchResult(result) {
+        return {
+            id: result.id,
+            score: result.score,
+            courseId: result.payload.courseId,
+            lectureName: result.payload.lectureName,
+            documentId: result.payload.documentId,
+            fileName: result.payload.fileName,
+            documentType: result.payload.documentType,
+            type: result.payload.type,
+            chunkText: result.payload.chunkText,
+            chunkIndex: result.payload.chunkIndex,
+            timestamp: result.payload.timestamp
+        };
+    }
+
+    /**
      * Search for relevant document chunks using semantic similarity
      * @param {string} query - Search query text
      * @param {Object} filters - Optional filters for search
@@ -507,31 +565,7 @@ class QdrantService {
             await this.ensureCollectionExists();
 
             // Generate embedding for the search query and normalize to number[]
-            const rawEmbedding = await this.embeddings.embed(query);
-            let queryVector = rawEmbedding;
-            if (Array.isArray(rawEmbedding)) {
-                // If provider returns a batch ([[...]]), unwrap the first vector
-                if (rawEmbedding.length > 0 && Array.isArray(rawEmbedding[0])) {
-                    if (rawEmbedding.length !== 1) {
-                        console.warn(`Embed returned ${rawEmbedding.length} vectors for a single query; using the first`);
-                    }
-                    queryVector = rawEmbedding[0];
-                }
-            } else if (rawEmbedding && typeof rawEmbedding === 'object') {
-                // Handle possible object wrappers
-                if (Array.isArray(rawEmbedding.embedding)) {
-                    queryVector = rawEmbedding.embedding;
-                } else if (Array.isArray(rawEmbedding.data) && Array.isArray(rawEmbedding.data[0])) {
-                    queryVector = rawEmbedding.data[0];
-                }
-            }
-
-            if (!Array.isArray(queryVector) || !queryVector.every(n => typeof n === 'number')) {
-                throw new Error('Invalid query embedding shape: expected number[]');
-            }
-            if (this.vectorSize && queryVector.length !== this.vectorSize) {
-                console.warn(`Query embedding size (${queryVector.length}) does not match expected collection size (${this.vectorSize})`);
-            }
+            const queryVector = await this.generateQueryVector(query);
 
             // Build search parameters
             const searchParams = {
@@ -592,19 +626,7 @@ class QdrantService {
             console.log(`Found ${searchResults.length} relevant chunks`);
 
             // Transform results to a more useful format
-            const transformedResults = searchResults.map(result => ({
-                id: result.id,
-                score: result.score,
-                courseId: result.payload.courseId,
-                lectureName: result.payload.lectureName,
-                documentId: result.payload.documentId,
-                fileName: result.payload.fileName,
-                documentType: result.payload.documentType,
-                type: result.payload.type,
-                chunkText: result.payload.chunkText,
-                chunkIndex: result.payload.chunkIndex,
-                timestamp: result.payload.timestamp
-            }));
+            const transformedResults = searchResults.map(result => this.transformSearchResult(result));
 
             return transformedResults;
 
@@ -612,6 +634,49 @@ class QdrantService {
             console.error('❌ Error searching documents:', error);
             throw error;
         }
+    }
+
+    /**
+     * Run the same semantic search independently against each course and return
+     * the per-course top hits, keyed by courseId. The query is embedded once and
+     * the vector reused for every course filter (no repeated embedding cost).
+     *
+     * Callers use this to guarantee each course representation in a multi-course
+     * pool (e.g. the Super Course), which a single pooled top-K search cannot do:
+     * a course with denser/more-similar chunks would otherwise win every slot.
+     *
+     * @param {string} query - Search query text
+     * @param {string[]} courseIds - Course IDs to search across
+     * @param {number} perCourseLimit - Max hits to fetch per course
+     * @returns {Promise<Map<string, Array<Object>>>} courseId -> results (score desc)
+     */
+    async searchDocumentsByCourse(query, courseIds = [], perCourseLimit = 10) {
+        const resultsByCourse = new Map();
+        if (!Array.isArray(courseIds) || courseIds.length === 0) {
+            return resultsByCourse;
+        }
+
+        await this.ensureCollectionExists();
+        const queryVector = await this.generateQueryVector(query);
+
+        // Fan out across courses in parallel, reusing the single query vector.
+        const perCourse = await Promise.all(courseIds.map(async (courseId) => {
+            const searchResults = await this.client.search(this.collectionName, {
+                vector: queryVector,
+                limit: perCourseLimit,
+                with_payload: true,
+                with_vector: false,
+                filter: {
+                    must: [{ key: 'courseId', match: { value: courseId } }]
+                }
+            });
+            return [courseId, searchResults.map(result => this.transformSearchResult(result))];
+        }));
+
+        for (const [courseId, results] of perCourse) {
+            resultsByCourse.set(courseId, results);
+        }
+        return resultsByCourse;
     }
 
     /**
