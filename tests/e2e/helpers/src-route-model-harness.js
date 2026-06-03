@@ -26,6 +26,7 @@ const ORIGINAL = {
         getCollectionStats: QdrantService.prototype.getCollectionStats,
         processAndStoreDocument: QdrantService.prototype.processAndStoreDocument,
         searchDocuments: QdrantService.prototype.searchDocuments,
+        searchDocumentsByCourse: QdrantService.prototype.searchDocumentsByCourse,
         deleteDocumentChunks: QdrantService.prototype.deleteDocumentChunks,
         deleteCollection: QdrantService.prototype.deleteCollection,
     },
@@ -39,6 +40,7 @@ function restoreOriginals() {
     QdrantService.prototype.getCollectionStats = ORIGINAL.Qdrant.getCollectionStats;
     QdrantService.prototype.processAndStoreDocument = ORIGINAL.Qdrant.processAndStoreDocument;
     QdrantService.prototype.searchDocuments = ORIGINAL.Qdrant.searchDocuments;
+    QdrantService.prototype.searchDocumentsByCourse = ORIGINAL.Qdrant.searchDocumentsByCourse;
     QdrantService.prototype.deleteDocumentChunks = ORIGINAL.Qdrant.deleteDocumentChunks;
     QdrantService.prototype.deleteCollection = ORIGINAL.Qdrant.deleteCollection;
     AuthService.prototype.getUserById = ORIGINAL.AuthServiceGetUserById;
@@ -253,6 +255,32 @@ function configureQdrant(mode) {
             chunkIndex: 0,
             timestamp: new Date().toISOString(),
         }];
+    };
+    // Super Course retrieval now fans out one filtered search per course and
+    // merges with a per-course floor. Mirror searchDocuments' recording shape
+    // (filters.courseId stays the full course array) so the existing assertions
+    // hold, and return a per-course map with one chunk each.
+    QdrantService.prototype.searchDocumentsByCourse = async (query, courseIds, perCourseLimit) => {
+        if (mode === 'qdrant-search-throws') throw new Error('harness search failure');
+        const ids = Array.isArray(courseIds) ? courseIds : [];
+        state.lastQdrantSearch = { query, filters: { courseId: ids }, limit: perCourseLimit };
+        const map = new Map();
+        for (const courseId of ids) {
+            map.set(courseId, [{
+                id: `chunk-${courseId}`,
+                score: 0.91,
+                courseId,
+                lectureName: 'Unit 1',
+                documentId: 'doc-1',
+                fileName: 'doc.txt',
+                documentType: 'lecture-notes',
+                type: 'lecture_notes',
+                chunkText: 'Harness chunk text',
+                chunkIndex: 0,
+                timestamp: new Date().toISOString(),
+            }]);
+        }
+        return map;
     };
     QdrantService.prototype.deleteDocumentChunks = async () => {
         if (mode === 'qdrant-delete-throws') throw new Error('harness delete failure');
