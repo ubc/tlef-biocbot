@@ -398,6 +398,25 @@ test.describe('userHasCourseAccess (student branch via POST /api/lectures/publis
         // then proceeds to update the lecture state.
         expect(res.status()).toBe(200);
     });
+
+    test('enrolled student succeeds when the course has NO status field (regression: strict status:active wrongly 403d)', async ({ request: api }) => {
+        test.setTimeout(60_000);
+        // Older courses were created without a status field. The chat path treats
+        // a missing status as active, but userHasCourseAccess used to require
+        // status === 'active' exactly, 403ing the student on questions/flags for a
+        // course they were enrolled in. Reproduce a status-less course here.
+        await seedCourse({ courseId: COURSE_MAIN, instructorId });
+        await withDb((db) => db.collection('courses').updateOne(
+            { courseId: COURSE_MAIN },
+            { $unset: { status: '' } }
+        ));
+        await setStudentEnrollment(COURSE_MAIN, studentId, true);
+        const res = await api.post('/api/lectures/publish', {
+            data: { courseId: COURSE_MAIN, lectureName: 'Unit 1', isPublished: true },
+            timeout: 45_000,
+        });
+        expect(res.status()).toBe(200);
+    });
 });
 
 // ---------------------------------------------------------------------------

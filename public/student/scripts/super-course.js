@@ -923,8 +923,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     // startNewChat() both do `messages.innerHTML = ...` — never wipes it. That
     // also removes the race with the (un-awaited) source-pool fetch.
     function maybeShowLevelNotice(hasHigherLevelCourses) {
-        if (!hasHigherLevelCourses || !messages || !messages.parentNode) return;
-        if (document.getElementById('super-course-level-notice')) return;
+        if (!messages || !messages.parentNode) return;
+
+        const existing = document.getElementById('super-course-level-notice');
+
+        // Switching buckets re-evaluates this: if the now-selected bucket doesn't
+        // reach above the student's level, drop any notice left over from a
+        // previous (higher-level) bucket. Without this it lingers until reload.
+        if (!hasHigherLevelCourses) {
+            if (existing) existing.remove();
+            return;
+        }
+
+        if (existing) return;
 
         const notice = document.createElement('div');
         notice.id = 'super-course-level-notice';
