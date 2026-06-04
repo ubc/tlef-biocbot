@@ -113,19 +113,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     initializeAutoSave();
     restoreRecentSession();
 
-    // Build the per-message "Directive Mode" indicator that renders inside a bot
-    // message (like the flag control), shown only on the specific answer that was
-    // generated in Directive Mode.
-    function createDirectiveIndicator(topic) {
-        const badge = document.createElement('span');
-        badge.className = 'directive-mode-badge directive-mode-inline';
-        badge.innerHTML = '<span class="icon">⚠️</span><span>Directive Mode</span>';
-        badge.title = topic
-            ? `This answer is in Directive Mode for: ${topic}`
-            : 'This answer is in Directive Mode';
-        return badge;
-    }
-
     if (newChatButton) {
         newChatButton.addEventListener('click', () => {
             if (conversationMessages.length && !confirm('Start a new Super Course chat?')) {
@@ -178,9 +165,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             typing.remove();
             addMessage(result.message || '', 'bot', {
                 sourceAttribution: result.sourceAttribution,
-                citations: result.citations,
-                directiveModeActive: !!result.directiveModeActive,
-                struggleTopic: result.struggleTopic || null
+                citations: result.citations
             });
             conversationMessages.push({ role: 'assistant', content: result.message || '' });
         } catch (error) {
@@ -227,12 +212,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         const footer = document.createElement('div');
         footer.className = 'message-footer';
 
-        // Per-message Directive Mode indicator — part of the bot's output,
-        // shown only for the answer that was generated in Directive Mode.
-        if (sender === 'bot' && options.directiveModeActive) {
-            footer.appendChild(createDirectiveIndicator(options.struggleTopic));
-        }
-
         if (sender === 'bot' && options.sourceAttribution) {
             footer.appendChild(renderSourceAttribution(options.sourceAttribution));
         }
@@ -260,9 +239,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             autoSaveMessage(content, sender, {
                 sourceAttribution: options.sourceAttribution || null,
                 citations: Array.isArray(options.citations) ? options.citations : [],
-                isError: options.isError === true,
-                directiveModeActive: options.directiveModeActive === true,
-                struggleTopic: options.struggleTopic || null
+                isError: options.isError === true
             });
         }
 
@@ -458,9 +435,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 messageType: 'student-super-course-chat',
                 sourceAttribution: options.sourceAttribution || null,
                 citations: options.citations || [],
-                isError: options.isError === true,
-                directiveModeActive: options.directiveModeActive === true,
-                struggleTopic: options.struggleTopic || null
+                isError: options.isError === true
             });
 
             chatData.metadata.totalMessages = chatData.messages.length;
@@ -517,8 +492,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 sourceAttribution: messageData.sourceAttribution,
                 citations: messageData.citations,
                 isError: messageData.isError,
-                directiveModeActive: messageData.directiveModeActive === true,
-                struggleTopic: messageData.struggleTopic || null,
                 skipAutoSave: true
             });
 

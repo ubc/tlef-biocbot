@@ -1359,7 +1359,31 @@ function renderWeeklyStruggleChart(weekData, totalWeeksAvailable) {
     // Destroy previous chart instance
     if (weeklyStruggleChart) {
         weeklyStruggleChart.destroy();
+        weeklyStruggleChart = null;
     }
+
+    // A page can legitimately contain only gap-filled (zero-struggle) weeks when an
+    // earlier week pushed the timeline back. Drawing an empty chart looks like a crash,
+    // so show a clear message instead and keep the panel (and its nav) visible.
+    const wrapper = canvas.parentElement;
+    let emptyState = wrapper ? wrapper.querySelector('.chart-empty-state') : null;
+    if (topicList.length === 0) {
+        canvas.style.display = 'none';
+        if (wrapper && !emptyState) {
+            emptyState = document.createElement('div');
+            emptyState.className = 'chart-empty-state';
+            wrapper.appendChild(emptyState);
+        }
+        if (emptyState) {
+            emptyState.textContent = 'No active struggles recorded during this period.';
+            emptyState.style.display = 'flex';
+        }
+        return;
+    }
+    if (emptyState) {
+        emptyState.style.display = 'none';
+    }
+    canvas.style.display = 'block';
 
     // Create stacked bar chart
     weeklyStruggleChart = new Chart(canvas, {

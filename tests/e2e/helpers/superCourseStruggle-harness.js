@@ -196,7 +196,8 @@ async function run() {
     }
 
     // =====================================================================
-    // trackSuperCourseStruggle (route helper): state correctness + directive
+    // trackSuperCourseStruggle (route helper): struggle tracking correctness
+    // (the Super Chat records struggle but never enters Directive Mode)
     // =====================================================================
     const POOL_COURSES = [{ courseId: 'C1', courseName: 'One', approvedStruggleTopics: ['Plant Diagnostics'] }];
     // candidate index 0 == Plant Diagnostics / C1
@@ -212,7 +213,7 @@ async function run() {
     // reuses the single app.locals.llm.
     const sharedLLM = new FakeLLM(MAPPED_STRUGGLE);
 
-    // ---- first struggle on a topic (count 1) → logged 'Inactive', no directive ----
+    // ---- first struggle on a topic (count 1) → logged 'Inactive' ----
     {
         sharedLLM.content = MAPPED_STRUGGLE;
         const courses = new FakeCollection(); courses.docs = POOL_COURSES;
@@ -220,7 +221,7 @@ async function run() {
         const struggle = new FakeCollection();
         const persist = new FakeCollection();
 
-        const result = await trackSuperCourseStruggle({
+        await trackSuperCourseStruggle({
             db: makeTrackingDb(courses, users, struggle, persist),
             llmService: sharedLLM,
             user: { userId: 'u1', displayName: 'Stu' },
@@ -231,11 +232,9 @@ async function run() {
         assert.equal(struggle.docs.length, 1);
         assert.equal(struggle.docs[0].state, 'Inactive');     // below threshold
         assert.equal(struggle.docs[0].source, 'superCourse');
-        assert.equal(result.directiveModeActive, false);
-        assert.equal(result.identifiedTopic, null);
     }
 
-    // ---- struggle that reaches threshold (count 2 → 3) → 'Active' + directive ----
+    // ---- struggle that reaches threshold (count 2 → 3) → logged 'Active' (no directive) ----
     {
         sharedLLM.content = MAPPED_STRUGGLE;
         const courses = new FakeCollection(); courses.docs = POOL_COURSES;
@@ -244,7 +243,7 @@ async function run() {
         const struggle = new FakeCollection();
         const persist = new FakeCollection();
 
-        const result = await trackSuperCourseStruggle({
+        await trackSuperCourseStruggle({
             db: makeTrackingDb(courses, users, struggle, persist),
             llmService: sharedLLM,
             user: { userId: 'u1', displayName: 'Stu' },
@@ -253,13 +252,11 @@ async function run() {
         });
 
         assert.equal(struggle.docs.length, 1);
-        assert.equal(struggle.docs[0].state, 'Active');       // directive threshold reached
-        assert.equal(result.directiveModeActive, true);
-        assert.equal(result.identifiedTopic, 'Plant Diagnostics');
+        assert.equal(struggle.docs[0].state, 'Active');       // tracking threshold reached
         assert.ok(persist.findOneAndUpdateCount >= 1);
     }
 
-    // ---- no struggle detected → no row, no directive ----
+    // ---- no struggle detected → no row ----
     {
         sharedLLM.content = '{"isStruggling": false, "matchedIndex": -1, "matchConfidence": 0}';
         const courses = new FakeCollection(); courses.docs = POOL_COURSES;
@@ -267,7 +264,7 @@ async function run() {
         const struggle = new FakeCollection();
         const persist = new FakeCollection();
 
-        const result = await trackSuperCourseStruggle({
+        await trackSuperCourseStruggle({
             db: makeTrackingDb(courses, users, struggle, persist),
             llmService: sharedLLM,
             user: { userId: 'u1' },
@@ -276,10 +273,9 @@ async function run() {
         });
 
         assert.equal(struggle.docs.length, 0);
-        assert.equal(result.directiveModeActive, false);
     }
 
-    // ---- no approved topics in pool → returns noDirective, never calls LLM ----
+    // ---- no approved topics in pool → bails out, never calls LLM ----
     {
         sharedLLM.content = MAPPED_STRUGGLE; // irrelevant: should bail before LLM
         const courses = new FakeCollection(); courses.docs = [{ courseId: 'C1', approvedStruggleTopics: [] }];
@@ -287,7 +283,7 @@ async function run() {
         const struggle = new FakeCollection();
         const persist = new FakeCollection();
 
-        const result = await trackSuperCourseStruggle({
+        await trackSuperCourseStruggle({
             db: makeTrackingDb(courses, users, struggle, persist),
             llmService: sharedLLM,
             user: { userId: 'u1' },
@@ -296,7 +292,6 @@ async function run() {
         });
 
         assert.equal(struggle.docs.length, 0);
-        assert.equal(result.directiveModeActive, false);
     }
 }
 
