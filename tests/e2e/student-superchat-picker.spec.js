@@ -20,6 +20,11 @@ const BUCKET_A = `${PREFIX}-A`;
 const BUCKET_B = `${PREFIX}-B`;
 const COURSE_A = `${PREFIX}-COURSE-A`;
 const COURSE_B = `${PREFIX}-COURSE-B`;
+// A year-5 course in bucket B the student is NOT enrolled in. Pool membership is
+// not enrollment-gated, so it lifts bucket B's pool above the student's level
+// (max enrolled year = 3) without raising the student's own level. This makes
+// bucket B "above your year" and bucket A not — needed to test the banner toggle.
+const COURSE_C = `${PREFIX}-COURSE-C`;
 
 let studentId;
 let instructorId;
@@ -47,11 +52,16 @@ test.beforeEach(async () => {
             overrides: { yearLevel: 3, superchatIds: [BUCKET_B] },
             studentEnrollment: { [studentId]: { enrolled: true, enrolledAt: new Date() } },
         }),
+        seedCourse({
+            courseId: COURSE_C, instructorId, courseName: 'BIOC 501 Picker C',
+            overrides: { yearLevel: 5, superchatIds: [BUCKET_B] },
+            // Intentionally not enrolled — pool membership only.
+        }),
     ]);
 });
 
 test.afterEach(async () => {
-    await cleanupCourses([COURSE_A, COURSE_B]);
+    await cleanupCourses([COURSE_A, COURSE_B, COURSE_C]);
     await cleanupSuperchats([BUCKET_A, BUCKET_B]);
 });
 
@@ -75,6 +85,27 @@ test('the picker offers both accessible buckets and switching swaps the source p
     await picker.selectOption(BUCKET_B);
     await expect(poolList).toContainText('BIOC 301 Picker B', { timeout: 10_000 });
     await expect(poolList).not.toContainText('BIOC 202 Picker A');
+});
+
+test('the "above your level" notice toggles when switching buckets (not just on reload)', async ({ page }) => {
+    await page.goto('/student/super-course');
+
+    const picker = page.locator('#superchat-picker');
+    await expect(picker).toBeVisible({ timeout: 10_000 });
+    const notice = page.locator('#super-course-level-notice');
+
+    // Bucket B's pool reaches year 5 (above the student's year 3) -> notice shows.
+    await picker.selectOption(BUCKET_B);
+    await expect(notice).toBeVisible({ timeout: 10_000 });
+
+    // Switching to bucket A (year 2 only, at/below the student) must REMOVE the
+    // notice in place — previously it lingered until a full page reload.
+    await picker.selectOption(BUCKET_A);
+    await expect(notice).toHaveCount(0);
+
+    // And switching back re-shows it.
+    await picker.selectOption(BUCKET_B);
+    await expect(notice).toBeVisible();
 });
 
 test('/list returns both accessible visible buckets', async ({ request: api }) => {

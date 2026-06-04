@@ -1505,17 +1505,13 @@ async function userHasCourseAccess(db, courseId, userId, role) {
         query.tas = userId;
         query.status = { $ne: 'deleted' };
     } else if (role === 'student') {
-        query.status = 'active';
-        const course = await collection.findOne(query, {
-            projection: { studentEnrollment: 1 }
-        });
-
-        if (!course) {
-            return false;
-        }
-
-        const enrollment = course.studentEnrollment && course.studentEnrollment[userId];
-        return !!(enrollment && enrollment.enrolled === true);
+        // Defer to getStudentEnrollment so this matches the chat path and the
+        // requireActiveCourseForNonInstructors middleware exactly: a course with
+        // no status field is treated as active (only 'inactive'/'deleted' block
+        // access). A strict `status === 'active'` query here wrongly 403'd
+        // students on enrolled courses whose status was never set.
+        const enrollment = await getStudentEnrollment(db, courseId, userId);
+        return !!(enrollment.success && enrollment.enrolled === true);
     }
     
     const course = await collection.findOne(query);

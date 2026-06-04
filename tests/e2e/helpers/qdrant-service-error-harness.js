@@ -48,6 +48,7 @@ function resetState(overrides = {}) {
             search: [],
             scroll: [],
             delete: [],
+            embed: 0,
         },
         ...overrides,
     };
@@ -134,6 +135,7 @@ class FakeConsoleLogger {
 function fakeEmbeddings() {
     return {
         async embed() {
+            state.calls.embed += 1;
             if (state.embeddingThrows) throw new Error('harness embedding failure');
             return state.embeddingReturn;
         },
@@ -462,6 +464,54 @@ async function searchBranches() {
     return { empty, withCourseAndLecture, calls };
 }
 
+async function byCourseBranches() {
+    // Empty course list short-circuits: no embedding, no search, empty map.
+    let service = readyService({ embeddingReturn: [baseVector] });
+    const emptyMap = await service.searchDocumentsByCourse('q', [], 5);
+
+    const noCourses = {
+        size: emptyMap.size,
+        embedCalls: state.calls.embed,
+        searchCalls: state.calls.search.length,
+    };
+
+    // Multi-course: one embedding reused across one filtered search per course.
+    service = readyService({
+        embeddingReturn: [baseVector],
+        searchResults: [{
+            id: 'pt-1',
+            score: 0.7,
+            payload: {
+                courseId: 'X',
+                lectureName: 'Unit 1',
+                documentId: 'doc-1',
+                fileName: 'doc.txt',
+                documentType: 'notes',
+                type: 'pdf',
+                chunkText: 'chunk',
+                chunkIndex: 0,
+                timestamp: 'now',
+            },
+        }],
+    });
+    const map = await service.searchDocumentsByCourse('cells', ['BIOC-202', 'BIOC-302'], 6);
+
+    const multi = {
+        keys: [...map.keys()],
+        resultLengths: [...map.values()].map(list => list.length),
+        embedCalls: state.calls.embed,
+        searchCalls: state.calls.search.length,
+        // Each search is filtered to a single courseId (match.value, not any-of).
+        filterCourseIds: state.calls.search.map(call => {
+            const must = call.params.filter && call.params.filter.must;
+            return must && must[0] && must[0].match ? must[0].match.value : null;
+        }),
+        perCourseLimit: state.calls.search[0].params.limit,
+    };
+
+    return { noCourses, multi };
+}
+
 async function scrollCloneDeleteBranches() {
     const outputs = {};
 
@@ -549,6 +599,8 @@ async function runCase(name) {
             return embeddingBranches();
         case 'search-branches':
             return searchBranches();
+        case 'by-course-branches':
+            return byCourseBranches();
         case 'scroll-clone-delete-branches':
             return scrollCloneDeleteBranches();
         default:

@@ -222,6 +222,53 @@ async function getSuperCourseApprovedTopics(db, options = {}) {
         .filter(entry => entry.approvedTopics.length > 0);
 }
 
+/**
+ * Merge per-course search results into a single ranked list that guarantees each
+ * course a minimum number of slots before filling the rest by raw score.
+ *
+ * Each course is first allotted a floor of ⌊target / nCourses⌋ (at least 1) of
+ * its own top chunks; these are front-loaded (interleaved by rank) so that when
+ * the caller slices the list down to its final budget, every course keeps its
+ * representation. Any remaining slots up to `target` go to the globally
+ * highest-scoring leftover chunks. Courses that returned nothing are skipped so
+ * their floor isn't wasted.
+ *
+ * @param {Map<string, Array<Object>>} resultsByCourse - courseId -> hits (score desc)
+ * @param {number} target - Maximum number of merged results to return
+ * @returns {Array<Object>} Front-loaded, deduped, length <= target
+ */
+function mergeBalancedCourseResults(resultsByCourse, target) {
+    const lists = [...resultsByCourse.values()].filter(list => list.length > 0);
+    if (lists.length === 0) return [];
+
+    const floor = Math.max(1, Math.floor(target / lists.length));
+
+    const taken = new Set();
+    const guaranteed = [];
+    // Round-robin by rank: each course's #1 chunk, then each course's #2, ... up
+    // to the floor — so the front of the list is balanced across courses.
+    for (let rank = 0; rank < floor; rank++) {
+        for (const list of lists) {
+            const item = list[rank];
+            if (item && !taken.has(item.id)) {
+                taken.add(item.id);
+                guaranteed.push(item);
+            }
+        }
+    }
+
+    // Everything not already taken, ranked globally by score, fills the remainder.
+    const remainder = [];
+    for (const list of lists) {
+        for (const item of list) {
+            if (!taken.has(item.id)) remainder.push(item);
+        }
+    }
+    remainder.sort((a, b) => (b.score || 0) - (a.score || 0));
+
+    return [...guaranteed, ...remainder].slice(0, target);
+}
+
 async function searchSuperCourse(db, query, limit, options = {}) {
     const pool = await getSuperCourseRetrievalPool(db, options);
     const courseIds = pool.map(course => course.courseId);
@@ -243,11 +290,16 @@ async function searchSuperCourse(db, query, limit, options = {}) {
     const lectureSlots = totalK - noteSlots;
 
     // --- Lecture retrieval (over-fetch so we can backfill unused note slots) ---
+    // Search each pool course independently and merge with a per-course floor so
+    // every opted-in course is represented. A single pooled top-K search lets a
+    // course with denser/more-similar chunks win every slot, silently shutting
+    // the others out (see the Super Course "only one course ever cited" bug).
     let lectureResults = [];
     if (courseIds.length > 0 && lectureSlots > 0) {
         const qdrant = new QdrantService();
         await qdrant.initialize();
-        lectureResults = await qdrant.searchDocuments(query, { courseId: courseIds }, totalK);
+        const resultsByCourse = await qdrant.searchDocumentsByCourse(query, courseIds, totalK);
+        lectureResults = mergeBalancedCourseResults(resultsByCourse, totalK);
     }
 
     // --- Notes retrieval ---
@@ -438,6 +490,7 @@ module.exports = {
     getSuperCourseRetrievalPool,
     getSuperCourseApprovedTopics,
     searchSuperCourse,
+    mergeBalancedCourseResults,
     buildSuperCourseContext,
     buildSuperCoursePoolSummary,
     buildSuperCourseCitations,

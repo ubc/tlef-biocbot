@@ -540,26 +540,40 @@ test.describe('Instructor home dashboard', () => {
         }, approvedTopicsWithOsmosis);
         await expect(page.locator('#approved-topics-content')).toContainText('osmosis');
 
-        // Edit-topic flow: commitEditTopic synchronously calls
-        // renderApprovedGlobalTopics which replaces the chip container's
-        // innerHTML, detaching the input mid-press. Playwright's element-bound
-        // .press() then errors with "element was detached." Using
-        // page.keyboard.press on the focused input avoids the issue.
+        // Edit-topic flow. startEditTopic swaps the chip label for a transient
+        // <input>, and commitEditTopic/cancelEditTopic call
+        // renderApprovedGlobalTopics which rebuilds the chip container's
+        // innerHTML. This page also has overlapping mocked loaders that can
+        // re-render the section between separate Playwright operations; under
+        // load one of them fires between `startEditTopic` and a follow-up
+        // `.fill()`/`.press()`, permanently detaching the edit input so the next
+        // step waits out the full timeout. Drive each edit — start, type, and
+        // the real keydown handler — in a single browser turn so no async
+        // re-render can interleave mid-edit. The assertions afterwards still
+        // exercise the resulting re-render.
+        //
+        // Escape cancels the edit: the value reverts to 'cell membranes'.
         await page.evaluate(() => {
             const label = document.querySelector('.approved-topic-chip[data-topic="cell membranes"] .topic-chip-label');
-            if (!label) throw new Error('cell membranes topic label not found before edit');
+            if (!label) throw new Error('cell membranes topic label not found before edit (escape)');
             /** @type {any} */ (window).startEditTopic(label);
+            const input = /** @type {HTMLInputElement|null} */ (document.querySelector('.topic-chip-edit-input'));
+            if (!input) throw new Error('edit input not rendered before escape');
+            input.value = 'cell transport';
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         });
-        await page.locator('.topic-chip-edit-input').fill('cell transport');
-        await page.keyboard.press('Escape');
         await expect(page.locator('#approved-topics-content')).toContainText('cell membranes');
+
+        // Enter commits the edit: the value becomes 'cell transport'.
         await page.evaluate(() => {
             const label = document.querySelector('.approved-topic-chip[data-topic="cell membranes"] .topic-chip-label');
-            if (!label) throw new Error('cell membranes topic label not found before edit commit');
+            if (!label) throw new Error('cell membranes topic label not found before edit (enter)');
             /** @type {any} */ (window).startEditTopic(label);
+            const input = /** @type {HTMLInputElement|null} */ (document.querySelector('.topic-chip-edit-input'));
+            if (!input) throw new Error('edit input not rendered before enter');
+            input.value = 'cell transport';
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
         });
-        await page.locator('.topic-chip-edit-input').fill('cell transport');
-        await page.keyboard.press('Enter');
         await expect(page.locator('#approved-topics-content')).toContainText('cell transport');
 
         await expect(page.locator('#persistence-topics-section')).toBeVisible();
