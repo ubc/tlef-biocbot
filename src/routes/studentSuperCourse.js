@@ -59,15 +59,15 @@ let localTrackerService;
 /**
  * Detect cross-course struggle in a Super Chat message and record it against the
  * source course that owns the matched topic. See build spec — Option B (per-event
- * logging). Never throws: on any error it resolves to a "no directive" result.
+ * logging). Records the struggle for dashboards but does NOT enter Directive Mode:
+ * the Super Chat never switches into directive answering. Never throws.
  *
  * @param {Object} params - { db, llmService, user, message, superchatId, includeInactiveCourses }
- * @returns {Promise<{directiveModeActive: boolean, identifiedTopic: string|null}>}
+ * @returns {Promise<void>}
  */
 async function trackSuperCourseStruggle({ db, llmService, user, message, superchatId, includeInactiveCourses }) {
-    const noDirective = { directiveModeActive: false, identifiedTopic: null };
     try {
-        if (!db || !llmService || !user || !user.userId || !message) return noDirective;
+        if (!db || !llmService || !user || !user.userId || !message) return;
 
         if (!localTrackerService) {
             localTrackerService = new TrackerService(llmService);
@@ -76,18 +76,18 @@ async function trackSuperCourseStruggle({ db, llmService, user, message, superch
         // Scope candidate topics to THIS bucket's courses — fewer candidates means
         // more accurate cross-course attribution.
         const courseTopics = await getSuperCourseApprovedTopics(db, { superchatId, includeInactiveCourses });
-        if (!courseTopics.length) return noDirective;
+        if (!courseTopics.length) return;
 
         const analysis = await localTrackerService.analyzeMessageAcrossCourses(message, courseTopics);
         if (!analysis.isStruggling || !analysis.isMapped || !analysis.courseId) {
-            return noDirective;
+            return;
         }
 
         const studentName = user.displayName || user.username || user.email || 'Unknown Student';
 
-        // Update the student's GLOBAL topic counter (blended Directive Mode) and
-        // persistence, but suppress the activation-only row — we log every event
-        // ourselves below so the global Super Chat dashboard shows real volume.
+        // Update the student's GLOBAL topic counter and persistence, but suppress the
+        // activation-only row — we log every event ourselves below so the global Super
+        // Chat dashboard shows real volume.
         const updateResult = await User.updateUserStruggleState(
             db,
             user.userId,
@@ -96,9 +96,9 @@ async function trackSuperCourseStruggle({ db, llmService, user, message, superch
             { source: 'superCourse', skipActivityLog: true }
         );
 
-        // The topic only enters Directive Mode at count >= 3; until then the
-        // struggle is recorded but NOT active. Reflect that in the logged state
-        // instead of always writing 'Active'.
+        // A topic counts as "Active" for the dashboards once its struggle count hits
+        // the threshold (>= 3); below that it is recorded but Inactive. This only
+        // affects the logged state — the Super Chat does not switch to Directive Mode.
         const isActive = !!(updateResult && updateResult.success && updateResult.state && updateResult.state.isActive);
 
         // Per-event record, attributed to the source course and tagged superCourse,
@@ -114,16 +114,8 @@ async function trackSuperCourseStruggle({ db, llmService, user, message, superch
         });
 
         console.log(`🕵️ [SUPER_STRUGGLE] Recorded "${analysis.topic}" (${isActive ? 'Active' : 'Inactive'}) for ${studentName} → course ${analysis.courseId} (conf ${analysis.matchConfidence})`);
-
-        // Mirror the per-course chat: directive mode applies to THIS response
-        // only when the current message's topic is now active.
-        return {
-            directiveModeActive: isActive,
-            identifiedTopic: isActive ? analysis.topic : null
-        };
     } catch (error) {
         console.error('❌ [SUPER_STRUGGLE] Error tracking Super Chat struggle:', error);
-        return noDirective;
     }
 }
 
@@ -465,8 +457,9 @@ router.post('/chat', async (req, res) => {
         }
 
         // Struggle tracking runs in parallel with retrieval so its own LLM call
-        // overlaps; we await it before building the prompt so we can switch the
-        // Super Chat into Directive Mode when the current topic is active.
+        // overlaps; we await it before responding only to ensure the record is
+        // written. It does not affect the answer — the Super Chat never enters
+        // Directive Mode.
         const strugglePromise = req.user
             ? trackSuperCourseStruggle({
                 db: ctx.db,
@@ -476,7 +469,7 @@ router.post('/chat', async (req, res) => {
                 superchatId: ctx.superchatId,
                 includeInactiveCourses: ctx.settings.includeInactiveCourses
             })
-            : Promise.resolve({ directiveModeActive: false, identifiedTopic: null });
+            : Promise.resolve();
 
         const { pool, results } = await searchSuperCourse(
             ctx.db,
@@ -485,7 +478,7 @@ router.post('/chat', async (req, res) => {
             { superchatId: ctx.superchatId, includeInactiveCourses: ctx.settings.includeInactiveCourses }
         );
 
-        const { directiveModeActive, identifiedTopic } = await strugglePromise;
+        await strugglePromise;
 
         const contextText = buildSuperCourseContext(results, pool);
         const poolSummary = buildSuperCoursePoolSummary(pool);
@@ -515,14 +508,6 @@ router.post('/chat', async (req, res) => {
             ctx.settings.studentLevelModifiers
         );
 
-        // Directive Mode: when the student's current topic has hit the struggle
-        // threshold, switch the Super Chat into guided/directive answering, the
-        // same way the per-course chat does. The Super Chat spans courses, so we
-        // use the platform-default directive prompt (no single course prompt).
-        if (directiveModeActive && identifiedTopic) {
-            systemPrompt += `\n\nCRITICAL INSTRUCTION: The student is struggling significantly with the topic "${identifiedTopic}".\nSwitch to DIRECTIVE MODE:\n${prompts.DEFAULT_PROMPTS.directive}`;
-        }
-
         const response = await llmService.sendMessage(prompt, {
             temperature: 0.4,
             maxTokens: 32768,
@@ -536,12 +521,7 @@ router.post('/chat', async (req, res) => {
             usage: response && response.usage,
             timestamp: new Date().toISOString(),
             citations,
-            sourceAttribution,
-            // Per-response directive state: true only for THIS query (when the
-            // current message's topic is active). The client shows the badge
-            // for the specific response, not the whole session.
-            directiveModeActive,
-            struggleTopic: identifiedTopic
+            sourceAttribution
         });
     } catch (error) {
         console.error('Error in student Super Course chat:', error);
