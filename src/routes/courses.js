@@ -9,6 +9,7 @@ const CourseModel = require('../models/Course');
 const UserModel = require('../models/User');
 const DocumentModel = require('../models/Document');
 const QdrantService = require('../services/qdrantService');
+const gridfs = require('../services/gridfs');
 const { hasSystemAdminAccess } = require('../services/authorization');
 
 // Middleware to parse JSON bodies
@@ -264,8 +265,18 @@ async function cloneDocumentForTransfer({
         metadata
     };
 
-    if (contentType === 'file' && fileBuffer) {
-        documentData.fileData = fileBuffer;
+    if (contentType === 'file') {
+        if (sourceDocument.fileId) {
+            // Source binary lives in GridFS — give the clone its own copy so the
+            // two documents can be deleted independently.
+            const copiedFileId = await gridfs.copyFile(db, sourceDocument.fileId);
+            if (copiedFileId) {
+                documentData.fileId = copiedFileId;
+            }
+        } else if (fileBuffer) {
+            // Legacy inline binary.
+            documentData.fileData = fileBuffer;
+        }
     }
 
     const createdDocument = await DocumentModel.uploadDocument(db, documentData);

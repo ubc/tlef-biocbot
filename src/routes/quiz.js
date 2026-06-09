@@ -10,6 +10,7 @@ const CourseModel = require('../models/Course');
 const QuizAttempt = require('../models/QuizAttempt');
 const DocumentModel = require('../models/Document');
 const QdrantService = require('../services/qdrantService');
+const gridfs = require('../services/gridfs');
 const prompts = require('../services/prompts');
 const BadWordsFilter = require('bad-words');
 const profanityFilter = new BadWordsFilter();
@@ -437,7 +438,22 @@ router.get('/materials/:documentId/download', async (req, res) => {
         const downloadFilename = resolveDownloadFilename(document);
         setAttachmentHeaders(res, downloadFilename);
 
-        if (document.contentType === 'file' && document.fileData) {
+        if (document.contentType === 'file' && (document.fileId || document.fileData)) {
+            // Newer uploads store the binary in GridFS (fileId); older ones inline (fileData).
+            if (document.fileId) {
+                res.setHeader('Content-Type', document.mimeType || 'application/octet-stream');
+                return gridfs.openDownloadStream(db, document.fileId)
+                    .on('error', (err) => {
+                        console.error(`❌ GridFS download failed for ${documentId}:`, err.message);
+                        if (!res.headersSent) {
+                            res.status(500).json({ success: false, message: 'Stored file could not be read' });
+                        } else {
+                            res.end();
+                        }
+                    })
+                    .pipe(res);
+            }
+
             const payload = Buffer.isBuffer(document.fileData)
                 ? document.fileData
                 : (document.fileData.buffer ? Buffer.from(document.fileData.buffer) : null);

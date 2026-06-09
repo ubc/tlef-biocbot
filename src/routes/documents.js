@@ -161,6 +161,10 @@ function countTokens(text) {
 const { DocumentParsingModule } = require('ubc-genai-toolkit-document-parsing');
 const { ConsoleLogger } = require('ubc-genai-toolkit-core');
 
+// GridFS storage for uploaded file binaries (keeps raw files out of the 16MB
+// per-document BSON limit; the document only keeps a `fileId` reference).
+const gridfs = require('../services/gridfs');
+
 // Holds the app's shared LLM service so the imageDescriber hook can reach it.
 // Populated from req.app.locals.llm on each upload (always the same singleton).
 let llmServiceRef = null;
@@ -175,6 +179,9 @@ let llmServiceRef = null;
 const docParser = new DocumentParsingModule({
     logger: new ConsoleLogger(),
     debug: true,
+    // Describe embedded slide images in parallel so image-heavy PowerPoint decks
+    // finish quickly instead of one-call-at-a-time.
+    imageConcurrency: 8,
     imageDescriber: async (image) => {
         try {
             if (!llmServiceRef || typeof llmServiceRef.isReady !== 'function' || !llmServiceRef.isReady()) {
@@ -283,6 +290,15 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             // The 'originalName' usually tracks the actual uploaded file. But DocumentModel might use filename for display.
         }
 
+        // Store the raw file in GridFS (not inline in the document) so large
+        // uploads aren't blocked by MongoDB's 16MB per-document limit. The
+        // document keeps only the resulting `fileId` reference.
+        const gridfsFileId = await gridfs.uploadBuffer(db, file.buffer, file.originalname, {
+            contentType: file.mimetype,
+            metadata: { courseId, lectureName, originalName: file.originalname },
+        });
+        console.log(`💾 Stored file in GridFS: ${gridfsFileId} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+
         // Prepare document data
         const documentData = {
             courseId,
@@ -292,7 +308,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             contentType: 'file',
             filename: filename,       // Use the determined filename (strict title or original)
             originalName: file.originalname, // Keep the actual original filename for reference
-            fileData: file.buffer,
+            fileId: gridfsFileId,     // Reference to the binary stored in GridFS
             mimeType: file.mimetype,
             size: file.size,
             content: '', // Initialize content field for extracted text
@@ -327,11 +343,14 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                     fs.writeFileSync(tempFilePath, file.buffer);
                     console.log(`✅ File written to temp path successfully`);
                     
-                    // Parse document to extract text with timeout
+                    // Parse document to extract text with timeout. Image-heavy
+                    // decks describe images in parallel but can still take a
+                    // while, so allow a generous ceiling (5 min).
                     console.log(`🔍 Starting document parsing...`);
+                    const PARSE_TIMEOUT_MS = 5 * 60 * 1000;
                     const parsePromise = docParser.parse({ filePath: tempFilePath }, 'text');
-                    const timeoutPromise = new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('Document parsing timed out after 60 seconds')), 60000)
+                    const timeoutPromise = new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('Document parsing timed out after 5 minutes')), PARSE_TIMEOUT_MS)
                     );
                     
                     const parseResult = await Promise.race([parsePromise, timeoutPromise]);
@@ -725,9 +744,25 @@ router.get('/:documentId/download', async (req, res) => {
         const downloadFilename = resolveDownloadFilename(document);
         setAttachmentHeaders(res, downloadFilename);
 
-        const isFileDocument = document.contentType === 'file' || (!!document.fileData && document.contentType !== 'text');
+        const isFileDocument = document.contentType === 'file' || (!!document.fileData || !!document.fileId) && document.contentType !== 'text';
 
         if (isFileDocument) {
+            // Newer uploads keep the binary in GridFS (referenced by fileId); older
+            // documents may still have it inline in fileData. Support both.
+            if (document.fileId) {
+                res.setHeader('Content-Type', document.mimeType || 'application/octet-stream');
+                return gridfs.openDownloadStream(db, document.fileId)
+                    .on('error', (err) => {
+                        console.error(`❌ GridFS download failed for ${documentId}:`, err.message);
+                        if (!res.headersSent) {
+                            res.status(500).json({ success: false, message: 'Stored file could not be read' });
+                        } else {
+                            res.end();
+                        }
+                    })
+                    .pipe(res);
+            }
+
             const payload = getStoredFileBuffer(document.fileData);
 
             if (!payload) {
@@ -845,7 +880,13 @@ router.delete('/:documentId', async (req, res) => {
         
         // Delete the document from the documents collection
         const result = await DocumentModel.deleteDocument(db, documentId);
-        
+
+        // Remove the backing file from GridFS (no-op for older inline-fileData docs).
+        if (document.fileId) {
+            await gridfs.deleteFile(db, document.fileId);
+            console.log(`🧹 Deleted GridFS file ${document.fileId} for document ${documentId}`);
+        }
+
         // DELETE FROM ALL THREE STORAGE SYSTEMS: MongoDB documents, course structure, and Qdrant
         let qdrantDeleted = false;
         let qdrantDeletedCount = 0;
