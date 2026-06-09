@@ -974,7 +974,7 @@ test.describe('instructor onboarding', () => {
         try {
             await resetLlmStub(apiForStub);
             await addLlmStubRule(apiForStub, {
-                matchSystemPrompt: 'chemistry/biochemistry topic labels',
+                matchSystemPrompt: 'biochemistry topic labels only',
                 content: JSON.stringify({
                     topics: ['DNA structure', 'DNA replication', 'Cell membrane transport'],
                 }),
