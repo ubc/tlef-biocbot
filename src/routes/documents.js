@@ -161,10 +161,33 @@ function countTokens(text) {
 const { DocumentParsingModule } = require('ubc-genai-toolkit-document-parsing');
 const { ConsoleLogger } = require('ubc-genai-toolkit-core');
 
-// Initialize document parsing module
+// Holds the app's shared LLM service so the imageDescriber hook can reach it.
+// Populated from req.app.locals.llm on each upload (always the same singleton).
+let llmServiceRef = null;
+
+// Initialize document parsing module.
+//
+// `imageDescriber` is the provider-agnostic hook the toolkit calls for each
+// image embedded in a PowerPoint slide. We route it through BiocBot's LLM
+// service (multi-modal, e.g. gpt-5-nano) so charts/screenshots/photos become
+// searchable text. If no LLM service is available, we return null and the
+// toolkit falls back to text-only parsing (no external calls).
 const docParser = new DocumentParsingModule({
     logger: new ConsoleLogger(),
-    debug: true
+    debug: true,
+    imageDescriber: async (image) => {
+        try {
+            if (!llmServiceRef || typeof llmServiceRef.isReady !== 'function' || !llmServiceRef.isReady()) {
+                return null;
+            }
+            return await llmServiceRef.describeImage(image.data, image.mimeType, {
+                slideNumber: image.slideNumber
+            });
+        } catch (err) {
+            console.warn(`⚠️ imageDescriber failed (slide ${image.slideNumber}): ${err.message}`);
+            return null;
+        }
+    }
 });
 
 // Initialize Qdrant service
@@ -192,15 +215,16 @@ const upload = multer({
             'application/pdf',
             'application/msword',
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
             'text/plain',
             'text/markdown',
             'application/rtf'
         ];
-        
+
         if (allowedTypes.includes(file.mimetype)) {
             cb(null, true);
         } else {
-            cb(new Error('Invalid file type. Only PDF, DOC, DOCX, TXT, MD, and RTF files are allowed.'), false);
+            cb(new Error('Invalid file type. Only PDF, DOC, DOCX, PPTX, TXT, MD, and RTF files are allowed.'), false);
         }
     }
 });
@@ -224,7 +248,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                 message: 'Missing required fields: courseId, lectureName, documentType, instructorId, file'
             });
         }
-        
+
         // Get database instance from app.locals
         const db = req.app.locals.db;
         if (!db) {
@@ -232,6 +256,12 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                 success: false,
                 message: 'Database connection not available'
             });
+        }
+
+        // Make the shared LLM service available to the document parser's
+        // imageDescriber hook (used to describe images inside PowerPoint files).
+        if (req.app.locals.llm) {
+            llmServiceRef = req.app.locals.llm;
         }
 
         const access = await requireCourseDocumentAccess(req, res, db, courseId, { instructorId });

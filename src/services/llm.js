@@ -222,6 +222,62 @@ class LLMService {
     }
 
     /**
+     * Describe an image using the configured multi-modal model.
+     *
+     * Used by the document-parsing module's `imageDescriber` hook to turn
+     * images embedded in PowerPoint slides (charts, screenshots, photos) into
+     * searchable text. Routes through the UBC GenAI Toolkit LLM module's
+     * multi-modal message support, so it works with whichever provider/model is
+     * configured (e.g. gpt-5-nano).
+     *
+     * @param {Buffer|string} imageData - Raw image bytes (Buffer) or base64 string.
+     * @param {string} mimeType - Image MIME type, e.g. 'image/png'.
+     * @param {Object} [context] - Optional context, e.g. { slideNumber }.
+     * @returns {Promise<string>} A textual description (empty string if none).
+     */
+    async describeImage(imageData, mimeType, context = {}) {
+        if (!this.isInitialized) {
+            await this._performInitialization();
+        }
+
+        const base64 = Buffer.isBuffer(imageData)
+            ? imageData.toString('base64')
+            : imageData;
+
+        const slideInfo = context.slideNumber
+            ? ` (from slide ${context.slideNumber})`
+            : '';
+        const prompt =
+            `You are extracting content from a lecture slide${slideInfo} so it can be used as ` +
+            `searchable course notes. Describe this image factually and concisely. ` +
+            `If it is a chart, graph, or diagram, summarize what it shows and any key data, ` +
+            `labels, or trends. If it contains text (e.g. a screenshot), transcribe that text. ` +
+            `Do not add commentary or preamble. If the image is purely decorative and carries ` +
+            `no information, respond with nothing.`;
+
+        // Reuse provider/model handling (gpt-5 family param translation, etc.).
+        const baseOptions = {
+            ...this._getProviderSpecificOptions(),
+            temperature: 0,
+            max_tokens: 1000,
+        };
+        const finalOptions = await this._applyModelOptions(baseOptions);
+
+        const response = await this.llm.sendConversation(
+            [
+                {
+                    role: 'user',
+                    content: prompt,
+                    images: [{ data: base64, mimeType }],
+                },
+            ],
+            finalOptions
+        );
+
+        return (response && response.content) ? response.content : '';
+    }
+
+    /**
      * Get provider-specific options based on the current LLM provider
      * @returns {Object} Provider-specific options
      * @private
