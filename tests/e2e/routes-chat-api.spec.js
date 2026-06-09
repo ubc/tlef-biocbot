@@ -243,6 +243,57 @@ test.describe('GET /api/chat/source-documents/:documentId/download', () => {
         }
     });
 
+    test('serves GridFS-backed source files (e.g. PPTX) as the original binary', async ({ baseURL }) => {
+        await seedCourse({
+            courseId: COURSE_A,
+            instructorId,
+            overrides: { quizSettings: { allowSourceAttributionDownloads: true } },
+        });
+        const gridfs = require('../../src/services/gridfs');
+        const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+        // Stand-in for real PPTX bytes; only fidelity of the round-trip matters.
+        const payload = Buffer.from('PK fake pptx archive bytes for download test', 'utf8');
+        const now = new Date();
+        const fileId = await withDb(async (db) => {
+            const id = await gridfs.uploadBuffer(db, payload, 'Chromatin.pptx', { contentType: PPTX_MIME });
+            await db.collection('documents').insertOne({
+                documentId: 'doc-src-gridfs',
+                courseId: COURSE_A,
+                lectureName: 'Unit 1',
+                documentType: 'lecture-notes',
+                contentType: 'file',
+                fileId: id,
+                content: 'extracted slide text that must NOT be served as the download',
+                filename: 'Chromatin.pptx',
+                originalName: 'Chromatin.pptx',
+                mimeType: PPTX_MIME,
+                size: payload.length,
+                status: 'parsed',
+                uploadDate: now,
+                lastModified: now,
+            });
+            return id;
+        });
+        const api = await request.newContext({
+            baseURL,
+            storageState: storageStatePath('instructor'),
+        });
+        try {
+            const res = await api.get(`/api/chat/source-documents/doc-src-gridfs/download?courseId=${COURSE_A}`);
+            expect(res.ok()).toBeTruthy();
+            expect(res.headers()['content-type']).toContain('presentationml');
+            expect((res.headers()['content-disposition'] || '')).toContain('Chromatin.pptx');
+            const body = await res.body();
+            expect(Buffer.compare(body, payload)).toBe(0);
+        } finally {
+            await api.dispose();
+            await withDb(async (db) => {
+                await db.collection('documents').deleteOne({ documentId: 'doc-src-gridfs' });
+                await gridfs.deleteFile(db, fileId);
+            });
+        }
+    });
+
     test('500 when contentType=file but fileData is unusable', async ({ baseURL }) => {
         await seedCourse({
             courseId: COURSE_A,
