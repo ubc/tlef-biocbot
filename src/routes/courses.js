@@ -9,6 +9,7 @@ const CourseModel = require('../models/Course');
 const UserModel = require('../models/User');
 const DocumentModel = require('../models/Document');
 const QdrantService = require('../services/qdrantService');
+const gridfs = require('../services/gridfs');
 const { hasSystemAdminAccess } = require('../services/authorization');
 
 // Middleware to parse JSON bodies
@@ -85,14 +86,17 @@ function buildTopicExtractionPrompt(content, maxTopics = 8) {
     const truncatedContent = typeof content === 'string' ? content.slice(0, 12000) : '';
     return `
 You are BIOCBOT, an expert chemistry/biochemistry curriculum analyst.
-Read the uploaded course content and extract the core concepts that students might struggle with.
+Read the uploaded course content and extract only biochemistry concepts that students might struggle with.
 
 Requirements:
 1. Return ${maxTopics} or fewer concise topic labels.
 2. Each topic should be 1-5 words.
-3. Prefer concept-level terms (e.g., "Hydrophilic Interactions", "Enzyme Kinetics", "Acid-Base Chemistry").
-4. Avoid duplicates and overly generic labels like "Chemistry" or "General".
-5. Return JSON ONLY.
+3. Include only topics that are directly relevant to biochemistry, molecular biology, metabolism, enzymes, proteins, nucleic acids, membranes, cellular signaling, or biochemical methods.
+4. If the content is not about biochemistry, return an empty topics array.
+5. Do not extract humanities, literature, history, politics, geography, legal, or general social-science topics.
+6. Prefer concept-level terms (e.g., "Hydrophilic Interactions", "Enzyme Kinetics", "Protein Structure").
+7. Avoid duplicates and overly generic labels like "Chemistry" or "General".
+8. Return JSON ONLY.
 
 JSON format:
 {
@@ -104,6 +108,14 @@ Course content:
 ${truncatedContent}
 """
 `;
+}
+
+function filterBiochemistryTopics(topics = []) {
+    const biochemistryPattern = /\b(amino acid|protein|peptide|enzyme|kinetic|cataly|substrate|active site|alloster|metabol|glycolysis|gluconeogenesis|krebs|citric acid|tca|electron transport|oxidative phosphorylation|atp|bioenergetic|carbohydrate|glucose|glycogen|lipid|fatty acid|cholesterol|membrane|phospholipid|hydrophilic|hydrophobic|polarity|polar|nonpolar|nucleic acid|dna|rna|nucleotide|transcription|translation|replication|gene expression|molecular biology|cell signal|signal transduction|receptor|ligand|hormone|cofactor|vitamin|redox|oxidation|reduction|buffer|ph\b|acid-base|equilibrium|thermodynamic|hemoglobin|myoglobin|collagen|antibody|immunoglobulin|western blot|pcr|electrophoresis|chromatography|spectrophotometry|assay)\b/i;
+    const nonBiochemistryPattern = /\b(erasure|poetry|poetic|literary|literature|treaty|indigenous|colonial|dispossession|endowment|territory|musqueam|university|crown land|government|policy|rights|legal|historical|history|geography|map)\b/i;
+
+    return CourseModel.normalizeTopicList(topics)
+        .filter((topic) => biochemistryPattern.test(topic) && !nonBiochemistryPattern.test(topic));
 }
 
 function generateCourseCode() {
@@ -264,8 +276,18 @@ async function cloneDocumentForTransfer({
         metadata
     };
 
-    if (contentType === 'file' && fileBuffer) {
-        documentData.fileData = fileBuffer;
+    if (contentType === 'file') {
+        if (sourceDocument.fileId) {
+            // Source binary lives in GridFS — give the clone its own copy so the
+            // two documents can be deleted independently.
+            const copiedFileId = await gridfs.copyFile(db, sourceDocument.fileId);
+            if (copiedFileId) {
+                documentData.fileId = copiedFileId;
+            }
+        } else if (fileBuffer) {
+            // Legacy inline binary.
+            documentData.fileData = fileBuffer;
+        }
     }
 
     const createdDocument = await DocumentModel.uploadDocument(db, documentData);
@@ -1143,7 +1165,7 @@ router.post('/:courseId/extract-topics', async (req, res) => {
             const llmResponse = await llm.sendMessage(prompt, {
                 temperature: 0.1,
                 maxTokens: 300,
-                systemPrompt: 'You extract concise chemistry/biochemistry topic labels from course content. Return strict JSON only.'
+                systemPrompt: 'You extract concise biochemistry topic labels only. If the content is not biochemistry, return {"topics":[]}. Return strict JSON only.'
             });
 
             const parsed = extractFirstJSONObject(llmResponse?.content || '');
@@ -1154,7 +1176,7 @@ router.post('/:courseId/extract-topics', async (req, res) => {
             console.warn('LLM service unavailable for /extract-topics; returning empty suggestions');
         }
 
-        suggestedTopics = CourseModel.normalizeTopicList(suggestedTopics).slice(0, topicLimit);
+        suggestedTopics = filterBiochemistryTopics(suggestedTopics).slice(0, topicLimit);
 
         return res.json({
             success: true,

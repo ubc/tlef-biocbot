@@ -17,6 +17,7 @@ const profanityFilter = new BadWordsFilter();
 const TrackerService = require('../services/tracker');
 const User = require('../models/User');
 const MentalHealthFlag = require('../models/MentalHealthFlag');
+const gridfs = require('../services/gridfs');
 
 // Initialize services
 // Initialize services lazily
@@ -190,6 +191,8 @@ function inferExtensionFromMimeType(mimeType) {
             return '.doc';
         case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
             return '.docx';
+        case 'application/vnd.openxmlformats-officedocument.presentationml.presentation':
+            return '.pptx';
         case 'application/rtf':
             return '.rtf';
         case 'text/plain':
@@ -375,10 +378,31 @@ router.get('/source-documents/:documentId/download', async (req, res) => {
         const downloadFilename = resolveDownloadFilename(document);
         setAttachmentHeaders(res, downloadFilename);
 
-        if (document.contentType === 'file' && document.fileData) {
+        const isFileDocument = document.contentType === 'file'
+            || ((!!document.fileData || !!document.fileId) && document.contentType !== 'text');
+
+        if (isFileDocument) {
+            // Newer uploads keep the binary in GridFS (referenced by fileId); older
+            // documents may still have it inline in fileData. Support both so the
+            // student gets the original file (e.g. the full PowerPoint), not the
+            // extracted text.
+            if (document.fileId) {
+                res.setHeader('Content-Type', document.mimeType || 'application/octet-stream');
+                return gridfs.openDownloadStream(db, document.fileId)
+                    .on('error', (err) => {
+                        console.error(`❌ GridFS download failed for source document ${documentId}:`, err.message);
+                        if (!res.headersSent) {
+                            res.status(500).json({ success: false, message: 'Stored file could not be read' });
+                        } else {
+                            res.end();
+                        }
+                    })
+                    .pipe(res);
+            }
+
             const payload = Buffer.isBuffer(document.fileData)
                 ? document.fileData
-                : (document.fileData.buffer ? Buffer.from(document.fileData.buffer) : null);
+                : (document.fileData && document.fileData.buffer ? Buffer.from(document.fileData.buffer) : null);
 
             if (!payload) {
                 return res.status(500).json({ success: false, message: 'Stored file data is invalid' });

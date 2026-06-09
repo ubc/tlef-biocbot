@@ -449,11 +449,15 @@ class QdrantService {
 
             for (let i = 0; i < chunks.length; i++) {
                 const chunkId = randomUUID();
+                const chunkMetadata = Array.isArray(documentData.chunkMetadata) && documentData.chunkMetadata[i]
+                    ? documentData.chunkMetadata[i]
+                    : {};
                 
                 const point = {
                     id: chunkId,
                     vector: embeddings[i],
                     payload: {
+                        ...chunkMetadata,
                         courseId: documentData.courseId,
                         lectureName: documentData.lectureName,
                         documentId: documentData.documentId,
