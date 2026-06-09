@@ -252,6 +252,9 @@ class LLMService {
             `searchable course notes. Describe this image factually and concisely. ` +
             `If it is a chart, graph, or diagram, summarize what it shows and any key data, ` +
             `labels, or trends. If it contains text (e.g. a screenshot), transcribe that text. ` +
+            `If you identify topics or concepts, include only biochemistry topics. If there ` +
+            `are no biochemistry topics, do not mention that fact; just describe/transcribe ` +
+            `any visible factual content, or return nothing if there is no useful content. ` +
             `Do not add commentary or preamble. If the image is purely decorative and carries ` +
             `no information, respond with nothing.`;
 
@@ -274,7 +277,18 @@ class LLMService {
             finalOptions
         );
 
-        return (response && response.content) ? response.content : '';
+        const content = (response && response.content) ? response.content.trim() : '';
+        if (/^(nothing|no)\b.*\b(biochemistry|biochemical)\b/i.test(content)) {
+            return '';
+        }
+        if (/\bno biochemistry topics?\b/i.test(content)) {
+            return content
+                .replace(/\.?\s*no biochemistry topics?[^.]*\./ig, '')
+                .replace(/\bThere are no biochemistry topics?[^.]*\./ig, '')
+                .trim();
+        }
+
+        return content;
     }
 
     /**
