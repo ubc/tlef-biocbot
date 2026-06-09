@@ -12,6 +12,8 @@ const { hasSystemAdminAccess } = require('../services/authorization');
 const { QUESTION_EXTRACTION_SYSTEM_PROMPT, buildQuestionExtractionPrompt } = require('../services/prompts');
 const { encodingForModel } = require('js-tiktoken');
 
+const PPTX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+
 // Token encoder using cl100k_base (same as tokencounter.space)
 const tokenEncoder = encodingForModel('gpt-4o');
 
@@ -25,6 +27,8 @@ function inferExtensionFromMimeType(mimeType) {
             return '.doc';
         case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
             return '.docx';
+        case PPTX_MIME_TYPE:
+            return '.pptx';
         case 'application/rtf':
             return '.rtf';
         case 'text/plain':
@@ -169,33 +173,31 @@ const gridfs = require('../services/gridfs');
 // Populated from req.app.locals.llm on each upload (always the same singleton).
 let llmServiceRef = null;
 
-// Initialize document parsing module.
-//
-// `imageDescriber` is the provider-agnostic hook the toolkit calls for each
-// image embedded in a PowerPoint slide. We route it through BiocBot's LLM
-// service (multi-modal, e.g. gpt-5-nano) so charts/screenshots/photos become
-// searchable text. If no LLM service is available, we return null and the
-// toolkit falls back to text-only parsing (no external calls).
-const docParser = new DocumentParsingModule({
-    logger: new ConsoleLogger(),
-    debug: true,
-    // Describe embedded slide images in parallel so image-heavy PowerPoint decks
-    // finish quickly instead of one-call-at-a-time.
-    imageConcurrency: 8,
-    imageDescriber: async (image) => {
-        try {
-            if (!llmServiceRef || typeof llmServiceRef.isReady !== 'function' || !llmServiceRef.isReady()) {
+function createDocumentParser(options = {}) {
+    return new DocumentParsingModule({
+        logger: new ConsoleLogger(),
+        debug: true,
+        // Describe embedded slide images in parallel so image-heavy PowerPoint
+        // decks finish quickly instead of one-call-at-a-time.
+        imageConcurrency: 8,
+        onSlide: options.onSlide,
+        // `imageDescriber` is provider-agnostic. BiocBot's LLM service decides
+        // which configured multimodal provider/model actually handles the image.
+        imageDescriber: async (image) => {
+            try {
+                if (!llmServiceRef || typeof llmServiceRef.isReady !== 'function' || !llmServiceRef.isReady()) {
+                    return null;
+                }
+                return await llmServiceRef.describeImage(image.data, image.mimeType, {
+                    slideNumber: image.slideNumber
+                });
+            } catch (err) {
+                console.warn(`⚠️ imageDescriber failed (slide ${image.slideNumber}): ${err.message}`);
                 return null;
             }
-            return await llmServiceRef.describeImage(image.data, image.mimeType, {
-                slideNumber: image.slideNumber
-            });
-        } catch (err) {
-            console.warn(`⚠️ imageDescriber failed (slide ${image.slideNumber}): ${err.message}`);
-            return null;
         }
-    }
-});
+    });
+}
 
 // Initialize Qdrant service
 const qdrantService = new QdrantService();
@@ -222,7 +224,7 @@ const upload = multer({
             'application/pdf',
             'application/msword',
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+            PPTX_MIME_TYPE, // .pptx
             'text/plain',
             'text/markdown',
             'application/rtf'
@@ -324,6 +326,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         
         // Extract text content from file using UBC GenAI Toolkit BEFORE creating the document
         let textContent = '';
+        const parsedSlides = [];
         try {
             if (file.mimetype === 'text/plain' || file.mimetype === 'text/markdown') {
                 // Handle text files directly
@@ -348,7 +351,16 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                     // while, so allow a generous ceiling (5 min).
                     console.log(`🔍 Starting document parsing...`);
                     const PARSE_TIMEOUT_MS = 5 * 60 * 1000;
-                    const parsePromise = docParser.parse({ filePath: tempFilePath }, 'text');
+                    const parser = createDocumentParser({
+                        onSlide: file.mimetype === PPTX_MIME_TYPE
+                            ? async (slide) => {
+                                if (slide && typeof slide.text === 'string' && slide.text.trim()) {
+                                    parsedSlides.push(slide);
+                                }
+                            }
+                            : undefined
+                    });
+                    const parsePromise = parser.parse({ filePath: tempFilePath }, 'text');
                     const timeoutPromise = new Promise((_, reject) =>
                         setTimeout(() => reject(new Error('Document parsing timed out after 5 minutes')), PARSE_TIMEOUT_MS)
                     );
@@ -413,18 +425,50 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                     await qdrantService.initialize();
                 }
                 
-                // Try to process through Qdrant for vector search
-            console.log(`Processing document through Qdrant: ${file.originalname} -> ${documentData.filename}`);
-            qdrantResult = await qdrantService.processAndStoreDocument({
-                courseId,
-                lectureName,
-                documentId: result.documentId,
-                content: textContent,
-                fileName: documentData.filename, // Use the strict title/filename
-                mimeType: file.mimetype,
-                documentType: documentType,
-                type: result.type
-            });
+                const qdrantDocumentData = {
+                    courseId,
+                    lectureName,
+                    documentId: result.documentId,
+                    content: textContent,
+                    fileName: documentData.filename, // Use the strict title/filename
+                    mimeType: file.mimetype,
+                    documentType: documentType,
+                    type: result.type
+                };
+
+                if (file.mimetype === PPTX_MIME_TYPE && parsedSlides.length > 0) {
+                    const slideChunks = parsedSlides.map(slide => slide.text.trim()).filter(Boolean);
+                    const slideMetadata = parsedSlides
+                        .filter(slide => slide.text && slide.text.trim())
+                        .map(slide => ({
+                            sourceUnit: 'slide',
+                            slideNumber: slide.slideNumber,
+                            describedImageCount: slide.describedImageCount || 0
+                        }));
+
+                    console.log(`Processing PowerPoint through Qdrant per slide: ${file.originalname} -> ${slideChunks.length} slides`);
+                    const embeddings = await qdrantService.generateEmbeddings(slideChunks);
+                    const storedChunks = await qdrantService.storeChunks(
+                        {
+                            ...qdrantDocumentData,
+                            chunkMetadata: slideMetadata
+                        },
+                        slideChunks,
+                        embeddings,
+                        'pptx-slide'
+                    );
+
+                    qdrantResult = {
+                        success: true,
+                        chunksProcessed: slideChunks.length,
+                        chunksStored: storedChunks.length,
+                        message: `PowerPoint processed and ${storedChunks.length} slide chunks stored successfully`
+                    };
+                } else {
+                    // Try to process through Qdrant for vector search
+                    console.log(`Processing document through Qdrant: ${file.originalname} -> ${documentData.filename}`);
+                    qdrantResult = await qdrantService.processAndStoreDocument(qdrantDocumentData);
+                }
                 
                 if (qdrantResult.success) {
                     console.log(`✅ Document processed and stored in Qdrant: ${qdrantResult.chunksStored} chunks`);
