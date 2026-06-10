@@ -256,7 +256,7 @@ function settingsHarness(role = 'instructor') {
                     </div>
                 </section>
 
-                <div class="settings-actions">
+                <div class="settings-actions settings-section-actions">
                     <button id="save-settings" class="primary-button" type="button">Save Settings</button>
                     <button id="reset-settings" class="secondary-button" type="button">Reset to Default</button>
                 </div>
@@ -369,7 +369,7 @@ test.describe('settings.css harness coverage', () => {
         await page.setViewportSize({ width: 1100, height: 1200 });
         await gotoSettingsHarness(page, 'instructor');
 
-        await expect(page.locator('.settings-container')).toHaveCSS('max-width', '800px');
+        await expect(page.locator('.settings-container')).toHaveCSS('max-width', '1040px');
         await expect(page.locator('.development-disclaimer')).toHaveCSS('display', 'flex');
         await expect(page.locator('.development-disclaimer .disclaimer-content strong')).toHaveCSS('color', 'rgb(108, 87, 0)');
         await expect(page.locator('.setting-item.checkbox')).toHaveCSS('align-items', 'center');
@@ -388,7 +388,7 @@ test.describe('settings.css harness coverage', () => {
             input.checked = false;
             input.dispatchEvent(new Event('change', { bubbles: true }));
         });
-        await expect(page.locator('#quiz-enabled-toggle + .toggle-slider')).toHaveCSS('background-color', 'rgb(204, 204, 204)');
+        await expect(page.locator('#quiz-enabled-toggle + .toggle-slider')).toHaveCSS('background-color', 'rgb(118, 118, 118)');
 
         await expect(page.locator('#testable-units-container')).toHaveCSS('display', 'flex');
         await expect(page.locator('#testable-units-container .loading-text')).toHaveCSS('color', 'rgb(102, 102, 102)');
@@ -444,8 +444,8 @@ test.describe('settings.css harness coverage', () => {
         await gotoSettingsHarness(page, 'ta');
 
         await expect(page.locator('.settings-container')).toHaveCSS('padding-left', '10px');
-        await expect(page.locator('.settings-actions')).toHaveCSS('flex-direction', 'column');
-        await expect(page.locator('.settings-actions button').first()).toHaveCSS('width', '440px');
+        await expect(page.locator('.settings-section-actions')).toHaveCSS('flex-direction', 'column');
+        await expect(page.locator('.settings-section-actions button').first()).toHaveCSS('width', '440px');
 
         await expect(page.locator('.system-admin-list')).toHaveCSS('display', 'grid');
         await expect(page.locator('.system-admin-row.is-self')).toHaveCSS('background-color', 'rgb(244, 251, 255)');

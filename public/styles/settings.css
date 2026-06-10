@@ -1,47 +1,201 @@
 /* Settings Page Styles */
 
-/* Development Disclaimer */
-.development-disclaimer {
-    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
-    border: 2px solid #ffc107;
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: flex-start;
-    gap: 16px;
-    box-shadow: 0 4px 12px rgba(255, 193, 7, 0.2);
-}
-
-.development-disclaimer .disclaimer-icon {
-    font-size: 24px;
-    flex-shrink: 0;
-    margin-top: 2px;
-}
-
-.development-disclaimer .disclaimer-content h3 {
-    margin: 0 0 8px 0;
-    font-size: 16px;
-    font-weight: 600;
-    color: #856404;
-}
-
-.development-disclaimer .disclaimer-content p {
-    margin: 0;
-    font-size: 14px;
-    color: #856404;
-    line-height: 1.5;
-}
-
-.development-disclaimer .disclaimer-content strong {
-    color: #6c5700;
-}
-
 .settings-container {
-    max-width: 800px;
+    max-width: 1040px;
     margin: 0 auto;
 }
 
+/* The hidden attribute must always win, even over display rules set by the
+   classes below (e.g. .settings-panels { display: flex }). */
+.settings-container [hidden],
+.settings-hub[hidden],
+.settings-panels[hidden] {
+    display: none !important;
+}
+
+/* Visually hidden helper for screen-reader-only text */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* =============================================
+   Hub view: category tiles
+   ============================================= */
+.settings-group-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin: 28px 0 12px;
+}
+
+.settings-hub > .settings-group-label:first-child {
+    margin-top: 4px;
+}
+
+.settings-tile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.settings-tile {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    height: 100%;
+    padding: 18px;
+    background-color: var(--background-light);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.settings-tile:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 2px 8px var(--shadow-color);
+}
+
+.settings-tile:focus-visible {
+    outline: 3px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+.settings-tile-icon {
+    font-size: 22px;
+    line-height: 1.2;
+    flex-shrink: 0;
+}
+
+.settings-tile-title {
+    display: block;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.settings-tile-desc {
+    display: block;
+    margin-top: 2px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-secondary);
+}
+
+.settings-tile-danger:hover {
+    border-color: var(--danger-color);
+}
+
+/* =============================================
+   Panel view: side rail + active panel
+   ============================================= */
+.settings-panels {
+    display: flex;
+    align-items: flex-start;
+    gap: 24px;
+}
+
+.settings-rail {
+    width: 212px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    background-color: var(--background-light);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px 10px;
+}
+
+.settings-rail ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.settings-rail-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin: 14px 10px 4px;
+}
+
+.settings-rail-back {
+    display: block;
+    padding: 8px 10px;
+    margin-bottom: 4px;
+    border-radius: 6px;
+    font-size: 14px;
+    color: var(--primary-color);
+}
+
+.settings-rail-back:hover {
+    background-color: var(--background-color);
+}
+
+.settings-rail-link {
+    display: block;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.settings-rail-link:hover {
+    background-color: var(--background-color);
+}
+
+/* Active section: color is reinforced by weight so state is not color-only */
+.settings-rail-link[aria-current="true"] {
+    background-color: var(--primary-color);
+    color: var(--light-text);
+    font-weight: 600;
+}
+
+.settings-rail-back:focus-visible,
+.settings-rail-link:focus-visible {
+    outline: 3px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+.settings-panel-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.settings-panel-title {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0 0 8px;
+}
+
+/* Heading receives programmatic focus on panel change; it is not in the tab
+   order, so no ring is drawn. */
+.settings-panel-title:focus {
+    outline: none;
+}
+
+.settings-panel-desc {
+    margin: 0 0 16px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+/* =============================================
+   Section cards
+   ============================================= */
 .settings-section {
     background-color: #fff;
     border-radius: 8px;
@@ -50,12 +204,19 @@
     margin-bottom: 24px;
 }
 
-.settings-section h2 {
-    margin-bottom: 20px;
+.settings-section > h3 {
+    margin-bottom: 12px;
     padding-bottom: 10px;
     border-bottom: 1px solid var(--border-color);
     font-size: 18px;
     font-weight: 500;
+}
+
+.section-description {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin: 0 0 16px;
 }
 
 .setting-item {
@@ -79,7 +240,6 @@
     font-weight: 500;
 }
 
-/* New setting item layout for database management */
 .settings-content {
     margin-top: 16px;
 }
@@ -89,7 +249,7 @@
     margin-right: 20px;
 }
 
-.setting-info h3 {
+.setting-info h4 {
     margin: 0 0 8px 0;
     font-size: 16px;
     font-weight: 500;
@@ -109,7 +269,103 @@
     align-items: center;
 }
 
-/* Super Course bucket management controls (admin) */
+/* Per-section footer with reset/save + unsaved-changes note */
+.settings-section-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 12px;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+.settings-dirty-note {
+    margin-right: auto;
+    font-size: 13px;
+    font-weight: 500;
+    color: #7a5800;
+}
+
+.settings-dirty-note::before {
+    content: "\25CF ";
+    font-size: 11px;
+}
+
+/* Collapsible advanced group (native details/summary) */
+.settings-advanced {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background-color: var(--background-light);
+    margin-top: 4px;
+}
+
+.settings-advanced > summary {
+    cursor: pointer;
+    padding: 14px 16px;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    border-radius: 8px;
+}
+
+.settings-advanced > summary:hover {
+    background-color: var(--background-color);
+}
+
+.settings-advanced > summary:focus-visible {
+    outline: 3px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+.settings-advanced[open] > summary {
+    border-bottom: 1px solid var(--border-color);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.settings-advanced .setting-item {
+    margin: 16px;
+}
+
+/* Development Disclaimer */
+.development-disclaimer {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+    border: 2px solid #ffc107;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    box-shadow: 0 4px 12px rgba(255, 193, 7, 0.2);
+}
+
+.development-disclaimer .disclaimer-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.development-disclaimer .disclaimer-content h4 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #856404;
+}
+
+.development-disclaimer .disclaimer-content p {
+    margin: 0;
+    font-size: 14px;
+    color: #856404;
+    line-height: 1.5;
+}
+
+.development-disclaimer .disclaimer-content strong {
+    color: #6c5700;
+}
+
+/* Super Course bucket management controls */
 .superchat-manage-controls {
     gap: 8px;
 }
@@ -151,8 +407,27 @@
     margin: 0;
 }
 
+.superchat-checklist-item input:focus-visible {
+    outline: 3px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+/* Newly created bucket is highlighted until the next save */
+.superchat-checklist-item.is-new {
+    background-color: #e8f7ef;
+    border-radius: 6px;
+    padding: 4px 8px;
+    margin: -4px -8px;
+}
+
+.superchat-checklist-new-badge {
+    font-size: 12px;
+    font-weight: 600;
+    color: #1f7a46;
+}
+
 .superchat-checklist-empty {
-    color: var(--text-muted, #888);
+    color: var(--text-secondary, #666);
     font-style: italic;
     margin: 0;
 }
@@ -195,13 +470,6 @@
     font-weight: normal;
 }
 
-.settings-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 16px;
-    margin-top: 24px;
-}
-
 /* Toggle Switch */
 .toggle-switch {
     position: relative;
@@ -223,7 +491,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: #ccc;
+    background-color: #767676;
     transition: .4s;
     border-radius: 24px;
 }
@@ -248,6 +516,21 @@ input:checked+.toggle-slider:before {
     transform: translateX(26px);
 }
 
+/* Visible keyboard focus for the visually-hidden toggle checkbox */
+.toggle-switch input:focus-visible+.toggle-slider {
+    outline: 3px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+/* Visible keyboard focus for the remaining controls on this page */
+.settings-container button:focus-visible,
+.settings-container input:focus-visible,
+.settings-container select:focus-visible,
+.settings-container textarea:focus-visible {
+    outline: 3px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
 /* Form validation */
 .invalid-feedback {
     color: var(--danger-color);
@@ -257,21 +540,6 @@ input:checked+.toggle-slider:before {
 
 input.is-invalid {
     border-color: var(--danger-color);
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-    .settings-container {
-        padding: 0 10px;
-    }
-
-    .settings-actions {
-        flex-direction: column;
-    }
-
-    .settings-actions button {
-        width: 100%;
-    }
 }
 
 /* Vertical Setting Layout */
@@ -305,6 +573,11 @@ input.is-invalid {
     outline: none;
     border-color: var(--primary-color);
     box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.1);
+}
+
+.full-width-control textarea:focus-visible {
+    outline: 3px solid var(--primary-color);
+    outline-offset: 2px;
 }
 
 /* Level modifier fields: stack each label above its textarea */
@@ -480,7 +753,7 @@ input.is-invalid {
     min-width: 0;
 }
 
-.transfer-unit-header h4 {
+.transfer-unit-header h5 {
     margin: 0 0 0.35rem 0;
     font-size: 1rem;
 }
@@ -757,7 +1030,64 @@ input.is-invalid {
     font-size: 0.92rem;
 }
 
+/* Honor reduced-motion preferences: drop decorative transitions/animations.
+   The transfer spinner is kept (it conveys loading state) but slowed. */
+@media (prefers-reduced-motion: reduce) {
+    .settings-tile,
+    .settings-rail-link,
+    .settings-rail-back,
+    .toggle-slider,
+    .toggle-slider:before,
+    .setting-item .transfer-option,
+    .setting-item .transfer-master-option,
+    #testable-units-container label,
+    .danger-button {
+        transition: none !important;
+    }
+
+    .field-error-shake {
+        animation: none !important;
+    }
+
+    .transfer-modal-spinner {
+        animation-duration: 2s;
+    }
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+    .settings-panels {
+        flex-direction: column;
+    }
+
+    .settings-rail {
+        position: static;
+        width: 100%;
+    }
+}
+
 @media (max-width: 768px) {
+    .settings-container {
+        padding: 0 10px;
+    }
+
+    .settings-tile-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .settings-section-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .settings-dirty-note {
+        margin-right: 0;
+    }
+
+    .settings-section-actions button {
+        width: 100%;
+    }
+
     .system-admin-row {
         flex-direction: column;
         align-items: stretch;

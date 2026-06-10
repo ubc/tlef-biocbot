@@ -53,7 +53,8 @@ test.describe('Instructor settings UI — Quiz Practice section', () => {
     }
 
     async function gotoSettingsPage(page) {
-        await page.goto(`/instructor/settings?courseId=${QUIZ_COURSE_ID}`);
+        await page.goto(`/instructor/settings?courseId=${QUIZ_COURSE_ID}#quiz`);
+        await expect(page.locator('#settings-panel-quiz')).toBeVisible({ timeout: 15_000 });
         await expect(page.locator('#quiz-settings-section')).toBeVisible({ timeout: 15_000 });
         // loadQuizSettings() runs async after DOMContentLoaded — it ends by
         // populating the testable-units container. Wait for that to render
@@ -110,7 +111,7 @@ test.describe('Instructor settings UI — Quiz Practice section', () => {
         await gotoSettingsPage(page);
 
         await setToggle(page, 'quiz-enabled-toggle', true);
-        await page.locator('#save-settings').click();
+        await page.locator('#save-quiz-settings').click();
 
         // Wait for the save to round-trip. The button briefly reads "Saving..."
         // and resets afterwards — easier to assert on DB truth directly.
@@ -123,7 +124,7 @@ test.describe('Instructor settings UI — Quiz Practice section', () => {
         await gotoSettingsPage(page);
 
         await setToggle(page, 'quiz-material-access-toggle', false);
-        await page.locator('#save-settings').click();
+        await page.locator('#save-quiz-settings').click();
 
         await expect.poll(readQuizSettings, { timeout: 10_000 })
             .toMatchObject({ allowLectureMaterialAccess: false });
@@ -154,7 +155,7 @@ test.describe('Instructor settings UI — Quiz Practice section', () => {
             cb.dispatchEvent(new Event('change', { bubbles: true }));
         });
         await setToggle(page, 'quiz-enabled-toggle', true);
-        await page.locator('#save-settings').click();
+        await page.locator('#save-quiz-settings').click();
 
         await expect.poll(readQuizSettings, { timeout: 10_000 })
             .toMatchObject({ enabled: true, testableUnits: ['Unit 1'] });
@@ -173,7 +174,7 @@ test.describe('Instructor settings UI — Quiz Practice section', () => {
 
         // Both boxes start checked because the seeded testableUnits is "all"
         await expect(page.locator('.testable-unit-checkbox')).toHaveCount(2);
-        await page.locator('#save-settings').click();
+        await page.locator('#save-quiz-settings').click();
 
         await expect.poll(readQuizSettings, { timeout: 10_000 })
             .toMatchObject({ testableUnits: 'all' });
