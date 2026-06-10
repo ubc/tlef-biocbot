@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settings - BiocBot Instructor</title>
-    
+
     <!-- Favicon - UBC Logo -->
     <link rel="icon" type="image/x-icon" href="../assets/images/favicon.ico">
     <link rel="icon" type="image/png" sizes="32x32" href="../assets/images/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="../assets/images/favicon-16x16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="../assets/images/apple-touch-icon.png">
     <link rel="manifest" href="../assets/images/site.webmanifest">
-    
+
     <link rel="stylesheet" href="../styles/style.css">
     <link rel="stylesheet" href="../styles/settings.css">
 </head>
@@ -53,674 +53,901 @@
             </header>
 
             <div class="settings-container">
-                <!-- Database Management Section -->
-                <section class="settings-section" id="database-management-section">
-                    <h2>Database Management</h2>
-                    
-                    <!-- Development Disclaimer -->
-                    <div class="development-disclaimer">
-                        <div class="disclaimer-icon">⚠️</div>
-                        <div class="disclaimer-content">
-                            <h3>Development Mode</h3>
-                            <p><strong>Note:</strong> The database management tools below are temporary and only available during development. These features will be removed or restricted in production environments.</p>
-                        </div>
+                <!-- ============================================= -->
+                <!-- Hub view: clickable category tiles            -->
+                <!-- ============================================= -->
+                <nav id="settings-hub" class="settings-hub" aria-label="Settings categories">
+                    <h2 class="settings-group-label">This course</h2>
+                    <ul class="settings-tile-grid">
+                        <li>
+                            <a class="settings-tile" href="#course-basics" data-panel="course-basics">
+                                <span class="settings-tile-icon" aria-hidden="true">&#128214;</span>
+                                <span class="settings-tile-text">
+                                    <span class="settings-tile-title">Course basics</span>
+                                    <span class="settings-tile-desc">Year level used to tailor responses</span>
+                                </span>
+                            </a>
+                        </li>
+                        <li>
+                            <a class="settings-tile" href="#student-chat" data-panel="student-chat">
+                                <span class="settings-tile-icon" aria-hidden="true">&#128172;</span>
+                                <span class="settings-tile-text">
+                                    <span class="settings-tile-title">Student chat</span>
+                                    <span class="settings-tile-desc">Retrieval depth and source options</span>
+                                </span>
+                            </a>
+                        </li>
+                        <li>
+                            <a class="settings-tile" href="#prompts" data-panel="prompts">
+                                <span class="settings-tile-icon" aria-hidden="true">&#9999;&#65039;</span>
+                                <span class="settings-tile-text">
+                                    <span class="settings-tile-title">AI prompts</span>
+                                    <span class="settings-tile-desc">Persona and chat-mode prompts</span>
+                                </span>
+                            </a>
+                        </li>
+                        <li>
+                            <a class="settings-tile" href="#quiz" data-panel="quiz">
+                                <span class="settings-tile-icon" aria-hidden="true">&#128221;</span>
+                                <span class="settings-tile-text">
+                                    <span class="settings-tile-title">Quiz practice</span>
+                                    <span class="settings-tile-desc">Practice page and testable units</span>
+                                </span>
+                            </a>
+                        </li>
+                        <li>
+                            <a class="settings-tile" href="#privacy" data-panel="privacy">
+                                <span class="settings-tile-icon" aria-hidden="true">&#128274;</span>
+                                <span class="settings-tile-text">
+                                    <span class="settings-tile-title">Privacy &amp; sessions</span>
+                                    <span class="settings-tile-desc">Anonymization and idle timeout</span>
+                                </span>
+                            </a>
+                        </li>
+                        <li id="lifecycle-tile">
+                            <a class="settings-tile" href="#lifecycle" data-panel="lifecycle">
+                                <span class="settings-tile-icon" aria-hidden="true">&#128260;</span>
+                                <span class="settings-tile-text">
+                                    <span class="settings-tile-title">Course lifecycle</span>
+                                    <span class="settings-tile-desc">Deactivate or copy this course</span>
+                                </span>
+                            </a>
+                        </li>
+                    </ul>
+
+                    <h2 class="settings-group-label">Shared</h2>
+                    <ul class="settings-tile-grid">
+                        <li>
+                            <a class="settings-tile" href="#super-course" data-panel="super-course">
+                                <span class="settings-tile-icon" aria-hidden="true">&#128194;</span>
+                                <span class="settings-tile-text">
+                                    <span class="settings-tile-title">Super course</span>
+                                    <span class="settings-tile-desc">Buckets this course belongs to</span>
+                                </span>
+                            </a>
+                        </li>
+                    </ul>
+
+                    <div id="admin-tile-group" hidden>
+                        <h2 class="settings-group-label">Admin only</h2>
+                        <ul class="settings-tile-grid">
+                            <li>
+                                <a class="settings-tile" href="#admin-platform" data-panel="admin-platform">
+                                    <span class="settings-tile-icon" aria-hidden="true">&#9881;&#65039;</span>
+                                    <span class="settings-tile-text">
+                                        <span class="settings-tile-title">Platform &amp; models</span>
+                                        <span class="settings-tile-desc">LLM model for all courses</span>
+                                    </span>
+                                </a>
+                            </li>
+                            <li>
+                                <a class="settings-tile" href="#admin-access" data-panel="admin-access">
+                                    <span class="settings-tile-icon" aria-hidden="true">&#128101;</span>
+                                    <span class="settings-tile-text">
+                                        <span class="settings-tile-title">Admins &amp; access</span>
+                                        <span class="settings-tile-desc">System admins and login rules</span>
+                                    </span>
+                                </a>
+                            </li>
+                            <li>
+                                <a class="settings-tile" href="#admin-safety" data-panel="admin-safety">
+                                    <span class="settings-tile-icon" aria-hidden="true">&#128737;&#65039;</span>
+                                    <span class="settings-tile-text">
+                                        <span class="settings-tile-title">Safety prompts</span>
+                                        <span class="settings-tile-desc">Question generation and detection</span>
+                                    </span>
+                                </a>
+                            </li>
+                            <li>
+                                <a class="settings-tile settings-tile-danger" href="#admin-database" data-panel="admin-database">
+                                    <span class="settings-tile-icon" aria-hidden="true">&#128451;&#65039;</span>
+                                    <span class="settings-tile-text">
+                                        <span class="settings-tile-title">Database</span>
+                                        <span class="settings-tile-desc">Development data tools</span>
+                                    </span>
+                                </a>
+                            </li>
+                        </ul>
                     </div>
-                    
-                    <div class="settings-content">
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Reset All Data</h3>
-                                <p>Delete all BiocBot data including vector embeddings (Qdrant) and document metadata (MongoDB). This will completely reset the system.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <button id="delete-collection" class="danger-button">Delete All Data</button>
-                            </div>
-                        </div>
-                    </div>
-                </section>
+                </nav>
 
-                <!-- LLM Model Section (system admins only) -->
-                <section class="settings-section" id="llm-model-section" style="display: none;">
-                    <h2>LLM Model</h2>
-                    <p class="section-description">Pick the OpenAI model used for all chat, question generation, and analysis across courses. Reasoning effort only applies to gpt-5 family models.</p>
-                    <div class="settings-content">
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Model</h3>
-                                <p>Course-wide selection. gpt-4.1-mini uses temperature; gpt-5 family models use reasoning instead.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <select id="llm-model-select" class="number-input">
-                                    <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-                                    <option value="gpt-5-nano">gpt-5-nano</option>
-                                    <option value="gpt-5.4-nano">gpt-5.4-nano</option>
-                                </select>
-                            </div>
+                <!-- ============================================= -->
+                <!-- Panel view: side rail + active section panel  -->
+                <!-- ============================================= -->
+                <div id="settings-panels" class="settings-panels" hidden>
+                    <nav id="settings-rail" class="settings-rail" aria-label="Settings sections">
+                        <a class="settings-rail-back" href="#">&larr; All settings</a>
+                        <h2 class="settings-rail-label">This course</h2>
+                        <ul>
+                            <li><a class="settings-rail-link" href="#course-basics" data-panel="course-basics">Course basics</a></li>
+                            <li><a class="settings-rail-link" href="#student-chat" data-panel="student-chat">Student chat</a></li>
+                            <li><a class="settings-rail-link" href="#prompts" data-panel="prompts">AI prompts</a></li>
+                            <li><a class="settings-rail-link" href="#quiz" data-panel="quiz">Quiz practice</a></li>
+                            <li><a class="settings-rail-link" href="#privacy" data-panel="privacy">Privacy &amp; sessions</a></li>
+                            <li id="lifecycle-rail-item"><a class="settings-rail-link" href="#lifecycle" data-panel="lifecycle">Course lifecycle</a></li>
+                        </ul>
+                        <h2 class="settings-rail-label">Shared</h2>
+                        <ul>
+                            <li><a class="settings-rail-link" href="#super-course" data-panel="super-course">Super course</a></li>
+                        </ul>
+                        <div id="admin-rail-group" hidden>
+                            <h2 class="settings-rail-label">Admin only</h2>
+                            <ul>
+                                <li><a class="settings-rail-link" href="#admin-platform" data-panel="admin-platform">Platform &amp; models</a></li>
+                                <li><a class="settings-rail-link" href="#admin-access" data-panel="admin-access">Admins &amp; access</a></li>
+                                <li><a class="settings-rail-link" href="#admin-safety" data-panel="admin-safety">Safety prompts</a></li>
+                                <li><a class="settings-rail-link" href="#admin-database" data-panel="admin-database">Database</a></li>
+                            </ul>
                         </div>
-                        <div class="setting-item" id="llm-reasoning-item" style="display: none;">
-                            <div class="setting-info">
-                                <h3>Reasoning Effort</h3>
-                                <p>Only applies to gpt-5 family models. Defaults to minimal.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <select id="llm-reasoning-select" class="number-input">
-                                    <option value="minimal">minimal</option>
-                                    <option value="low">low</option>
-                                    <option value="medium">medium</option>
-                                    <option value="high">high</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                </section>
+                    </nav>
 
-                <!-- AI Settings (course instructor or admin) -->
-                <section class="settings-section" id="ai-settings-section">
-                    <h2>AI Settings</h2>
-                    <p class="section-description">Course-specific retrieval settings for the regular student chat and Super Course source pool.</p>
-                    <div class="settings-content">
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Super Course Buckets</h3>
-                                <p>Choose which Super Course bucket(s) this course belongs to. Students enrolled in this course can then chat the bucket across all its courses. Buckets are created by an admin under Super Course Chat Settings.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <div id="course-superchat-checklist" class="superchat-checklist">Loading buckets...</div>
-                            </div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Student Chat - Top-K</h3>
-                                <p>Number of course-material chunks regular student chat retrieves before answering. Default is 3.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <input type="number" id="student-chat-topk-input" class="number-input" min="1" max="20" step="1" value="3">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="settings-actions" style="margin-top: 1rem;">
-                        <button id="reset-ai-settings" class="secondary-button">Reset AI Settings to Default</button>
-                    </div>
-                </section>
-
-                <!-- Super Course Chat Settings (instructor or admin) -->
-                <section class="settings-section" id="super-course-chat-section">
-                    <h2>Super Course Chat Settings</h2>
-                    <p class="section-description">Manage the Super Course buckets students can chat across. Each bucket is a group of courses (instructors add their own courses to a bucket from each course's AI Settings). Pick a bucket to edit its chat settings.</p>
-                    <div class="settings-content">
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Super Course Bucket</h3>
-                                <p>Select a bucket to edit, create a new one, or delete the selected bucket. Deleting a bucket removes it from every course and hides it from students.</p>
-                            </div>
-                            <div class="setting-controls superchat-manage-controls">
-                                <select id="superchat-select" class="select-input"></select>
-                                <button type="button" id="new-superchat-btn" class="secondary-button">New</button>
-                                <button type="button" id="delete-superchat-btn" class="secondary-button">Delete</button>
-                            </div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Bucket Name</h3>
-                                <p>Shown to students in the Super Course picker (e.g. "2nd Year Biochem").</p>
-                            </div>
-                            <div class="setting-controls">
-                                <input type="text" id="superchat-name-input" class="text-input" placeholder="Bucket name">
-                            </div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Year Level</h3>
-                                <p>Used to label and order the bucket for students. Does not control access (enrollment does).</p>
-                            </div>
-                            <div class="setting-controls">
-                                <select id="superchat-year-select" class="select-input">
-                                    <option value="">Not set</option>
-                                    <option value="1">1st Year</option>
-                                    <option value="2">2nd Year</option>
-                                    <option value="3">3rd Year</option>
-                                    <option value="4">4th Year</option>
-                                    <option value="5">Graduate</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Instructor Super Course Top-K</h3>
-                                <p>Number of chunks instructor Super Course chat retrieves before answering. Default is 8.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <input type="number" id="super-instructor-topk-input" class="number-input" min="1" max="20" step="1" value="8">
-                            </div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Student Super Course Top-K</h3>
-                                <p>Number of chunks student Super Course chat retrieves before answering. Default is 8.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <input type="number" id="super-student-topk-input" class="number-input" min="1" max="20" step="1" value="8">
-                            </div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Include Inactive Courses</h3>
-                                <p>When enabled, inactive opted-in courses can contribute material to Super Course chat. Off by default.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="include-inactive-super-course-toggle">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Show Students This Bucket</h3>
-                                <p>When enabled, enrolled students can see and chat this bucket in the Super Course picker.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="show-student-super-course-toggle">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Include Super Chat Notes</h3>
-                                <p>When enabled, shared instructor notes are blended into instructor Super Chat answers alongside course material. On by default. (Instructor chat only — students never see notes.)</p>
-                            </div>
-                            <div class="setting-controls">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="include-notes-super-course-toggle">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Notes Retrieval Share</h3>
-                                <p>Fraction of the instructor Top-K chunks reserved for notes. Default 0.25 (e.g. with Top-K 8, ~2 chunks come from notes and ~6 from course material). Unused note slots fall back to course material.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <input type="number" id="super-note-ratio-input" class="number-input" min="0" max="1" step="0.05" value="0.25">
-                            </div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Notes Minimum Similarity</h3>
-                                <p>Minimum similarity (0&ndash;1) a note must reach to be used in an answer. Default 0.25. Higher = stricter (fewer notes used); lower = more permissive. Tuned for the current embedding model; raise it if irrelevant notes appear.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <input type="number" id="super-note-min-score-input" class="number-input" min="0" max="1" step="0.05" value="0.25">
-                            </div>
-                        </div>
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Instructor Super Course Prompt</h3>
-                                <p>System prompt used for instructor Super Course chat.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <textarea id="super-instructor-prompt" rows="10" placeholder="Enter instructor Super Course prompt..."></textarea>
-                            </div>
-                        </div>
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Student Super Course Prompt</h3>
-                                <p>System prompt used for student Super Course chat.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <textarea id="super-student-prompt" rows="10" placeholder="Enter student Super Course prompt..."></textarea>
-                            </div>
-                        </div>
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Student Answer-Level Modifiers</h3>
-                                <p>Appended to the student prompt based on the level the student picks in chat. Undergraduate is the default selection.</p>
-                            </div>
-                            <div class="setting-controls full-width-control level-modifier-fields">
-                                <label for="super-student-level-intro">Introductory</label>
-                                <textarea id="super-student-level-intro" rows="4" placeholder="Modifier appended for the introductory level..."></textarea>
-                                <label for="super-student-level-undergraduate">Undergraduate (default)</label>
-                                <textarea id="super-student-level-undergraduate" rows="4" placeholder="Modifier appended for the undergraduate level..."></textarea>
-                                <label for="super-student-level-graduate">Graduate</label>
-                                <textarea id="super-student-level-graduate" rows="4" placeholder="Modifier appended for the graduate level..."></textarea>
-                            </div>
-                        </div>
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Instructor Answer-Depth Modifiers</h3>
-                                <p>Appended to the instructor prompt based on the depth the instructor picks in chat. Standard is the default selection.</p>
-                            </div>
-                            <div class="setting-controls full-width-control level-modifier-fields">
-                                <label for="super-instructor-level-overview">Overview</label>
-                                <textarea id="super-instructor-level-overview" rows="4" placeholder="Modifier appended for the overview depth..."></textarea>
-                                <label for="super-instructor-level-standard">Standard (default)</label>
-                                <textarea id="super-instructor-level-standard" rows="4" placeholder="Modifier appended for the standard depth..."></textarea>
-                                <label for="super-instructor-level-deepDive">Deep dive</label>
-                                <textarea id="super-instructor-level-deepDive" rows="4" placeholder="Modifier appended for the deep-dive depth..."></textarea>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Login Restriction Section -->
-                <section class="settings-section" id="login-restriction-section" style="display: none;">
-                    <h2>Login Restrictions</h2>
-                    <div class="settings-content">
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Allow Local Login & Registration</h3>
-                                <p>When disabled, users can only log in via CWL. Local username/password login and new account registration will be hidden.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="allow-local-login-toggle" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="settings-section" id="system-admin-section" style="display: none;">
-                    <h2>System Admin Access</h2>
-                    <p class="section-description">System admins can manage platform-wide settings, delete all data, and grant admin access to other users.</p>
-                    <div class="settings-content">
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Grant Admin Access</h3>
-                                <p>Enter the email for an existing user. They need to have logged in at least once before you can grant access here.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <div class="system-admin-grant-row">
-                                    <input
-                                        type="email"
-                                        id="system-admin-email-input"
-                                        class="number-input system-admin-email-input"
-                                        placeholder="name@ubc.ca"
-                                    >
-                                    <button id="grant-system-admin-btn" class="primary-button">Grant Admin Access</button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Current System Admins</h3>
-                                <p>Only system admins can see this list or change admin access.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <div id="system-admin-list" class="system-admin-list">
-                                    <div class="system-admin-empty">Loading system admins...</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Student Session Settings -->
-                <section class="settings-section">
-                    <h2>Student Session Settings</h2>
-                    <div class="settings-content">
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Student Idle Timeout (Minutes)</h3>
-                                <p>Time before a student is prompted to confirm they are still active. Default is 4 minutes. 
-                                    The student sees a timer pop up halfway through the timeout period. 
-                                </p>
-                            </div>
-                            <div class="setting-controls">
-                                <input type="number" id="idle-timeout-input" class="number-input" min="0.5" max="20" step="0.5" value="4">
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Course Level -->
-                <section class="settings-section" id="course-level-section">
-                    <h2>Course Level</h2>
-                    <div class="settings-content">
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Year Level</h3>
-                                <p>The academic year this course targets. It is set automatically from the course number (e.g. "BIOC 401" &rarr; 4th Year) and is used to tailor responses to your students and to flag higher-level material in the Super Course. Change it here if the default is wrong.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <select id="course-year-level-select" class="number-input">
-                                    <option value="">Not set</option>
-                                    <option value="1">1st Year</option>
-                                    <option value="2">2nd Year</option>
-                                    <option value="3">3rd Year</option>
-                                    <option value="4">4th Year</option>
-                                    <option value="5">Graduate</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Quiz Practice Settings -->
-                <section class="settings-section" id="quiz-settings-section">
-                    <h2>Quiz Practice Settings</h2>
-                    <div class="settings-content">
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Enable Quiz Practice Page</h3>
-                                <p>When enabled, students can access a self-paced quiz practice page. When disabled, the quiz page is hidden from the student interface.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="quiz-enabled-toggle">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Testable Units</h3>
-                                <p>Select which published units students can practice. By default, all published units are available.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <div id="testable-units-container">
-                                    <p class="loading-text">Loading units...</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Allow Lecture Material Access</h3>
-                                <p>When enabled, students can download lecture materials from units where they answered incorrectly. This helps them review and learn from mistakes.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="quiz-material-access-toggle" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Privacy Settings -->
-                <section class="settings-section" id="privacy-settings-section">
-                    <h2>Privacy Settings</h2>
-                    <div class="settings-content">
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Anonymize Students</h3>
-                                <p>When enabled, student names are hidden throughout your instructor dashboard. The Student Hub remains available and still shows student names, but individual struggle topics are hidden there. Student counts and activity data remain visible. This setting only affects your own view.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="anonymize-students-toggle">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Question Generation Settings (system admins only) -->
-                <section class="settings-section" id="question-generation-section" style="display: none;">
-                    <h2>Question Generation Settings</h2>
-                    <p class="section-description">Customize the prompts used for AI question generation. Use placeholders: <code>{{learningObjectives}}</code>, <code>{{courseMaterial}}</code>, <code>{{unitName}}</code>, <code>{{questionType}}</code></p>
-                    <div class="settings-content">
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>System Prompt</h3>
-                                <p>Core instructions for the AI when generating questions. Applied to all question types.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <textarea id="question-system-prompt" rows="10" placeholder="Enter system prompt for question generation..."></textarea>
-                            </div>
-                        </div>
-
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>True/False Question Prompt</h3>
-                                <p>Template for generating true/false questions.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <textarea id="question-true-false-prompt" rows="10" placeholder="Enter true/false question prompt..."></textarea>
-                            </div>
-                        </div>
-
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Multiple Choice Question Prompt</h3>
-                                <p>Template for generating multiple choice questions.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <textarea id="question-multiple-choice-prompt" rows="10" placeholder="Enter multiple choice question prompt..."></textarea>
-                            </div>
-                        </div>
-
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Short Answer Question Prompt</h3>
-                                <p>Template for generating short answer questions.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <textarea id="question-short-answer-prompt" rows="10" placeholder="Enter short answer question prompt..."></textarea>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="settings-actions" style="margin-top: 1rem;">
-                        <button id="reset-question-prompts" class="secondary-button">Reset Question Prompts to Default</button>
-                    </div>
-                </section>
-
-                <!-- Mental Health Detection Settings (system admins only) -->
-                <section class="settings-section" id="mental-health-detection-section" style="display: none;">
-                    <h2>Mental Health Detection Settings</h2>
-                    <p class="section-description">Configure the AI prompt used to silently detect mental health concerns in student conversations. The detection runs in parallel and does not affect the student's chat experience. Flags appear on the Flagged Content page.</p>
-                    <div class="settings-content">
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Detection Prompt</h3>
-                                <p>This prompt instructs the AI on how to analyze conversations for mental health concerns. The AI outputs a concern level (no concern, low concern, high concern) for each student message.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <textarea id="mental-health-detection-prompt" rows="12" placeholder="Enter mental health detection prompt..."></textarea>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="settings-actions" style="margin-top: 1rem;">
-                        <button id="reset-mh-prompt" class="secondary-button">Reset Detection Prompt to Default</button>
-                    </div>
-                </section>
-
-                <!-- Chat Retrieval Settings -->
-                <section class="settings-section">
-                    <h2>Chat Retrieval Settings</h2>
-                    <div class="settings-content">
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Enable Source Attribution Downloads</h3>
-                                <p>When enabled, source citations in student chat responses become clickable download links to the underlying uploaded documents.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="source-attribution-download-toggle">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <h3>Additive Retrieval</h3>
-                                <p>When enabled, student chat for a selected unit can also use earlier published units from the course. When disabled, chat uses only the selected unit.</p>
-                            </div>
-                            <div class="setting-controls">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="additive-retrieval-toggle">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- AI Persona Settings -->
-                <section class="settings-section">
-                    <h2>AI Persona Settings</h2>
-                    <div class="settings-content">
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Base System Prompt</h3>
-                                <p>Core instructions defining BiocBot's general personality and behavior.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <textarea id="base-prompt" rows="10" placeholder="Enter base system prompt..."></textarea>
-                            </div>
-                        </div>
-
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Protege Mode Prompt</h3>
-                                <p>Instructions for when the AI acts as a student (Protege mode).</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <textarea id="protege-prompt" rows="10" placeholder="Enter protege mode prompt..."></textarea>
-                            </div>
-                        </div>
-
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Tutor Mode Prompt</h3>
-                                <p>Instructions for when the AI acts as an instructor/tutor (Default mode).</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <textarea id="tutor-prompt" rows="10" placeholder="Enter tutor mode prompt..."></textarea>
-                            </div>
-                        </div>
-
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Explain Mode Prompt</h3>
-                                <p>Instructions for when the AI explains a specific concept (Explain button).</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <textarea id="explain-prompt" rows="10" placeholder="Enter explain mode prompt..."></textarea>
-                            </div>
-                        </div>
-
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Directive Mode Strategy</h3>
-                                <p>Instructions for <em>how</em> to teach when the student is struggling. The system will automatically announce the topic (e.g. "Student is struggling with X").</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <textarea id="directive-prompt" rows="10" placeholder="Enter directive mode strategy steps..."></textarea>
-                            </div>
-                        </div>
-
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Quiz Help Chat Prompt</h3>
-                                <p>Instructions for the inline chat that appears when students answer quiz questions incorrectly. The chat helps students understand why the correct answer is right.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <textarea id="quiz-help-prompt" rows="10" placeholder="Enter quiz help chat prompt..."></textarea>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Course Lifecycle -->
-                <section class="settings-section" id="course-lifecycle-section">
-                    <h2>Course Lifecycle</h2>
-                    <div class="settings-content">
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Deactivate Course</h3>
-                                <p id="course-status-description">When a course is deactivated, students and TAs are blocked from using it. Instructors can still open the course here and reactivate it later.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <div class="course-status-panel">
-                                    <div class="course-status-header">
-                                        <span class="course-state-badge active" id="course-status-badge">Active</span>
-                                        <span class="course-state-note" id="course-status-note">Students and TAs can currently use this course.</span>
-                                    </div>
-                                    <button id="toggle-course-active-btn" class="danger-button">Deactivate Course</button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="setting-item vertical">
-                            <div class="setting-info">
-                                <h3>Transfer Course</h3>
-                                <p>Create a brand-new course copy from the current course. Materials are recopied and re-parsed, TAs keep their permissions if selected, and no students, chats, or historical activity are carried over.</p>
-                            </div>
-                            <div class="setting-controls full-width-control">
-                                <div class="transfer-course-builder">
-                                    <div class="transfer-field-group">
-                                        <label for="transfer-course-name">New course name</label>
-                                        <input
-                                            type="text"
-                                            id="transfer-course-name"
-                                            class="number-input transfer-course-name-input"
-                                            placeholder="e.g. CPSC 430 Winter 2027"
-                                        >
-                                    </div>
-
-                                    <div class="transfer-global-options">
-                                        <label class="transfer-option">
-                                            <input type="checkbox" id="transfer-settings-toggle" checked>
-                                            <span>Transfer course settings</span>
-                                        </label>
-                                        <label class="transfer-option">
-                                            <input type="checkbox" id="transfer-tas-toggle" checked>
-                                            <span>Transfer TAs and permissions</span>
-                                        </label>
-                                        <label class="transfer-option">
-                                            <input type="checkbox" id="deactivate-source-after-transfer-toggle">
-                                            <span>Deactivate source course after transfer</span>
-                                        </label>
-                                    </div>
-
-                                    <div class="transfer-unit-section">
-                                        <div class="transfer-unit-header">
-                                            <div>
-                                                <h4>Per-Unit Transfer</h4>
-                                                <p>Learning objectives and assessment questions start on by default. Documents also bring their parsed topics along to the new course.</p>
-                                            </div>
-                                            <div class="transfer-unit-masters">
-                                                <label class="transfer-master-option">
-                                                    <input type="checkbox" id="transfer-all-docs" checked>
-                                                    <span>All docs</span>
-                                                </label>
-                                                <label class="transfer-master-option">
-                                                    <input type="checkbox" id="transfer-all-objectives" checked>
-                                                    <span>All learning objectives</span>
-                                                </label>
-                                                <label class="transfer-master-option">
-                                                    <input type="checkbox" id="transfer-all-questions" checked>
-                                                    <span>All questions</span>
-                                                </label>
-                                            </div>
+                    <div class="settings-panel-content">
+                        <!-- Course basics -->
+                        <div class="settings-panel" id="settings-panel-course-basics" data-panel="course-basics" hidden>
+                            <h2 class="settings-panel-title" tabindex="-1">Course basics</h2>
+                            <section class="settings-section" id="course-level-section">
+                                <h3>Course level</h3>
+                                <div class="settings-content">
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="course-year-level-label">Year level</h4>
+                                            <p id="course-year-level-desc">The academic year this course targets. It is set automatically from the course number (e.g. "BIOC 401" &rarr; 4th Year) and is used to tailor responses to your students and to flag higher-level material in the Super Course. Change it here if the default is wrong.</p>
                                         </div>
+                                        <div class="setting-controls">
+                                            <select id="course-year-level-select" class="number-input" aria-labelledby="course-year-level-label" aria-describedby="course-year-level-desc">
+                                                <option value="">Not set</option>
+                                                <option value="1">1st Year</option>
+                                                <option value="2">2nd Year</option>
+                                                <option value="3">3rd Year</option>
+                                                <option value="4">4th Year</option>
+                                                <option value="5">Graduate</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="settings-section-actions">
+                                    <span class="settings-dirty-note" hidden>Unsaved changes</span>
+                                    <button id="save-course-basics" class="primary-button">Save course basics</button>
+                                </div>
+                            </section>
+                        </div>
 
-                                        <div class="transfer-unit-grid" id="transfer-unit-grid">
-                                            <div class="transfer-unit-grid-empty">Loading units...</div>
+                        <!-- Student chat -->
+                        <div class="settings-panel" id="settings-panel-student-chat" data-panel="student-chat" hidden>
+                            <h2 class="settings-panel-title" tabindex="-1">Student chat</h2>
+                            <p class="settings-panel-desc">How the regular student chat retrieves and cites course material.</p>
+                            <section class="settings-section" id="student-chat-section">
+                                <h3>Retrieval &amp; sources</h3>
+                                <div class="settings-content">
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="student-chat-topk-label">Student chat - Top-K</h4>
+                                            <p id="student-chat-topk-desc">Number of course-material chunks regular student chat retrieves before answering. Default is 3.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <input type="number" id="student-chat-topk-input" class="number-input" min="1" max="20" step="1" value="3" aria-labelledby="student-chat-topk-label" aria-describedby="student-chat-topk-desc">
+                                        </div>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="additive-retrieval-label">Additive retrieval</h4>
+                                            <p id="additive-retrieval-desc">When enabled, student chat for a selected unit can also use earlier published units from the course. When disabled, chat uses only the selected unit.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" id="additive-retrieval-toggle" aria-labelledby="additive-retrieval-label" aria-describedby="additive-retrieval-desc">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="source-attribution-label">Enable source attribution downloads</h4>
+                                            <p id="source-attribution-desc">When enabled, source citations in student chat responses become clickable download links to the underlying uploaded documents.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" id="source-attribution-download-toggle" aria-labelledby="source-attribution-label" aria-describedby="source-attribution-desc">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="settings-section-actions">
+                                    <span class="settings-dirty-note" hidden>Unsaved changes</span>
+                                    <button id="reset-student-chat" class="secondary-button">Reset to defaults</button>
+                                    <button id="save-student-chat" class="primary-button">Save student chat settings</button>
+                                </div>
+                            </section>
+                        </div>
+
+                        <!-- AI prompts -->
+                        <div class="settings-panel" id="settings-panel-prompts" data-panel="prompts" hidden>
+                            <h2 class="settings-panel-title" tabindex="-1">AI prompts</h2>
+                            <p class="settings-panel-desc">The system prompts that define how BiocBot behaves in each chat mode for this course.</p>
+                            <section class="settings-section" id="ai-persona-section">
+                                <h3>AI persona prompts</h3>
+                                <div class="settings-content">
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="base-prompt-label">Base system prompt</h4>
+                                            <p id="base-prompt-desc">Core instructions defining BiocBot's general personality and behavior.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="base-prompt" rows="10" placeholder="Enter base system prompt..." aria-labelledby="base-prompt-label" aria-describedby="base-prompt-desc"></textarea>
                                         </div>
                                     </div>
 
-                                    <div class="transfer-actions">
-                                        <button id="transfer-course-btn" class="primary-button">Create Course Copy</button>
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="protege-prompt-label">Protege mode prompt</h4>
+                                            <p id="protege-prompt-desc">Instructions for when the AI acts as a student (Protege mode).</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="protege-prompt" rows="10" placeholder="Enter protege mode prompt..." aria-labelledby="protege-prompt-label" aria-describedby="protege-prompt-desc"></textarea>
+                                        </div>
+                                    </div>
+
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="tutor-prompt-label">Tutor mode prompt</h4>
+                                            <p id="tutor-prompt-desc">Instructions for when the AI acts as an instructor/tutor (Default mode).</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="tutor-prompt" rows="10" placeholder="Enter tutor mode prompt..." aria-labelledby="tutor-prompt-label" aria-describedby="tutor-prompt-desc"></textarea>
+                                        </div>
+                                    </div>
+
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="explain-prompt-label">Explain mode prompt</h4>
+                                            <p id="explain-prompt-desc">Instructions for when the AI explains a specific concept (Explain button).</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="explain-prompt" rows="10" placeholder="Enter explain mode prompt..." aria-labelledby="explain-prompt-label" aria-describedby="explain-prompt-desc"></textarea>
+                                        </div>
+                                    </div>
+
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="directive-prompt-label">Directive mode strategy</h4>
+                                            <p id="directive-prompt-desc">Instructions for <em>how</em> to teach when the student is struggling. The system will automatically announce the topic (e.g. "Student is struggling with X").</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="directive-prompt" rows="10" placeholder="Enter directive mode strategy steps..." aria-labelledby="directive-prompt-label" aria-describedby="directive-prompt-desc"></textarea>
+                                        </div>
+                                    </div>
+
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="quiz-help-prompt-label">Quiz help chat prompt</h4>
+                                            <p id="quiz-help-prompt-desc">Instructions for the inline chat that appears when students answer quiz questions incorrectly. The chat helps students understand why the correct answer is right.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="quiz-help-prompt" rows="10" placeholder="Enter quiz help chat prompt..." aria-labelledby="quiz-help-prompt-label" aria-describedby="quiz-help-prompt-desc"></textarea>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
+                                <div class="settings-section-actions">
+                                    <span class="settings-dirty-note" hidden>Unsaved changes</span>
+                                    <button id="reset-prompts" class="secondary-button">Reset prompts to defaults</button>
+                                    <button id="save-prompts" class="primary-button">Save prompts</button>
+                                </div>
+                            </section>
+                        </div>
+
+                        <!-- Quiz practice -->
+                        <div class="settings-panel" id="settings-panel-quiz" data-panel="quiz" hidden>
+                            <h2 class="settings-panel-title" tabindex="-1">Quiz practice</h2>
+                            <section class="settings-section" id="quiz-settings-section">
+                                <h3>Quiz practice settings</h3>
+                                <div class="settings-content">
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="quiz-enabled-label">Enable quiz practice page</h4>
+                                            <p id="quiz-enabled-desc">When enabled, students can access a self-paced quiz practice page. When disabled, the quiz page is hidden from the student interface.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" id="quiz-enabled-toggle" aria-labelledby="quiz-enabled-label" aria-describedby="quiz-enabled-desc">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="testable-units-label">Testable units</h4>
+                                            <p id="testable-units-desc">Select which published units students can practice. By default, all published units are available.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <div id="testable-units-container" role="group" aria-labelledby="testable-units-label" aria-describedby="testable-units-desc">
+                                                <p class="loading-text">Loading units...</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="quiz-material-access-label">Allow lecture material access</h4>
+                                            <p id="quiz-material-access-desc">When enabled, students can download lecture materials from units where they answered incorrectly. This helps them review and learn from mistakes.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" id="quiz-material-access-toggle" checked aria-labelledby="quiz-material-access-label" aria-describedby="quiz-material-access-desc">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="settings-section-actions">
+                                    <span class="settings-dirty-note" hidden>Unsaved changes</span>
+                                    <button id="reset-quiz-settings" class="secondary-button">Reset to defaults</button>
+                                    <button id="save-quiz-settings" class="primary-button">Save quiz settings</button>
+                                </div>
+                            </section>
+                        </div>
+
+                        <!-- Privacy & sessions -->
+                        <div class="settings-panel" id="settings-panel-privacy" data-panel="privacy" hidden>
+                            <h2 class="settings-panel-title" tabindex="-1">Privacy &amp; sessions</h2>
+                            <section class="settings-section" id="privacy-settings-section">
+                                <h3>Privacy &amp; session settings</h3>
+                                <div class="settings-content">
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="anonymize-students-label">Anonymize students</h4>
+                                            <p id="anonymize-students-desc">When enabled, student names are hidden throughout your instructor dashboard. The Student Hub remains available and still shows student names, but individual struggle topics are hidden there. Student counts and activity data remain visible. This setting only affects your own view.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" id="anonymize-students-toggle" aria-labelledby="anonymize-students-label" aria-describedby="anonymize-students-desc">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="idle-timeout-label">Student idle timeout (minutes)</h4>
+                                            <p id="idle-timeout-desc">Time before a student is prompted to confirm they are still active. Default is 4 minutes.
+                                                The student sees a timer pop up halfway through the timeout period.
+                                            </p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <input type="number" id="idle-timeout-input" class="number-input" min="0.5" max="20" step="0.5" value="4" aria-labelledby="idle-timeout-label" aria-describedby="idle-timeout-desc">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="settings-section-actions">
+                                    <span class="settings-dirty-note" hidden>Unsaved changes</span>
+                                    <button id="reset-privacy-settings" class="secondary-button">Reset to defaults</button>
+                                    <button id="save-privacy-settings" class="primary-button">Save privacy settings</button>
+                                </div>
+                            </section>
+                        </div>
+
+                        <!-- Super course -->
+                        <div class="settings-panel" id="settings-panel-super-course" data-panel="super-course" hidden>
+                            <h2 class="settings-panel-title" tabindex="-1">Super course</h2>
+                            <p class="settings-panel-desc">Super Course buckets are shared groups of courses that students can chat across. Choose which buckets this course belongs to, or manage the buckets themselves.</p>
+
+                            <section class="settings-section" id="course-superchats-section">
+                                <h3 id="course-superchats-label">Buckets this course belongs to</h3>
+                                <p class="section-description" id="course-superchats-desc">Students enrolled in this course can chat each checked bucket across all of its courses.</p>
+                                <div class="settings-content">
+                                    <div class="setting-item vertical">
+                                        <div class="setting-controls full-width-control">
+                                            <div id="course-superchat-checklist" class="superchat-checklist" role="group" aria-labelledby="course-superchats-label" aria-describedby="course-superchats-desc">Loading buckets...</div>
+                                        </div>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="new-superchat-label">Create a new bucket</h4>
+                                            <p id="new-superchat-desc">New buckets appear in the list above right away and are checked for this course - save to confirm membership.</p>
+                                        </div>
+                                        <div class="setting-controls superchat-manage-controls">
+                                            <input type="text" id="new-superchat-name" class="text-input" placeholder="New bucket name" aria-labelledby="new-superchat-label" aria-describedby="new-superchat-desc">
+                                            <button type="button" id="new-superchat-btn" class="secondary-button">Create bucket</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="settings-section-actions">
+                                    <span class="settings-dirty-note" hidden>Unsaved changes</span>
+                                    <button id="reset-course-superchats" class="secondary-button">Remove from all buckets</button>
+                                    <button id="save-course-superchats" class="primary-button">Save bucket membership</button>
+                                </div>
+                            </section>
+
+                            <section class="settings-section" id="super-course-chat-section">
+                                <h3>Bucket settings</h3>
+                                <p class="section-description">These settings are shared - edits apply to every instructor and student using the bucket.</p>
+                                <div class="settings-content">
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="superchat-select-label">Super Course bucket</h4>
+                                            <p id="superchat-select-desc">Select a bucket to edit, or delete the selected bucket. Deleting a bucket removes it from every course and hides it from students.</p>
+                                        </div>
+                                        <div class="setting-controls superchat-manage-controls">
+                                            <select id="superchat-select" class="select-input" aria-labelledby="superchat-select-label" aria-describedby="superchat-select-desc"></select>
+                                            <button type="button" id="delete-superchat-btn" class="danger-button">Delete</button>
+                                        </div>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="superchat-name-label">Bucket name</h4>
+                                            <p id="superchat-name-desc">Shown to students in the Super Course picker (e.g. "2nd Year Biochem").</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <input type="text" id="superchat-name-input" class="text-input" placeholder="Bucket name" aria-labelledby="superchat-name-label" aria-describedby="superchat-name-desc">
+                                        </div>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="superchat-year-label">Year level</h4>
+                                            <p id="superchat-year-desc">Used to label and order the bucket for students. Does not control access (enrollment does).</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <select id="superchat-year-select" class="select-input" aria-labelledby="superchat-year-label" aria-describedby="superchat-year-desc">
+                                                <option value="">Not set</option>
+                                                <option value="1">1st Year</option>
+                                                <option value="2">2nd Year</option>
+                                                <option value="3">3rd Year</option>
+                                                <option value="4">4th Year</option>
+                                                <option value="5">Graduate</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="show-student-super-course-label">Show students this bucket</h4>
+                                            <p id="show-student-super-course-desc">When enabled, enrolled students can see and chat this bucket in the Super Course picker.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" id="show-student-super-course-toggle" aria-labelledby="show-student-super-course-label" aria-describedby="show-student-super-course-desc">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <details class="settings-advanced" id="superchat-advanced">
+                                        <summary>Advanced retrieval &amp; prompt settings</summary>
+                                        <div class="setting-item">
+                                            <div class="setting-info">
+                                                <h4 id="super-instructor-topk-label">Instructor Super Course Top-K</h4>
+                                                <p id="super-instructor-topk-desc">Number of chunks instructor Super Course chat retrieves before answering. Default is 8.</p>
+                                            </div>
+                                            <div class="setting-controls">
+                                                <input type="number" id="super-instructor-topk-input" class="number-input" min="1" max="20" step="1" value="8" aria-labelledby="super-instructor-topk-label" aria-describedby="super-instructor-topk-desc">
+                                            </div>
+                                        </div>
+                                        <div class="setting-item">
+                                            <div class="setting-info">
+                                                <h4 id="super-student-topk-label">Student Super Course Top-K</h4>
+                                                <p id="super-student-topk-desc">Number of chunks student Super Course chat retrieves before answering. Default is 8.</p>
+                                            </div>
+                                            <div class="setting-controls">
+                                                <input type="number" id="super-student-topk-input" class="number-input" min="1" max="20" step="1" value="8" aria-labelledby="super-student-topk-label" aria-describedby="super-student-topk-desc">
+                                            </div>
+                                        </div>
+                                        <div class="setting-item">
+                                            <div class="setting-info">
+                                                <h4 id="include-inactive-label">Include inactive courses</h4>
+                                                <p id="include-inactive-desc">When enabled, inactive opted-in courses can contribute material to Super Course chat. Off by default.</p>
+                                            </div>
+                                            <div class="setting-controls">
+                                                <label class="toggle-switch">
+                                                    <input type="checkbox" id="include-inactive-super-course-toggle" aria-labelledby="include-inactive-label" aria-describedby="include-inactive-desc">
+                                                    <span class="toggle-slider"></span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="setting-item">
+                                            <div class="setting-info">
+                                                <h4 id="include-notes-label">Include Super Chat notes</h4>
+                                                <p id="include-notes-desc">When enabled, shared instructor notes are blended into instructor Super Chat answers alongside course material. On by default. (Instructor chat only - students never see notes.)</p>
+                                            </div>
+                                            <div class="setting-controls">
+                                                <label class="toggle-switch">
+                                                    <input type="checkbox" id="include-notes-super-course-toggle" aria-labelledby="include-notes-label" aria-describedby="include-notes-desc">
+                                                    <span class="toggle-slider"></span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="setting-item">
+                                            <div class="setting-info">
+                                                <h4 id="super-note-ratio-label">Notes retrieval share</h4>
+                                                <p id="super-note-ratio-desc">Fraction of the instructor Top-K chunks reserved for notes. Default 0.25 (e.g. with Top-K 8, ~2 chunks come from notes and ~6 from course material). Unused note slots fall back to course material.</p>
+                                            </div>
+                                            <div class="setting-controls">
+                                                <input type="number" id="super-note-ratio-input" class="number-input" min="0" max="1" step="0.05" value="0.25" aria-labelledby="super-note-ratio-label" aria-describedby="super-note-ratio-desc">
+                                            </div>
+                                        </div>
+                                        <div class="setting-item">
+                                            <div class="setting-info">
+                                                <h4 id="super-note-min-score-label">Notes minimum similarity</h4>
+                                                <p id="super-note-min-score-desc">Minimum similarity (0&ndash;1) a note must reach to be used in an answer. Default 0.25. Higher = stricter (fewer notes used); lower = more permissive. Tuned for the current embedding model; raise it if irrelevant notes appear.</p>
+                                            </div>
+                                            <div class="setting-controls">
+                                                <input type="number" id="super-note-min-score-input" class="number-input" min="0" max="1" step="0.05" value="0.25" aria-labelledby="super-note-min-score-label" aria-describedby="super-note-min-score-desc">
+                                            </div>
+                                        </div>
+                                        <div class="setting-item vertical">
+                                            <div class="setting-info">
+                                                <h4 id="super-instructor-prompt-label">Instructor Super Course prompt</h4>
+                                                <p id="super-instructor-prompt-desc">System prompt used for instructor Super Course chat.</p>
+                                            </div>
+                                            <div class="setting-controls full-width-control">
+                                                <textarea id="super-instructor-prompt" rows="10" placeholder="Enter instructor Super Course prompt..." aria-labelledby="super-instructor-prompt-label" aria-describedby="super-instructor-prompt-desc"></textarea>
+                                            </div>
+                                        </div>
+                                        <div class="setting-item vertical">
+                                            <div class="setting-info">
+                                                <h4 id="super-student-prompt-label">Student Super Course prompt</h4>
+                                                <p id="super-student-prompt-desc">System prompt used for student Super Course chat.</p>
+                                            </div>
+                                            <div class="setting-controls full-width-control">
+                                                <textarea id="super-student-prompt" rows="10" placeholder="Enter student Super Course prompt..." aria-labelledby="super-student-prompt-label" aria-describedby="super-student-prompt-desc"></textarea>
+                                            </div>
+                                        </div>
+                                        <div class="setting-item vertical">
+                                            <div class="setting-info">
+                                                <h4 id="super-student-level-label">Student answer-level modifiers</h4>
+                                                <p id="super-student-level-desc">Appended to the student prompt based on the level the student picks in chat. Undergraduate is the default selection.</p>
+                                            </div>
+                                            <div class="setting-controls full-width-control level-modifier-fields">
+                                                <label for="super-student-level-intro">Introductory</label>
+                                                <textarea id="super-student-level-intro" rows="4" placeholder="Modifier appended for the introductory level..."></textarea>
+                                                <label for="super-student-level-undergraduate">Undergraduate (default)</label>
+                                                <textarea id="super-student-level-undergraduate" rows="4" placeholder="Modifier appended for the undergraduate level..."></textarea>
+                                                <label for="super-student-level-graduate">Graduate</label>
+                                                <textarea id="super-student-level-graduate" rows="4" placeholder="Modifier appended for the graduate level..."></textarea>
+                                            </div>
+                                        </div>
+                                        <div class="setting-item vertical">
+                                            <div class="setting-info">
+                                                <h4 id="super-instructor-level-label">Instructor answer-depth modifiers</h4>
+                                                <p id="super-instructor-level-desc">Appended to the instructor prompt based on the depth the instructor picks in chat. Standard is the default selection.</p>
+                                            </div>
+                                            <div class="setting-controls full-width-control level-modifier-fields">
+                                                <label for="super-instructor-level-overview">Overview</label>
+                                                <textarea id="super-instructor-level-overview" rows="4" placeholder="Modifier appended for the overview depth..."></textarea>
+                                                <label for="super-instructor-level-standard">Standard (default)</label>
+                                                <textarea id="super-instructor-level-standard" rows="4" placeholder="Modifier appended for the standard depth..."></textarea>
+                                                <label for="super-instructor-level-deepDive">Deep dive</label>
+                                                <textarea id="super-instructor-level-deepDive" rows="4" placeholder="Modifier appended for the deep-dive depth..."></textarea>
+                                            </div>
+                                        </div>
+                                    </details>
+                                </div>
+                                <div class="settings-section-actions">
+                                    <span class="settings-dirty-note" hidden>Unsaved changes</span>
+                                    <button id="reset-superchat-bucket" class="secondary-button">Reset chat settings to defaults</button>
+                                    <button id="save-superchat-bucket" class="primary-button">Save bucket settings</button>
+                                </div>
+                            </section>
+                        </div>
+
+                        <!-- Course lifecycle -->
+                        <div class="settings-panel" id="settings-panel-lifecycle" data-panel="lifecycle" hidden>
+                            <h2 class="settings-panel-title" tabindex="-1">Course lifecycle</h2>
+                            <section class="settings-section" id="course-lifecycle-section">
+                                <h3>Course lifecycle</h3>
+                                <div class="settings-content">
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4>Deactivate course</h4>
+                                            <p id="course-status-description">When a course is deactivated, students and TAs are blocked from using it. Instructors can still open the course here and reactivate it later.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <div class="course-status-panel">
+                                                <div class="course-status-header">
+                                                    <span class="course-state-badge active" id="course-status-badge">Active</span>
+                                                    <span class="course-state-note" id="course-status-note">Students and TAs can currently use this course.</span>
+                                                </div>
+                                                <button id="toggle-course-active-btn" class="danger-button">Deactivate Course</button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4>Transfer course</h4>
+                                            <p>Create a brand-new course copy from the current course. Materials are recopied and re-parsed, TAs keep their permissions if selected, and no students, chats, or historical activity are carried over.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <div class="transfer-course-builder">
+                                                <div class="transfer-field-group">
+                                                    <label for="transfer-course-name">New course name</label>
+                                                    <input
+                                                        type="text"
+                                                        id="transfer-course-name"
+                                                        class="number-input transfer-course-name-input"
+                                                        placeholder="e.g. CPSC 430 Winter 2027"
+                                                    >
+                                                </div>
+
+                                                <div class="transfer-global-options">
+                                                    <label class="transfer-option">
+                                                        <input type="checkbox" id="transfer-settings-toggle" checked>
+                                                        <span>Transfer course settings</span>
+                                                    </label>
+                                                    <label class="transfer-option">
+                                                        <input type="checkbox" id="transfer-tas-toggle" checked>
+                                                        <span>Transfer TAs and permissions</span>
+                                                    </label>
+                                                    <label class="transfer-option">
+                                                        <input type="checkbox" id="deactivate-source-after-transfer-toggle">
+                                                        <span>Deactivate source course after transfer</span>
+                                                    </label>
+                                                </div>
+
+                                                <div class="transfer-unit-section">
+                                                    <div class="transfer-unit-header">
+                                                        <div>
+                                                            <h5>Per-unit transfer</h5>
+                                                            <p>Learning objectives and assessment questions start on by default. Documents also bring their parsed topics along to the new course.</p>
+                                                        </div>
+                                                        <div class="transfer-unit-masters">
+                                                            <label class="transfer-master-option">
+                                                                <input type="checkbox" id="transfer-all-docs" checked>
+                                                                <span>All docs</span>
+                                                            </label>
+                                                            <label class="transfer-master-option">
+                                                                <input type="checkbox" id="transfer-all-objectives" checked>
+                                                                <span>All learning objectives</span>
+                                                            </label>
+                                                            <label class="transfer-master-option">
+                                                                <input type="checkbox" id="transfer-all-questions" checked>
+                                                                <span>All questions</span>
+                                                            </label>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="transfer-unit-grid" id="transfer-unit-grid">
+                                                        <div class="transfer-unit-grid-empty">Loading units...</div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="transfer-actions">
+                                                    <button id="transfer-course-btn" class="primary-button">Create Course Copy</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+
+                        <!-- Admin: platform & models -->
+                        <div class="settings-panel" id="settings-panel-admin-platform" data-panel="admin-platform" hidden>
+                            <h2 class="settings-panel-title" tabindex="-1">Platform &amp; models</h2>
+                            <section class="settings-section" id="llm-model-section" style="display: none;">
+                                <h3>LLM model</h3>
+                                <p class="section-description">Pick the OpenAI model used for all chat, question generation, and analysis across courses. Reasoning effort only applies to gpt-5 family models.</p>
+                                <div class="settings-content">
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="llm-model-label">Model</h4>
+                                            <p id="llm-model-desc">Course-wide selection. gpt-4.1-mini uses temperature; gpt-5 family models use reasoning instead.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <select id="llm-model-select" class="number-input" aria-labelledby="llm-model-label" aria-describedby="llm-model-desc">
+                                                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                                                <option value="gpt-5-nano">gpt-5-nano</option>
+                                                <option value="gpt-5.4-nano">gpt-5.4-nano</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="setting-item" id="llm-reasoning-item" style="display: none;">
+                                        <div class="setting-info">
+                                            <h4 id="llm-reasoning-label">Reasoning effort</h4>
+                                            <p id="llm-reasoning-desc">Only applies to gpt-5 family models. Defaults to minimal.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <select id="llm-reasoning-select" class="number-input" aria-labelledby="llm-reasoning-label" aria-describedby="llm-reasoning-desc">
+                                                <option value="minimal">minimal</option>
+                                                <option value="low">low</option>
+                                                <option value="medium">medium</option>
+                                                <option value="high">high</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="settings-section-actions">
+                                    <span class="settings-dirty-note" hidden>Unsaved changes</span>
+                                    <button id="save-llm-settings" class="primary-button">Save model settings</button>
+                                </div>
+                            </section>
+                        </div>
+
+                        <!-- Admin: admins & access -->
+                        <div class="settings-panel" id="settings-panel-admin-access" data-panel="admin-access" hidden>
+                            <h2 class="settings-panel-title" tabindex="-1">Admins &amp; access</h2>
+                            <section class="settings-section" id="login-restriction-section" style="display: none;">
+                                <h3>Login restrictions</h3>
+                                <div class="settings-content">
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="allow-local-login-label">Allow local login &amp; registration</h4>
+                                            <p id="allow-local-login-desc">When disabled, users can only log in via CWL. Local username/password login and new account registration will be hidden.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" id="allow-local-login-toggle" checked aria-labelledby="allow-local-login-label" aria-describedby="allow-local-login-desc">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="settings-section-actions">
+                                    <span class="settings-dirty-note" hidden>Unsaved changes</span>
+                                    <button id="save-access-settings" class="primary-button">Save login settings</button>
+                                </div>
+                            </section>
+
+                            <section class="settings-section" id="system-admin-section" style="display: none;">
+                                <h3>System admin access</h3>
+                                <p class="section-description">System admins can manage platform-wide settings, delete all data, and grant admin access to other users.</p>
+                                <div class="settings-content">
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="grant-admin-label">Grant admin access</h4>
+                                            <p id="grant-admin-desc">Enter the email for an existing user. They need to have logged in at least once before you can grant access here.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <div class="system-admin-grant-row">
+                                                <input
+                                                    type="email"
+                                                    id="system-admin-email-input"
+                                                    class="number-input system-admin-email-input"
+                                                    placeholder="name@ubc.ca"
+                                                    aria-labelledby="grant-admin-label"
+                                                    aria-describedby="grant-admin-desc"
+                                                >
+                                                <button id="grant-system-admin-btn" class="primary-button">Grant Admin Access</button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4>Current system admins</h4>
+                                            <p>Only system admins can see this list or change admin access.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <div id="system-admin-list" class="system-admin-list">
+                                                <div class="system-admin-empty">Loading system admins...</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+
+                        <!-- Admin: safety prompts -->
+                        <div class="settings-panel" id="settings-panel-admin-safety" data-panel="admin-safety" hidden>
+                            <h2 class="settings-panel-title" tabindex="-1">Safety prompts</h2>
+                            <section class="settings-section" id="question-generation-section" style="display: none;">
+                                <h3>Question generation settings</h3>
+                                <p class="section-description">Customize the prompts used for AI question generation. Use placeholders: <code>{{learningObjectives}}</code>, <code>{{courseMaterial}}</code>, <code>{{unitName}}</code>, <code>{{questionType}}</code></p>
+                                <div class="settings-content">
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="question-system-prompt-label">System prompt</h4>
+                                            <p id="question-system-prompt-desc">Core instructions for the AI when generating questions. Applied to all question types.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="question-system-prompt" rows="10" placeholder="Enter system prompt for question generation..." aria-labelledby="question-system-prompt-label" aria-describedby="question-system-prompt-desc"></textarea>
+                                        </div>
+                                    </div>
+
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="question-true-false-label">True/false question prompt</h4>
+                                            <p id="question-true-false-desc">Template for generating true/false questions.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="question-true-false-prompt" rows="10" placeholder="Enter true/false question prompt..." aria-labelledby="question-true-false-label" aria-describedby="question-true-false-desc"></textarea>
+                                        </div>
+                                    </div>
+
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="question-multiple-choice-label">Multiple choice question prompt</h4>
+                                            <p id="question-multiple-choice-desc">Template for generating multiple choice questions.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="question-multiple-choice-prompt" rows="10" placeholder="Enter multiple choice question prompt..." aria-labelledby="question-multiple-choice-label" aria-describedby="question-multiple-choice-desc"></textarea>
+                                        </div>
+                                    </div>
+
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="question-short-answer-label">Short answer question prompt</h4>
+                                            <p id="question-short-answer-desc">Template for generating short answer questions.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="question-short-answer-prompt" rows="10" placeholder="Enter short answer question prompt..." aria-labelledby="question-short-answer-label" aria-describedby="question-short-answer-desc"></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="settings-section-actions">
+                                    <span class="settings-dirty-note" hidden>Unsaved changes</span>
+                                    <button id="reset-question-prompts" class="secondary-button">Reset Question Prompts to Default</button>
+                                    <button id="save-question-prompts" class="primary-button">Save question prompts</button>
+                                </div>
+                            </section>
+
+                            <section class="settings-section" id="mental-health-detection-section" style="display: none;">
+                                <h3>Mental health detection settings</h3>
+                                <p class="section-description">Configure the AI prompt used to silently detect mental health concerns in student conversations. The detection runs in parallel and does not affect the student's chat experience. Flags appear on the Flagged Content page.</p>
+                                <div class="settings-content">
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="mh-prompt-label">Detection prompt</h4>
+                                            <p id="mh-prompt-desc">This prompt instructs the AI on how to analyze conversations for mental health concerns. The AI outputs a concern level (no concern, low concern, high concern) for each student message.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="mental-health-detection-prompt" rows="12" placeholder="Enter mental health detection prompt..." aria-labelledby="mh-prompt-label" aria-describedby="mh-prompt-desc"></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="settings-section-actions">
+                                    <span class="settings-dirty-note" hidden>Unsaved changes</span>
+                                    <button id="reset-mh-prompt" class="secondary-button">Reset Detection Prompt to Default</button>
+                                    <button id="save-mh-prompt" class="primary-button">Save detection prompt</button>
+                                </div>
+                            </section>
+                        </div>
+
+                        <!-- Admin: database -->
+                        <div class="settings-panel" id="settings-panel-admin-database" data-panel="admin-database" hidden>
+                            <h2 class="settings-panel-title" tabindex="-1">Database</h2>
+                            <section class="settings-section" id="database-management-section" style="display: none;">
+                                <h3>Database management</h3>
+
+                                <!-- Development Disclaimer -->
+                                <div class="development-disclaimer">
+                                    <div class="disclaimer-icon" aria-hidden="true">&#9888;&#65039;</div>
+                                    <div class="disclaimer-content">
+                                        <h4>Development Mode</h4>
+                                        <p><strong>Note:</strong> The database management tools below are temporary and only available during development. These features will be removed or restricted in production environments.</p>
+                                    </div>
+                                </div>
+
+                                <div class="settings-content">
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="delete-collection-label">Reset all data</h4>
+                                            <p id="delete-collection-desc">Delete all BiocBot data including vector embeddings (Qdrant) and document metadata (MongoDB). This will completely reset the system.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <button id="delete-collection" class="danger-button" aria-describedby="delete-collection-desc">Delete All Data</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
                         </div>
                     </div>
-                </section>
-
-                <!-- Save Button -->
-                <div class="settings-actions">
-                    <button id="save-settings" class="primary-button">Save Settings</button>
-                    <button id="reset-settings" class="secondary-button">Reset to Default</button>
                 </div>
             </div>
         </main>
@@ -762,4 +989,4 @@
     <script src="./scripts/instructor.js"></script>
     <script src="./scripts/settings.js"></script>
 </body>
-</html> 
+</html>

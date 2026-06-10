@@ -13,6 +13,9 @@
             container.className = 'notification-container';
             document.body.appendChild(container);
         }
+        // Announce notifications to assistive technology without stealing focus.
+        container.setAttribute('role', 'status');
+        container.setAttribute('aria-live', 'polite');
         return container;
     }
 
@@ -28,6 +31,7 @@
         const closeButton = document.createElement('button');
         closeButton.className = 'notification-close';
         closeButton.type = 'button';
+        closeButton.setAttribute('aria-label', 'Dismiss notification');
         closeButton.innerHTML = '&times;';
         closeButton.addEventListener('click', () => notification.remove());
 

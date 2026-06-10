@@ -79,6 +79,14 @@ router.get('/', async (req, res) => {
     }
 });
 
+// GET /api/superchats/defaults — default chat settings for a bucket. Used by the
+// settings page's per-bucket "reset to defaults" (instructor or admin); must be
+// registered before /:id so "defaults" is not treated as a bucket id.
+router.get('/defaults', (req, res) => {
+    if (!requireInstructorOrAdmin(req, res)) return;
+    res.json({ success: true, settings: resolveSuperCourseChatSettings({}) });
+});
+
 // GET /api/superchats/:id — full bucket + resolved chat settings (admin editor)
 router.get('/:id', async (req, res) => {
     try {

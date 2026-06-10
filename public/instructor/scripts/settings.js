@@ -1,8 +1,9 @@
 document.addEventListener('DOMContentLoaded', async () => {
     const SUPER_STUDENT_LEVELS = ['intro', 'undergraduate', 'graduate'];
     const SUPER_INSTRUCTOR_LEVELS = ['overview', 'standard', 'deepDive'];
-    const saveSettingsBtn = document.getElementById('save-settings');
-    const resetSettingsBtn = document.getElementById('reset-settings');
+
+    const settingsHub = document.getElementById('settings-hub');
+    const settingsPanels = document.getElementById('settings-panels');
     const deleteCollectionBtn = document.getElementById('delete-collection');
     const courseLifecycleSection = document.getElementById('course-lifecycle-section');
     const toggleCourseActiveBtn = document.getElementById('toggle-course-active-btn');
@@ -27,22 +28,143 @@ document.addEventListener('DOMContentLoaded', async () => {
     let lifecycleCourseData = null;
     let pendingTransferPayload = null;
     let isTransferInProgress = false;
-    // Currently-selected Super Course bucket in the admin editor (null = none yet).
+    // Currently-selected Super Course bucket in the bucket editor (null = none yet).
     let selectedSuperchatId = null;
-    
+    // Cached bucket summaries so the per-course checklist can re-render without a
+    // page refresh whenever buckets are created/renamed/deleted.
+    let availableSuperchats = [];
+    // Buckets created in this session get a "New" badge until membership is saved.
+    const newlyCreatedSuperchatIds = new Set();
+
+    /* =============================================
+       Hub / panel navigation (hash-routed)
+       ============================================= */
+
+    const BASE_PANEL_NAMES = ['course-basics', 'student-chat', 'prompts', 'quiz', 'privacy', 'super-course'];
+    const ADMIN_PANEL_NAMES = ['admin-platform', 'admin-access', 'admin-safety', 'admin-database'];
+
+    function getVisiblePanelNames() {
+        const names = [...BASE_PANEL_NAMES];
+        const lifecycleTile = document.getElementById('lifecycle-tile');
+        if (lifecycleTile && !lifecycleTile.hidden) {
+            names.push('lifecycle');
+        }
+        const adminTileGroup = document.getElementById('admin-tile-group');
+        if (adminTileGroup && !adminTileGroup.hidden) {
+            names.push(...ADMIN_PANEL_NAMES);
+        }
+        return names;
+    }
+
+    function currentPanelName() {
+        const hash = decodeURIComponent((window.location.hash || '').replace(/^#/, ''));
+        return getVisiblePanelNames().includes(hash) ? hash : null;
+    }
+
+    // Show either the hub (tile grid) or the panel view for the current hash.
+    // Deep links (/instructor/settings#quiz), refresh, and the browser back
+    // button all work because the hash is the source of truth.
+    function renderSettingsView({ focusHeading = false } = {}) {
+        if (!settingsHub || !settingsPanels) return;
+
+        const active = currentPanelName();
+        settingsHub.hidden = !!active;
+        settingsPanels.hidden = !active;
+
+        document.querySelectorAll('.settings-panel').forEach(panel => {
+            panel.hidden = panel.dataset.panel !== active;
+        });
+
+        document.querySelectorAll('.settings-rail-link').forEach(link => {
+            if (link.dataset.panel === active) {
+                link.setAttribute('aria-current', 'true');
+            } else {
+                link.removeAttribute('aria-current');
+            }
+        });
+
+        // Move focus to the panel heading so keyboard and screen-reader users
+        // land on the section they navigated to.
+        if (active && focusHeading) {
+            const heading = document.querySelector(`.settings-panel[data-panel="${active}"] .settings-panel-title`);
+            if (heading) heading.focus();
+        }
+    }
+
+    window.addEventListener('hashchange', () => renderSettingsView({ focusHeading: true }));
+    renderSettingsView();
+
+    /* =============================================
+       Per-section dirty tracking
+       ============================================= */
+
+    function initDirtyTracking() {
+        document.querySelectorAll('.settings-section').forEach(section => {
+            const note = section.querySelector('.settings-dirty-note');
+            if (!note) return;
+            const markDirty = (event) => {
+                if (event.target.closest('.settings-section-actions')) return;
+                note.hidden = false;
+            };
+            section.addEventListener('input', markDirty);
+            section.addEventListener('change', markDirty);
+        });
+    }
+
+    function clearDirty(elementInSection) {
+        const section = elementInSection && elementInSection.closest
+            ? elementInSection.closest('.settings-section')
+            : null;
+        const note = section ? section.querySelector('.settings-dirty-note') : null;
+        if (note) note.hidden = true;
+    }
+
+    function markSectionDirty(sectionId) {
+        const note = document.querySelector(`#${sectionId} .settings-dirty-note`);
+        if (note) note.hidden = false;
+    }
+
+    // Shared wiring for section save/reset buttons: confirm (optional), busy
+    // state, error notification, and clearing the section's dirty note.
+    function wireSectionButton(buttonId, handler, { confirmMessage, busyLabel } = {}) {
+        const btn = document.getElementById(buttonId);
+        if (!btn) return;
+        btn.addEventListener('click', async () => {
+            if (confirmMessage && !confirm(confirmMessage)) return;
+            const originalLabel = btn.textContent;
+            btn.disabled = true;
+            if (busyLabel) btn.textContent = busyLabel;
+            try {
+                await handler();
+                clearDirty(btn);
+            } catch (error) {
+                console.error(`Error handling ${buttonId}:`, error);
+                showNotification(error.message || 'Something went wrong', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalLabel;
+            }
+        });
+    }
+
+    initDirtyTracking();
+
     // Check if user has system admin access
     await waitForAuth();
     const canManageDB = await checkDeleteAllPermission();
-    
+
     // Load initial settings including prompts
     await loadSettings(canManageDB);
+
+    // Visibility of the lifecycle and admin groups may have changed during load;
+    // re-resolve the current hash against what this user can actually see.
+    renderSettingsView();
 
     async function loadSettings(canManageDB) {
         // Super Course settings (per-course bucket membership + bucket management)
         // are available to instructors, not just admins, so they can curate their
-        // own Super Course groupings. Reveal + load these FIRST and independently,
-        // so a failure in an unrelated section below can never hide them.
-        showSuperCourseSettingsSections();
+        // own Super Course groupings. Load these FIRST and independently, so a
+        // failure in an unrelated section below can never hide them.
         try {
             await loadAiSettings();
             await loadSuperCourseChatSettings();
@@ -139,11 +261,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             const response = await fetch('/api/settings/global');
             const result = await response.json();
-            
+
             if (result.success && result.settings) {
                 const allowLocalLoginToggle = document.getElementById('allow-local-login-toggle');
                 if (allowLocalLoginToggle) {
-                    allowLocalLoginToggle.checked =  result.settings.allowLocalLogin !== false; // Default true
+                    allowLocalLoginToggle.checked = result.settings.allowLocalLogin !== false; // Default true
                 }
             }
         } catch (error) {
@@ -175,12 +297,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Reveal the Super Course settings sections. These are open to instructors
-    // (not admin-only), so they are shown here rather than gated behind
-    // checkDeleteAllPermission.
-    function showSuperCourseSettingsSections() {
-    }
-
     async function loadAiSettings() {
         try {
             const courseId = await getCurrentCourseId();
@@ -195,8 +311,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             const topKInput = document.getElementById('student-chat-topk-input');
             if (topKInput) topKInput.value = result.settings.ragSettings?.student?.topK || 3;
 
+            availableSuperchats = result.availableSuperchats || [];
             renderCourseSuperchatChecklist(
-                result.availableSuperchats || [],
+                availableSuperchats,
                 result.settings.superchatIds || []
             );
         } catch (error) {
@@ -211,7 +328,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!container) return;
 
         if (!buckets.length) {
-            container.innerHTML = '<p class="superchat-checklist-empty">No Super Course buckets exist yet. An admin can create them under Super Course Chat Settings.</p>';
+            container.innerHTML = '<p class="superchat-checklist-empty">No Super Course buckets exist yet. Create one below.</p>';
             return;
         }
 
@@ -219,12 +336,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         container.innerHTML = buckets.map(b => {
             const id = `course-superchat-${b.superchatId}`;
             const checked = selected.has(b.superchatId) ? 'checked' : '';
+            const isNew = newlyCreatedSuperchatIds.has(b.superchatId);
             return `
-                <label class="superchat-checklist-item" for="${id}">
+                <label class="superchat-checklist-item${isNew ? ' is-new' : ''}" for="${id}">
                     <input type="checkbox" id="${id}" class="course-superchat-checkbox" value="${escapeHtml(b.superchatId)}" ${checked}>
                     <span>${escapeHtml(b.name)}</span>
+                    ${isNew ? '<span class="superchat-checklist-new-badge">New</span>' : ''}
                 </label>`;
         }).join('');
+    }
+
+    // Re-render the checklist from the cached bucket list, preserving whatever
+    // the user currently has checked (plus any ids passed in, e.g. a bucket that
+    // was just created and should start checked for this course).
+    function refreshCourseSuperchatChecklist(extraCheckedIds = []) {
+        const checked = new Set(collectCourseSuperchatIds());
+        extraCheckedIds.forEach(id => checked.add(id));
+        renderCourseSuperchatChecklist(availableSuperchats, Array.from(checked));
     }
 
     // Collect the checked bucket ids from the per-course checklist.
@@ -257,22 +385,30 @@ document.addEventListener('DOMContentLoaded', async () => {
         const s = (superchat && superchat.settings) || {};
         const nameInput = document.getElementById('superchat-name-input');
         const yearSelect = document.getElementById('superchat-year-select');
+        const showStudentToggle = document.getElementById('show-student-super-course-toggle');
+
+        if (nameInput) nameInput.value = (superchat && superchat.name) || '';
+        if (yearSelect) yearSelect.value = (superchat && superchat.yearLevel) ? String(superchat.yearLevel) : '';
+        if (showStudentToggle) showStudentToggle.checked = superchat && superchat.showToStudents === true;
+        fillSuperchatChatSettingsFields(s);
+    }
+
+    // Fill only the chat-settings fields (the "Advanced" group) of the bucket
+    // editor. Used by both fillSuperchatForm and the per-bucket reset, which
+    // restores defaults without touching the bucket's name/year/visibility.
+    function fillSuperchatChatSettingsFields(s) {
         const instructorTopKInput = document.getElementById('super-instructor-topk-input');
         const studentTopKInput = document.getElementById('super-student-topk-input');
         const includeInactiveToggle = document.getElementById('include-inactive-super-course-toggle');
-        const showStudentToggle = document.getElementById('show-student-super-course-toggle');
         const includeNotesToggle = document.getElementById('include-notes-super-course-toggle');
         const noteRatioInput = document.getElementById('super-note-ratio-input');
         const noteMinScoreInput = document.getElementById('super-note-min-score-input');
         const instructorPrompt = document.getElementById('super-instructor-prompt');
         const studentPrompt = document.getElementById('super-student-prompt');
 
-        if (nameInput) nameInput.value = (superchat && superchat.name) || '';
-        if (yearSelect) yearSelect.value = (superchat && superchat.yearLevel) ? String(superchat.yearLevel) : '';
         if (instructorTopKInput) instructorTopKInput.value = s.instructorTopK || 8;
         if (studentTopKInput) studentTopKInput.value = s.studentTopK || 8;
         if (includeInactiveToggle) includeInactiveToggle.checked = s.includeInactiveCourses === true;
-        if (showStudentToggle) showStudentToggle.checked = superchat && superchat.showToStudents === true;
         if (includeNotesToggle) includeNotesToggle.checked = s.includeNotesInRetrieval !== false;
         if (noteRatioInput) noteRatioInput.value = s.noteRetrievalRatio ?? 0.25;
         if (noteMinScoreInput) noteMinScoreInput.value = s.noteMinScore ?? 0.25;
@@ -289,7 +425,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             'super-instructor-topk-input', 'super-student-topk-input',
             'include-inactive-super-course-toggle', 'show-student-super-course-toggle',
             'include-notes-super-course-toggle', 'super-note-ratio-input', 'super-note-min-score-input',
-            'super-instructor-prompt', 'super-student-prompt'
+            'super-instructor-prompt', 'super-student-prompt',
+            'reset-superchat-bucket', 'save-superchat-bucket'
         ];
         for (const id of ids) {
             const el = document.getElementById(id);
@@ -311,12 +448,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             selectedSuperchatId = superchatId;
             setSuperchatEditorEnabled(true);
             fillSuperchatForm(result.superchat);
+            clearDirty(document.getElementById('superchat-select'));
         } catch (error) {
             console.error('Error loading superchat:', error);
         }
     }
 
-    // Populate the bucket <select> from the list endpoint and load the first one.
+    // Populate the bucket <select> from the list endpoint, refresh the cached
+    // bucket summaries, and load the preferred (or first) bucket into the editor.
     async function loadSuperchatList(preferredId) {
         const select = document.getElementById('superchat-select');
         if (!select) return;
@@ -326,9 +465,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (!response.ok || !result.success) throw new Error(result.message || 'Failed to list buckets');
 
             const buckets = result.superchats || [];
+            availableSuperchats = buckets;
             select.innerHTML = buckets.length
                 ? buckets.map(b => `<option value="${escapeHtml(b.superchatId)}">${escapeHtml(b.name)} (${b.courseCount} course${b.courseCount === 1 ? '' : 's'})</option>`).join('')
-                : '<option value="">No buckets yet — click New</option>';
+                : '<option value="">No buckets yet</option>';
 
             if (!buckets.length) {
                 await loadSuperchatIntoForm(null);
@@ -345,33 +485,62 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Wire up bucket management controls (select / new / delete).
+    // Wire up bucket management controls (select / create / delete).
     function initSuperchatManagement() {
         const select = document.getElementById('superchat-select');
         const newBtn = document.getElementById('new-superchat-btn');
+        const newNameInput = document.getElementById('new-superchat-name');
         const deleteBtn = document.getElementById('delete-superchat-btn');
 
         if (select) {
             select.addEventListener('change', () => loadSuperchatIntoForm(select.value || null));
         }
+
+        async function createBucket() {
+            const name = (newNameInput?.value || '').trim();
+            if (!name) {
+                showNotification('Enter a name for the new bucket first.', 'error');
+                newNameInput?.focus();
+                return;
+            }
+            newBtn.disabled = true;
+            try {
+                const response = await fetch('/api/superchats', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ name })
+                });
+                const result = await response.json();
+                if (!response.ok || !result.success) throw new Error(result.message || 'Failed to create bucket');
+
+                const newId = result.superchat.superchatId;
+                newlyCreatedSuperchatIds.add(newId);
+                if (newNameInput) newNameInput.value = '';
+
+                // Refresh the bucket editor select AND the per-course checklist in
+                // place (no page refresh needed). The new bucket starts checked for
+                // this course; saving bucket membership confirms it.
+                await loadSuperchatList(newId);
+                refreshCourseSuperchatChecklist([newId]);
+                markSectionDirty('course-superchats-section');
+                showNotification('Bucket created and checked for this course. Save bucket membership to confirm.', 'success');
+            } catch (error) {
+                console.error('Error creating bucket:', error);
+                showNotification(error.message || 'Failed to create bucket', 'error');
+            } finally {
+                newBtn.disabled = false;
+            }
+        }
+
         if (newBtn) {
-            newBtn.addEventListener('click', async () => {
-                const name = (prompt('Name for the new Super Course bucket:') || '').trim();
-                if (!name) return;
-                try {
-                    const response = await fetch('/api/superchats', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'include',
-                        body: JSON.stringify({ name })
-                    });
-                    const result = await response.json();
-                    if (!response.ok || !result.success) throw new Error(result.message || 'Failed to create bucket');
-                    await loadSuperchatList(result.superchat.superchatId);
-                    showNotification('Super Course bucket created', 'success');
-                } catch (error) {
-                    console.error('Error creating bucket:', error);
-                    showNotification(error.message || 'Failed to create bucket', 'error');
+            newBtn.addEventListener('click', createBucket);
+        }
+        if (newNameInput) {
+            newNameInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    createBucket();
                 }
             });
         }
@@ -386,7 +555,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                     });
                     const result = await response.json();
                     if (!response.ok || !result.success) throw new Error(result.message || 'Failed to delete bucket');
+                    newlyCreatedSuperchatIds.delete(selectedSuperchatId);
                     await loadSuperchatList();
+                    // Drop the deleted bucket from the per-course checklist too.
+                    refreshCourseSuperchatChecklist();
                     showNotification('Super Course bucket deleted', 'success');
                 } catch (error) {
                     console.error('Error deleting bucket:', error);
@@ -468,32 +640,37 @@ document.addEventListener('DOMContentLoaded', async () => {
             const courseId = await getCurrentCourseId();
             const response = await fetch(`/api/settings/prompts?courseId=${courseId}`);
             const result = await response.json();
-            
-            if (result.success && result.prompts) {
-                const basePromptInput = document.getElementById('base-prompt');
-                const protegePromptInput = document.getElementById('protege-prompt');
-                const tutorPromptInput = document.getElementById('tutor-prompt');
-                const explainPromptInput = document.getElementById('explain-prompt');
-                const directivePromptInput = document.getElementById('directive-prompt');
-                const quizHelpPromptInput = document.getElementById('quiz-help-prompt');
-                const additiveToggle = document.getElementById('additive-retrieval-toggle');
-                const idleTimeoutInput = document.getElementById('idle-timeout-input');
 
-                if (basePromptInput) basePromptInput.value = result.prompts.base || '';
-                if (protegePromptInput) protegePromptInput.value = result.prompts.protege || '';
-                if (tutorPromptInput) tutorPromptInput.value = result.prompts.tutor || '';
-                if (explainPromptInput) explainPromptInput.value = result.prompts.explain || '';
-                if (directivePromptInput) directivePromptInput.value = result.prompts.directive || '';
-                if (quizHelpPromptInput) quizHelpPromptInput.value = result.prompts.quizHelp || '';
+            if (result.success && result.prompts) {
+                applyPromptValues(result.prompts);
+
+                const additiveToggle = document.getElementById('additive-retrieval-toggle');
                 if (additiveToggle) additiveToggle.checked = !!result.prompts.additiveRetrieval;
-                
+
                 // Convert seconds to minutes for display
+                const idleTimeoutInput = document.getElementById('idle-timeout-input');
                 if (idleTimeoutInput && result.prompts.studentIdleTimeout) {
                     idleTimeoutInput.value = result.prompts.studentIdleTimeout / 60;
                 }
             }
         } catch (error) {
             console.error('Error fetching global config:', error);
+        }
+    }
+
+    // Fill the six persona prompt textareas from a prompts object.
+    function applyPromptValues(promptValues) {
+        const fields = {
+            'base-prompt': promptValues.base,
+            'protege-prompt': promptValues.protege,
+            'tutor-prompt': promptValues.tutor,
+            'explain-prompt': promptValues.explain,
+            'directive-prompt': promptValues.directive,
+            'quiz-help-prompt': promptValues.quizHelp
+        };
+        for (const [id, value] of Object.entries(fields)) {
+            const el = document.getElementById(id);
+            if (el) el.value = value || '';
         }
     }
 
@@ -506,23 +683,27 @@ document.addEventListener('DOMContentLoaded', async () => {
             const courseId = await getCurrentCourseId();
             const response = await fetch(`/api/settings/question-prompts?courseId=${courseId}`);
             const result = await response.json();
-            
+
             if (result.success && result.prompts) {
-                const systemPromptInput = document.getElementById('question-system-prompt');
-                const trueFalseInput = document.getElementById('question-true-false-prompt');
-                const multipleChoiceInput = document.getElementById('question-multiple-choice-prompt');
-                const shortAnswerInput = document.getElementById('question-short-answer-prompt');
-                
-                if (systemPromptInput) systemPromptInput.value = result.prompts.systemPrompt || '';
-                if (trueFalseInput) trueFalseInput.value = result.prompts.trueFalse || '';
-                if (multipleChoiceInput) multipleChoiceInput.value = result.prompts.multipleChoice || '';
-                if (shortAnswerInput) shortAnswerInput.value = result.prompts.shortAnswer || '';
+                applyQuestionPromptValues(result.prompts);
             }
         } catch (error) {
             console.error('Error fetching question prompts:', error);
         }
     }
-    
+
+    function applyQuestionPromptValues(promptValues) {
+        const systemPromptInput = document.getElementById('question-system-prompt');
+        const trueFalseInput = document.getElementById('question-true-false-prompt');
+        const multipleChoiceInput = document.getElementById('question-multiple-choice-prompt');
+        const shortAnswerInput = document.getElementById('question-short-answer-prompt');
+
+        if (systemPromptInput) systemPromptInput.value = promptValues.systemPrompt || '';
+        if (trueFalseInput) trueFalseInput.value = promptValues.trueFalse || '';
+        if (multipleChoiceInput) multipleChoiceInput.value = promptValues.multipleChoice || '';
+        if (shortAnswerInput) shortAnswerInput.value = promptValues.shortAnswer || '';
+    }
+
     /**
      * Load quiz practice settings and populate the testable units checkboxes
      */
@@ -655,6 +836,415 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.warn('Unable to display deferred settings message:', error);
         }
     }
+
+    /* =============================================
+       Shared save helpers (one per backend document)
+
+       The /prompts, /quiz, and /ai-settings endpoints are full-document
+       writes, so each helper collects every field the endpoint owns from the
+       DOM (values are loaded fresh on page load, so untouched fields simply
+       round-trip their current server values).
+       ============================================= */
+
+    async function saveAiSettingsToServer() {
+        const courseId = await getCurrentCourseId();
+        const superchatIds = collectCourseSuperchatIds();
+        const studentTopK = Number(document.getElementById('student-chat-topk-input')?.value || 3);
+        const response = await fetch('/api/settings/ai-settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ courseId, superchatIds, studentTopK })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to save AI settings');
+        }
+        return result;
+    }
+
+    async function savePromptsConfigToServer() {
+        const courseId = await getCurrentCourseId();
+        const idleTimeoutInput = document.getElementById('idle-timeout-input');
+        let studentIdleTimeout = 240;
+        if (idleTimeoutInput && idleTimeoutInput.value !== '') {
+            studentIdleTimeout = Math.round(parseFloat(idleTimeoutInput.value) * 60);
+        }
+
+        const response = await fetch('/api/settings/prompts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                base: document.getElementById('base-prompt')?.value ?? '',
+                protege: document.getElementById('protege-prompt')?.value ?? '',
+                tutor: document.getElementById('tutor-prompt')?.value ?? '',
+                explain: document.getElementById('explain-prompt')?.value ?? '',
+                directive: document.getElementById('directive-prompt')?.value ?? '',
+                quizHelp: document.getElementById('quiz-help-prompt')?.value ?? '',
+                additiveRetrieval: document.getElementById('additive-retrieval-toggle')?.checked === true,
+                studentIdleTimeout,
+                courseId
+            })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to save course settings');
+        }
+        return result;
+    }
+
+    async function saveQuizConfigToServer() {
+        const courseId = await getCurrentCourseId();
+        const unitCheckboxes = document.querySelectorAll('.testable-unit-checkbox');
+        let testableUnits = 'all';
+        if (unitCheckboxes.length > 0) {
+            const checkedUnits = Array.from(unitCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
+            // If all are checked, store 'all'; otherwise store the selected names
+            testableUnits = checkedUnits.length === unitCheckboxes.length ? 'all' : checkedUnits;
+        }
+
+        const response = await fetch('/api/settings/quiz', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                courseId,
+                enabled: document.getElementById('quiz-enabled-toggle')?.checked === true,
+                testableUnits,
+                allowLectureMaterialAccess: document.getElementById('quiz-material-access-toggle')?.checked === true,
+                allowSourceAttributionDownloads: document.getElementById('source-attribution-download-toggle')?.checked === true
+            })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to save quiz settings');
+        }
+        return result;
+    }
+
+    async function saveAnonymizeStudentsToServer() {
+        const courseId = await getCurrentCourseId();
+        const enabled = document.getElementById('anonymize-students-toggle')?.checked === true;
+        const response = await fetch('/api/settings/anonymize-students', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ courseId, enabled })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to save anonymize students setting');
+        }
+        return result;
+    }
+
+    async function saveSuperchatBucketToServer() {
+        if (!selectedSuperchatId) {
+            throw new Error('Select a bucket first');
+        }
+        const yearValue = document.getElementById('superchat-year-select')?.value || '';
+        const response = await fetch(`/api/superchats/${encodeURIComponent(selectedSuperchatId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+                name: document.getElementById('superchat-name-input')?.value || '',
+                yearLevel: yearValue ? Number(yearValue) : null,
+                showToStudents: document.getElementById('show-student-super-course-toggle')?.checked === true,
+                instructorTopK: Number(document.getElementById('super-instructor-topk-input')?.value || 8),
+                studentTopK: Number(document.getElementById('super-student-topk-input')?.value || 8),
+                includeInactiveCourses: document.getElementById('include-inactive-super-course-toggle')?.checked === true,
+                includeNotesInRetrieval: document.getElementById('include-notes-super-course-toggle')?.checked !== false,
+                noteRetrievalRatio: Number(document.getElementById('super-note-ratio-input')?.value ?? 0.25),
+                noteMinScore: Number(document.getElementById('super-note-min-score-input')?.value ?? 0.25),
+                instructorPrompt: document.getElementById('super-instructor-prompt')?.value || '',
+                studentPrompt: document.getElementById('super-student-prompt')?.value || '',
+                studentLevelModifiers: collectLevelModifiersFromFields('super-student-level', SUPER_STUDENT_LEVELS),
+                instructorLevelModifiers: collectLevelModifiersFromFields('super-instructor-level', SUPER_INSTRUCTOR_LEVELS)
+            })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to save Super Course settings');
+        }
+        return result;
+    }
+
+    /* =============================================
+       Per-section save / reset wiring
+       ============================================= */
+
+    // Course basics
+    wireSectionButton('save-course-basics', async () => {
+        const courseId = await getCurrentCourseId();
+        const yearLevelSelect = document.getElementById('course-year-level-select');
+        if (!courseId || !yearLevelSelect) {
+            throw new Error('Select a course first');
+        }
+        const rawLevel = yearLevelSelect.value;
+        const yearLevel = rawLevel === '' ? null : Number(rawLevel);
+        const instructorId = getCurrentInstructorId();
+        const response = await fetch(`/api/courses/${courseId}?instructorId=${encodeURIComponent(instructorId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instructorId, yearLevel })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to save course level');
+        }
+        showNotification('Course basics saved', 'success');
+    }, { busyLabel: 'Saving...' });
+
+    // Student chat (top-K lives in ai-settings; additive retrieval in the
+    // prompts config; source attribution downloads in the quiz config)
+    wireSectionButton('save-student-chat', async () => {
+        await saveAiSettingsToServer();
+        await savePromptsConfigToServer();
+        await saveQuizConfigToServer();
+        showNotification('Student chat settings saved', 'success');
+    }, { busyLabel: 'Saving...' });
+
+    wireSectionButton('reset-student-chat', async () => {
+        const topKInput = document.getElementById('student-chat-topk-input');
+        const additiveToggle = document.getElementById('additive-retrieval-toggle');
+        const sourceAttributionToggle = document.getElementById('source-attribution-download-toggle');
+        if (topKInput) topKInput.value = 3;
+        if (additiveToggle) additiveToggle.checked = true;
+        if (sourceAttributionToggle) sourceAttributionToggle.checked = false;
+        await saveAiSettingsToServer();
+        await savePromptsConfigToServer();
+        await saveQuizConfigToServer();
+        showNotification('Student chat settings reset to defaults', 'success');
+    }, {
+        confirmMessage: 'Reset student chat settings (Top-K, additive retrieval, source downloads) to defaults?',
+        busyLabel: 'Resetting...'
+    });
+
+    // AI persona prompts
+    wireSectionButton('save-prompts', async () => {
+        await savePromptsConfigToServer();
+        showNotification('Prompts saved', 'success');
+    }, { busyLabel: 'Saving...' });
+
+    wireSectionButton('reset-prompts', async () => {
+        // Fetch the platform defaults (GET without courseId), fill the fields,
+        // then save. Only the six persona prompts reset - additive retrieval and
+        // idle timeout belong to other sections and keep their current values.
+        const response = await fetch('/api/settings/prompts');
+        const result = await response.json();
+        if (!result.success || !result.prompts) {
+            throw new Error('Failed to load default prompts');
+        }
+        applyPromptValues(result.prompts);
+        await savePromptsConfigToServer();
+        showNotification('Prompts reset to defaults', 'success');
+    }, {
+        confirmMessage: 'Reset all AI persona prompts for this course to the default values?',
+        busyLabel: 'Resetting...'
+    });
+
+    // Quiz practice
+    wireSectionButton('save-quiz-settings', async () => {
+        await saveQuizConfigToServer();
+        showNotification('Quiz settings saved', 'success');
+    }, { busyLabel: 'Saving...' });
+
+    wireSectionButton('reset-quiz-settings', async () => {
+        const quizEnabledToggle = document.getElementById('quiz-enabled-toggle');
+        const materialAccessToggle = document.getElementById('quiz-material-access-toggle');
+        if (quizEnabledToggle) quizEnabledToggle.checked = false;
+        if (materialAccessToggle) materialAccessToggle.checked = true;
+        document.querySelectorAll('.testable-unit-checkbox').forEach(cb => { cb.checked = true; });
+        await saveQuizConfigToServer();
+        showNotification('Quiz settings reset to defaults', 'success');
+    }, {
+        confirmMessage: 'Reset quiz practice settings to defaults? Quiz practice will be disabled and all published units marked testable.',
+        busyLabel: 'Resetting...'
+    });
+
+    // Privacy & sessions
+    wireSectionButton('save-privacy-settings', async () => {
+        await saveAnonymizeStudentsToServer();
+        await savePromptsConfigToServer();
+        showNotification('Privacy settings saved', 'success');
+    }, { busyLabel: 'Saving...' });
+
+    wireSectionButton('reset-privacy-settings', async () => {
+        const anonymizeToggle = document.getElementById('anonymize-students-toggle');
+        const idleTimeoutInput = document.getElementById('idle-timeout-input');
+        if (anonymizeToggle) anonymizeToggle.checked = false;
+        if (idleTimeoutInput) idleTimeoutInput.value = 4;
+        await saveAnonymizeStudentsToServer();
+        await savePromptsConfigToServer();
+        showNotification('Privacy settings reset to defaults', 'success');
+    }, {
+        confirmMessage: 'Reset privacy and session settings to defaults (anonymization off, 4 minute idle timeout)?',
+        busyLabel: 'Resetting...'
+    });
+
+    // Super course: per-course bucket membership
+    wireSectionButton('save-course-superchats', async () => {
+        await saveAiSettingsToServer();
+        newlyCreatedSuperchatIds.clear();
+        refreshCourseSuperchatChecklist();
+        showNotification('Bucket membership saved', 'success');
+    }, { busyLabel: 'Saving...' });
+
+    wireSectionButton('reset-course-superchats', async () => {
+        document.querySelectorAll('.course-superchat-checkbox').forEach(cb => { cb.checked = false; });
+        await saveAiSettingsToServer();
+        newlyCreatedSuperchatIds.clear();
+        refreshCourseSuperchatChecklist();
+        showNotification('Course removed from all Super Course buckets', 'success');
+    }, {
+        confirmMessage: 'Remove this course from every Super Course bucket?',
+        busyLabel: 'Removing...'
+    });
+
+    // Super course: shared bucket settings
+    wireSectionButton('save-superchat-bucket', async () => {
+        await saveSuperchatBucketToServer();
+        // Refresh the select label and checklist (name/course count may have changed).
+        await loadSuperchatList(selectedSuperchatId);
+        refreshCourseSuperchatChecklist();
+        showNotification('Bucket settings saved', 'success');
+    }, { busyLabel: 'Saving...' });
+
+    wireSectionButton('reset-superchat-bucket', async () => {
+        if (!selectedSuperchatId) {
+            throw new Error('Select a bucket first');
+        }
+        const response = await fetch('/api/superchats/defaults', { credentials: 'include' });
+        const result = await response.json();
+        if (!response.ok || !result.success || !result.settings) {
+            throw new Error(result.message || 'Failed to load default bucket settings');
+        }
+        // Restore the chat-settings defaults but keep the bucket's identity
+        // (name, year level, student visibility) untouched, then persist.
+        fillSuperchatChatSettingsFields(result.settings);
+        await saveSuperchatBucketToServer();
+        showNotification('Bucket chat settings reset to defaults', 'success');
+    }, {
+        confirmMessage: 'Reset this bucket\'s chat settings (Top-K, notes, prompts, modifiers) to defaults? Its name, year level, and student visibility are kept.',
+        busyLabel: 'Resetting...'
+    });
+
+    // Admin: platform & models
+    wireSectionButton('save-llm-settings', async () => {
+        const model = document.getElementById('llm-model-select')?.value;
+        const reasoningEffort = document.getElementById('llm-reasoning-select')?.value || 'minimal';
+        if (!model) {
+            throw new Error('Select a model first');
+        }
+        const response = await fetch('/api/settings/llm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model, reasoningEffort })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || 'Failed to save LLM settings');
+        }
+        showNotification('Model settings saved', 'success');
+    }, { busyLabel: 'Saving...' });
+
+    // Admin: login restrictions
+    wireSectionButton('save-access-settings', async () => {
+        const allowLocalLogin = document.getElementById('allow-local-login-toggle')?.checked;
+        const response = await fetch('/api/settings/global', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ allowLocalLogin })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || 'Failed to save login settings');
+        }
+        showNotification('Login settings saved', 'success');
+    }, { busyLabel: 'Saving...' });
+
+    // Admin: question generation prompts
+    wireSectionButton('save-question-prompts', async () => {
+        const courseId = await getCurrentCourseId();
+        const systemPrompt = document.getElementById('question-system-prompt')?.value;
+        const trueFalse = document.getElementById('question-true-false-prompt')?.value;
+        const multipleChoice = document.getElementById('question-multiple-choice-prompt')?.value;
+        const shortAnswer = document.getElementById('question-short-answer-prompt')?.value;
+
+        if (!systemPrompt || !trueFalse || !multipleChoice || !shortAnswer) {
+            throw new Error('All four question prompts are required');
+        }
+
+        const response = await fetch('/api/settings/question-prompts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ systemPrompt, trueFalse, multipleChoice, shortAnswer, courseId })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to save question prompts');
+        }
+        showNotification('Question prompts saved', 'success');
+    }, { busyLabel: 'Saving...' });
+
+    wireSectionButton('reset-question-prompts', async () => {
+        const courseId = await getCurrentCourseId();
+        const response = await fetch('/api/settings/question-prompts/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ courseId })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success || !result.prompts) {
+            throw new Error(result.message || 'Failed to reset question prompts');
+        }
+        applyQuestionPromptValues(result.prompts);
+        showNotification('Question prompts reset to defaults', 'success');
+    }, {
+        confirmMessage: 'Are you sure you want to reset all question generation prompts to default values? This only affects the current course.',
+        busyLabel: 'Resetting...'
+    });
+
+    // Admin: mental health detection prompt
+    wireSectionButton('save-mh-prompt', async () => {
+        const courseId = await getCurrentCourseId();
+        const prompt = document.getElementById('mental-health-detection-prompt')?.value;
+        if (!prompt) {
+            throw new Error('Detection prompt cannot be empty');
+        }
+        const response = await fetch('/api/settings/mental-health-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, courseId })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to save detection prompt');
+        }
+        showNotification('Detection prompt saved', 'success');
+    }, { busyLabel: 'Saving...' });
+
+    wireSectionButton('reset-mh-prompt', async () => {
+        const courseId = await getCurrentCourseId();
+        const response = await fetch('/api/settings/mental-health-prompt/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ courseId })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to reset detection prompt');
+        }
+        const textarea = document.getElementById('mental-health-detection-prompt');
+        if (textarea) textarea.value = result.prompt || '';
+        showNotification('Detection prompt reset to default', 'success');
+    }, {
+        confirmMessage: 'Reset the mental health detection prompt to the default?',
+        busyLabel: 'Resetting...'
+    });
+
+    /* =============================================
+       Course lifecycle + transfer (action buttons)
+       ============================================= */
 
     function updateMasterTransferToggle(toggleId, selector) {
         const toggle = document.getElementById(toggleId);
@@ -860,14 +1450,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     async function initializeCourseLifecycle() {
         const currentUser = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
+        const lifecycleTile = document.getElementById('lifecycle-tile');
+        const lifecycleRailItem = document.getElementById('lifecycle-rail-item');
         if (!courseLifecycleSection) return;
 
         if (!currentUser || currentUser.role !== 'instructor') {
             courseLifecycleSection.style.display = 'none';
+            if (lifecycleTile) lifecycleTile.hidden = true;
+            if (lifecycleRailItem) lifecycleRailItem.hidden = true;
+            renderSettingsView();
             return;
         }
 
         courseLifecycleSection.style.display = '';
+        if (lifecycleTile) lifecycleTile.hidden = false;
+        if (lifecycleRailItem) lifecycleRailItem.hidden = false;
+        renderSettingsView();
 
         try {
             const courseId = await getCurrentCourseId();
@@ -905,31 +1503,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (toggleCourseActiveBtn) toggleCourseActiveBtn.disabled = true;
             if (transferCourseBtn) transferCourseBtn.disabled = true;
         }
-    }
-
-    // Handle mental health prompt reset button
-    const resetMHPromptBtn = document.getElementById('reset-mh-prompt');
-    if (resetMHPromptBtn) {
-        resetMHPromptBtn.addEventListener('click', async () => {
-            if (!confirm('Reset the mental health detection prompt to the default?')) return;
-            try {
-                const courseId = await getCurrentCourseId();
-                const response = await fetch('/api/settings/mental-health-prompt/reset', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ courseId })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    const textarea = document.getElementById('mental-health-detection-prompt');
-                    if (textarea) textarea.value = result.prompt || '';
-                    showNotification('Detection prompt reset to default', 'success');
-                }
-            } catch (error) {
-                console.error('Error resetting MH detection prompt:', error);
-                showNotification('Failed to reset detection prompt', 'error');
-            }
-        });
     }
 
     if (transferAllDocsToggle) {
@@ -1016,9 +1589,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     : 'Course copy created successfully.';
 
                 sessionStorage.setItem('settingsFlashMessage', JSON.stringify({
-                    message: warnings.length > 0
-                        ? `${summary} Switched to ${result.data.courseName}.`
-                        : `${summary} Switched to ${result.data.courseName}.`,
+                    message: `${summary} Switched to ${result.data.courseName}.`,
                     type: warnings.length > 0 ? 'info' : 'success'
                 }));
 
@@ -1041,93 +1612,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             } finally {
                 transferCourseBtn.disabled = false;
                 transferCourseBtn.textContent = previousLabel;
-            }
-        });
-    }
-
-    const resetAiSettingsBtn = document.getElementById('reset-ai-settings');
-    if (resetAiSettingsBtn) {
-        resetAiSettingsBtn.addEventListener('click', async () => {
-            if (!confirm('Reset AI settings for this course to defaults?')) return;
-
-            resetAiSettingsBtn.disabled = true;
-            resetAiSettingsBtn.textContent = 'Resetting...';
-            try {
-                const courseId = await getCurrentCourseId();
-                const response = await fetch('/api/settings/ai-settings/reset', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include',
-                    body: JSON.stringify({ courseId })
-                });
-                const result = await response.json();
-                if (!response.ok || !result.success) {
-                    throw new Error(result.message || 'Failed to reset AI settings');
-                }
-
-                const topKInput = document.getElementById('student-chat-topk-input');
-                const settings = result.settings || {};
-                if (topKInput) topKInput.value = settings.ragSettings?.student?.topK ?? 3;
-                // Reset clears bucket membership — uncheck every bucket in place
-                // (no re-fetch, so the reset defaults stay visible).
-                document.querySelectorAll('.course-superchat-checkbox').forEach((cb) => { cb.checked = false; });
-                showNotification('AI settings reset to defaults', 'success');
-            } catch (error) {
-                console.error('Error resetting AI settings:', error);
-                showNotification(error.message || 'Failed to reset AI settings', 'error');
-            } finally {
-                resetAiSettingsBtn.disabled = false;
-                resetAiSettingsBtn.textContent = 'Reset AI Settings to Default';
-            }
-        });
-    }
-
-    const resetSuperCourseSettingsBtn = document.getElementById('reset-super-course-settings');
-    if (resetSuperCourseSettingsBtn) {
-        resetSuperCourseSettingsBtn.addEventListener('click', async () => {
-            if (!confirm('Reset Super Course chat settings to defaults?')) return;
-
-            resetSuperCourseSettingsBtn.disabled = true;
-            resetSuperCourseSettingsBtn.textContent = 'Resetting...';
-            try {
-                const response = await fetch('/api/settings/super-course-chat/reset', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include'
-                });
-                const result = await response.json();
-                if (!response.ok || !result.success) {
-                    throw new Error(result.message || 'Failed to reset Super Course settings');
-                }
-
-                const settings = result.settings || {};
-                const instructorTopKInput = document.getElementById('super-instructor-topk-input');
-                const studentTopKInput = document.getElementById('super-student-topk-input');
-                const includeInactiveToggle = document.getElementById('include-inactive-super-course-toggle');
-                const showStudentToggle = document.getElementById('show-student-super-course-toggle');
-                const includeNotesToggle = document.getElementById('include-notes-super-course-toggle');
-                const noteRatioInput = document.getElementById('super-note-ratio-input');
-                const noteMinScoreInput = document.getElementById('super-note-min-score-input');
-                const instructorPrompt = document.getElementById('super-instructor-prompt');
-                const studentPrompt = document.getElementById('super-student-prompt');
-                if (instructorTopKInput) instructorTopKInput.value = settings.instructorTopK || 8;
-                if (studentTopKInput) studentTopKInput.value = settings.studentTopK || 8;
-                if (includeInactiveToggle) includeInactiveToggle.checked = settings.includeInactiveCourses === true;
-                if (showStudentToggle) showStudentToggle.checked = settings.showStudentSuperCourse === true;
-                if (includeNotesToggle) includeNotesToggle.checked = settings.includeNotesInRetrieval !== false;
-                if (noteRatioInput) noteRatioInput.value = settings.noteRetrievalRatio ?? 0.25;
-                if (noteMinScoreInput) noteMinScoreInput.value = settings.noteMinScore ?? 0.25;
-                if (instructorPrompt) instructorPrompt.value = settings.instructorPrompt || '';
-                if (studentPrompt) studentPrompt.value = settings.studentPrompt || '';
-                applyLevelModifiersToFields('super-student-level', SUPER_STUDENT_LEVELS, settings.studentLevelModifiers);
-                applyLevelModifiersToFields('super-instructor-level', SUPER_INSTRUCTOR_LEVELS, settings.instructorLevelModifiers);
-                showNotification('Super Course settings reset to defaults', 'success');
-            } catch (error) {
-                console.error('Error resetting Super Course settings:', error);
-                showNotification(error.message || 'Failed to reset Super Course settings', 'error');
-            } finally {
-                resetSuperCourseSettingsBtn.disabled = false;
-                resetSuperCourseSettingsBtn.textContent = 'Reset Super Course Settings to Default';
             }
         });
     }
@@ -1230,288 +1714,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // Handle save button click
-    if (saveSettingsBtn) {
-        saveSettingsBtn.addEventListener('click', async () => {
-            saveSettingsBtn.disabled = true;
-            saveSettingsBtn.textContent = 'Saving...';
-            
-            try {
-                // Save prompts and config
-                const base = document.getElementById('base-prompt')?.value;
-                const protege = document.getElementById('protege-prompt')?.value;
-                const tutor = document.getElementById('tutor-prompt')?.value;
-                const explain = document.getElementById('explain-prompt')?.value;
-                const directive = document.getElementById('directive-prompt')?.value;
-                const quizHelp = document.getElementById('quiz-help-prompt')?.value;
-                const additiveRetrieval = document.getElementById('additive-retrieval-toggle')?.checked;
-                const idleTimeoutInput = document.getElementById('idle-timeout-input');
-                const courseId = await getCurrentCourseId();
-                
-                // Convert minutes back to seconds
-                let studentIdleTimeout = 240;
-                if (idleTimeoutInput) {
-                    studentIdleTimeout = parseFloat(idleTimeoutInput.value) * 60;
-                }
-                
-                // Save login restriction setting if visible
-                const loginRestrictionSection = document.getElementById('login-restriction-section');
-                if (loginRestrictionSection && loginRestrictionSection.style.display !== 'none') {
-                    const allowLocalLogin = document.getElementById('allow-local-login-toggle')?.checked;
-
-                    await fetch('/api/settings/global', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ allowLocalLogin })
-                    });
-                }
-
-                // Save LLM model settings if section is visible (system admins only)
-                const llmModelSection = document.getElementById('llm-model-section');
-                if (llmModelSection && llmModelSection.style.display !== 'none') {
-                    const model = document.getElementById('llm-model-select')?.value;
-                    const reasoningEffort = document.getElementById('llm-reasoning-select')?.value || 'minimal';
-                    if (model) {
-                        await fetch('/api/settings/llm', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ model, reasoningEffort })
-                        });
-                    }
-                }
-
-                const aiSettingsSection = document.getElementById('ai-settings-section');
-                if (aiSettingsSection && aiSettingsSection.style.display !== 'none') {
-                    const superchatIds = collectCourseSuperchatIds();
-                    const studentTopK = Number(document.getElementById('student-chat-topk-input')?.value || 3);
-                    const aiResponse = await fetch('/api/settings/ai-settings', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'include',
-                        body: JSON.stringify({ courseId, superchatIds, studentTopK })
-                    });
-                    const aiResult = await aiResponse.json();
-                    if (!aiResponse.ok || !aiResult.success) {
-                        throw new Error(aiResult.message || 'Failed to save AI settings');
-                    }
-                }
-
-                const superCourseSection = document.getElementById('super-course-chat-section');
-                if (superCourseSection && superCourseSection.style.display !== 'none' && selectedSuperchatId) {
-                    const yearValue = document.getElementById('superchat-year-select')?.value || '';
-                    const superResponse = await fetch(`/api/superchats/${encodeURIComponent(selectedSuperchatId)}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'include',
-                        body: JSON.stringify({
-                            name: document.getElementById('superchat-name-input')?.value || '',
-                            yearLevel: yearValue ? Number(yearValue) : null,
-                            showToStudents: document.getElementById('show-student-super-course-toggle')?.checked === true,
-                            instructorTopK: Number(document.getElementById('super-instructor-topk-input')?.value || 8),
-                            studentTopK: Number(document.getElementById('super-student-topk-input')?.value || 8),
-                            includeInactiveCourses: document.getElementById('include-inactive-super-course-toggle')?.checked === true,
-                            includeNotesInRetrieval: document.getElementById('include-notes-super-course-toggle')?.checked !== false,
-                            noteRetrievalRatio: Number(document.getElementById('super-note-ratio-input')?.value ?? 0.25),
-                            noteMinScore: Number(document.getElementById('super-note-min-score-input')?.value ?? 0.25),
-                            instructorPrompt: document.getElementById('super-instructor-prompt')?.value || '',
-                            studentPrompt: document.getElementById('super-student-prompt')?.value || '',
-                            studentLevelModifiers: collectLevelModifiersFromFields('super-student-level', SUPER_STUDENT_LEVELS),
-                            instructorLevelModifiers: collectLevelModifiersFromFields('super-instructor-level', SUPER_INSTRUCTOR_LEVELS)
-                        })
-                    });
-                    const superResult = await superResponse.json();
-                    if (!superResponse.ok || !superResult.success) {
-                        throw new Error(superResult.message || 'Failed to save Super Course settings');
-                    }
-                    // Refresh the select label (name/course count may have changed).
-                    await loadSuperchatList(selectedSuperchatId);
-                }
-
-                // Save quiz practice settings
-                const quizEnabled = document.getElementById('quiz-enabled-toggle')?.checked;
-                const materialAccess = document.getElementById('quiz-material-access-toggle')?.checked;
-                const sourceAttributionDownloads = document.getElementById('source-attribution-download-toggle')?.checked;
-                const unitCheckboxes = document.querySelectorAll('.testable-unit-checkbox');
-                let testableUnits = 'all';
-                if (unitCheckboxes.length > 0) {
-                    const checkedUnits = Array.from(unitCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
-                    // If all are checked, store 'all'; otherwise store the selected names
-                    testableUnits = checkedUnits.length === unitCheckboxes.length ? 'all' : checkedUnits;
-                }
-
-                await fetch('/api/settings/quiz', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        courseId,
-                        enabled: quizEnabled === true,
-                        testableUnits,
-                        allowLectureMaterialAccess: materialAccess === true,
-                        allowSourceAttributionDownloads: sourceAttributionDownloads === true
-                    })
-                });
-
-                // Save course year level
-                const yearLevelSelect = document.getElementById('course-year-level-select');
-                if (yearLevelSelect && courseId) {
-                    const rawLevel = yearLevelSelect.value;
-                    const yearLevel = rawLevel === '' ? null : Number(rawLevel);
-                    const instructorId = getCurrentInstructorId();
-                    await fetch(`/api/courses/${courseId}?instructorId=${encodeURIComponent(instructorId)}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ instructorId, yearLevel })
-                    });
-                }
-
-                // Save mental health detection prompt
-                const mhDetectionPrompt = document.getElementById('mental-health-detection-prompt')?.value;
-                if (mhDetectionPrompt) {
-                    await fetch('/api/settings/mental-health-prompt', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ prompt: mhDetectionPrompt, courseId })
-                    });
-                }
-
-                // Save anonymize students setting
-                const anonymizeStudents = document.getElementById('anonymize-students-toggle')?.checked;
-                await fetch('/api/settings/anonymize-students', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ courseId, enabled: anonymizeStudents === true })
-                });
-
-                // Save question generation prompts if section is visible (system admins only)
-                const questionGenSection = document.getElementById('question-generation-section');
-                if (questionGenSection && questionGenSection.style.display !== 'none') {
-                    const systemPrompt = document.getElementById('question-system-prompt')?.value;
-                    const trueFalse = document.getElementById('question-true-false-prompt')?.value;
-                    const multipleChoice = document.getElementById('question-multiple-choice-prompt')?.value;
-                    const shortAnswer = document.getElementById('question-short-answer-prompt')?.value;
-                    
-                    if (systemPrompt && trueFalse && multipleChoice && shortAnswer) {
-                        await fetch('/api/settings/question-prompts', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ systemPrompt, trueFalse, multipleChoice, shortAnswer, courseId })
-                        });
-                    }
-                }
-                
-                if (base && protege && tutor) {
-                    const response = await fetch('/api/settings/prompts', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ base, protege, tutor, explain, directive, quizHelp, additiveRetrieval, studentIdleTimeout, courseId })
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (result.success) {
-                        showNotification('Settings saved successfully', 'success');
-                    } else {
-                        showNotification('Failed to save settings: ' + result.message, 'error');
-                    }
-                } else {
-                    // Fallback if inputs missing (shouldn't happen if HTML is correct)
-                    showNotification('Settings saved (simulated)', 'info');
-                }
-                
-            } catch (error) {
-                console.error('Error saving settings:', error);
-                showNotification('Error saving settings', 'error');
-            } finally {
-                saveSettingsBtn.disabled = false;
-                saveSettingsBtn.textContent = 'Save Settings';
-            }
-        });
-    }
-    
-    // Handle reset button click
-    if (resetSettingsBtn) {
-        resetSettingsBtn.addEventListener('click', async () => {
-            if (!confirm('Are you sure you want to reset all settings to default values?')) {
-                return;
-            }
-            
-            resetSettingsBtn.disabled = true;
-            resetSettingsBtn.textContent = 'Resetting...';
-            
-            try {
-                const courseId = await getCurrentCourseId();
-
-                // Reset prompts
-                const response = await fetch('/api/settings/prompts/reset', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ courseId })
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    // Reload values
-                    if (result.prompts) {
-                        const basePromptInput = document.getElementById('base-prompt');
-                        const protegePromptInput = document.getElementById('protege-prompt');
-                        const tutorPromptInput = document.getElementById('tutor-prompt');
-                        const explainPromptInput = document.getElementById('explain-prompt');
-                        const directivePromptInput = document.getElementById('directive-prompt');
-                        const additiveToggle = document.getElementById('additive-retrieval-toggle');
-                        
-                        if (basePromptInput) basePromptInput.value = result.prompts.base || '';
-                        if (protegePromptInput) protegePromptInput.value = result.prompts.protege || '';
-                        if (tutorPromptInput) tutorPromptInput.value = result.prompts.tutor || '';
-                        if (explainPromptInput) explainPromptInput.value = result.prompts.explain || '';
-                        if (directivePromptInput) directivePromptInput.value = result.prompts.directive || '';
-                        // Default for additive retrieval is true (on)
-                        if (additiveToggle) additiveToggle.checked = true;
-                        
-                        const idleTimeoutInput = document.getElementById('idle-timeout-input');
-                        if (idleTimeoutInput) idleTimeoutInput.value = 4; // Default 4 mins
-                    }
-                    
-                    // Reset quiz settings to defaults
-                    const quizEnabledToggle = document.getElementById('quiz-enabled-toggle');
-                    const materialAccessToggle = document.getElementById('quiz-material-access-toggle');
-                    const sourceAttributionDownloadToggle = document.getElementById('source-attribution-download-toggle');
-                    if (quizEnabledToggle) quizEnabledToggle.checked = false;
-                    if (materialAccessToggle) materialAccessToggle.checked = true;
-                    if (sourceAttributionDownloadToggle) sourceAttributionDownloadToggle.checked = false;
-                    // Check all unit checkboxes
-                    document.querySelectorAll('.testable-unit-checkbox').forEach(cb => { cb.checked = true; });
-                    // Save quiz defaults
-                    await fetch('/api/settings/quiz', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            courseId,
-                            enabled: false,
-                            testableUnits: 'all',
-                            allowLectureMaterialAccess: true,
-                            allowSourceAttributionDownloads: false
-                        })
-                    });
-
-                    showNotification('Settings reset to defaults', 'success');
-                } else {
-                    showNotification('Failed to reset settings: ' + result.message, 'error');
-                }
-                
-            } catch (error) {
-                console.error('Error resetting settings:', error);
-                showNotification('Error resetting settings', 'error');
-            } finally {
-                resetSettingsBtn.disabled = false;
-                resetSettingsBtn.textContent = 'Reset to Default';
-            }
-        });
-    }
+    /* =============================================
+       Database management + system admin actions
+       ============================================= */
 
     // Handle delete collection button click
     if (deleteCollectionBtn) {
@@ -1550,12 +1755,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 if (result.success) {
                     showNotification(
-                        `All data deleted successfully! Qdrant: ${result.data.qdrantDeletedCount}, MongoDB: ${result.data.mongoDeletedCount} documents removed.`, 
+                        `All data deleted successfully! Qdrant: ${result.data.qdrantDeletedCount}, MongoDB: ${result.data.mongoDeletedCount} documents removed.`,
                         'success'
                     );
                 } else {
                     showNotification(
-                        `Failed to delete data: ${result.message || 'Unknown error'}`, 
+                        `Failed to delete data: ${result.message || 'Unknown error'}`,
                         'error'
                     );
                 }
@@ -1563,7 +1768,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             } catch (error) {
                 console.error('Error deleting data:', error);
                 showNotification(
-                    'Failed to delete data: Network or server error', 
+                    'Failed to delete data: Network or server error',
                     'error'
                 );
             } finally {
@@ -1661,110 +1866,47 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // Handle reset question prompts button click (system admins only)
-    const resetQuestionPromptsBtn = document.getElementById('reset-question-prompts');
-    if (resetQuestionPromptsBtn) {
-        resetQuestionPromptsBtn.addEventListener('click', async () => {
-            if (!confirm('Are you sure you want to reset all question generation prompts to default values? This only affects the current course.')) {
-                return;
-            }
-            
-            resetQuestionPromptsBtn.disabled = true;
-            resetQuestionPromptsBtn.textContent = 'Resetting...';
-            
-            try {
-                const courseId = await getCurrentCourseId();
-                
-                const response = await fetch('/api/settings/question-prompts/reset', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ courseId })
-                });
-                
-                const result = await response.json();
-                
-                if (result.success && result.prompts) {
-                    // Reload the textareas with default values
-                    const systemPromptInput = document.getElementById('question-system-prompt');
-                    const trueFalseInput = document.getElementById('question-true-false-prompt');
-                    const multipleChoiceInput = document.getElementById('question-multiple-choice-prompt');
-                    const shortAnswerInput = document.getElementById('question-short-answer-prompt');
-                    
-                    if (systemPromptInput) systemPromptInput.value = result.prompts.systemPrompt || '';
-                    if (trueFalseInput) trueFalseInput.value = result.prompts.trueFalse || '';
-                    if (multipleChoiceInput) multipleChoiceInput.value = result.prompts.multipleChoice || '';
-                    if (shortAnswerInput) shortAnswerInput.value = result.prompts.shortAnswer || '';
-                    
-                    showNotification('Question prompts reset to defaults', 'success');
-                } else {
-                    showNotification('Failed to reset question prompts: ' + (result.message || 'Unknown error'), 'error');
-                }
-            } catch (error) {
-                console.error('Error resetting question prompts:', error);
-                showNotification('Error resetting question prompts', 'error');
-            } finally {
-                resetQuestionPromptsBtn.disabled = false;
-                resetQuestionPromptsBtn.textContent = 'Reset Question Prompts to Default';
-            }
-        });
-    }
-    
     /**
-     * Check if the current user has system admin access
-     * Hides the entire privileged section set if the user does not
-     * Returns true if user has permission
+     * Check if the current user has system admin access.
+     * Toggles the admin-only sections, hub tiles, and rail links.
+     * Returns true if user has permission.
      */
     async function checkDeleteAllPermission() {
+        const adminSectionIds = [
+            'database-management-section',
+            'login-restriction-section',
+            'question-generation-section',
+            'mental-health-detection-section',
+            'system-admin-section',
+            'llm-model-section'
+        ];
+
+        function setAdminVisibility(isAdmin) {
+            adminSectionIds.forEach(id => {
+                const section = document.getElementById(id);
+                if (section) section.style.display = isAdmin ? '' : 'none';
+            });
+            const adminTileGroup = document.getElementById('admin-tile-group');
+            const adminRailGroup = document.getElementById('admin-rail-group');
+            if (adminTileGroup) adminTileGroup.hidden = !isAdmin;
+            if (adminRailGroup) adminRailGroup.hidden = !isAdmin;
+            renderSettingsView();
+        }
+
         try {
             const response = await fetch('/api/settings/can-delete-all', {
                 credentials: 'include'
             });
-            
-            const result = await response.json();
-            
-            // Get all privileged sections by ID
-            const databaseSection = document.getElementById('database-management-section');
-            const loginRestrictionSection = document.getElementById('login-restriction-section');
-            const questionGenerationSection = document.getElementById('question-generation-section');
-            const mhDetectionSection = document.getElementById('mental-health-detection-section');
-            const adminSection = document.getElementById('system-admin-section');
-            const llmModelSection = document.getElementById('llm-model-section');
 
-            if (result.success && result.canDeleteAll) {
-                // User has permission, ensure the sections are visible
-                if (databaseSection) databaseSection.style.display = '';
-                if (loginRestrictionSection) loginRestrictionSection.style.display = '';
-                if (questionGenerationSection) questionGenerationSection.style.display = '';
-                if (mhDetectionSection) mhDetectionSection.style.display = '';
-                if (adminSection) adminSection.style.display = '';
-                if (llmModelSection) llmModelSection.style.display = '';
-                return true;
-            } else {
-                // User doesn't have permission, hide the sections
-                if (databaseSection) databaseSection.style.display = 'none';
-                if (loginRestrictionSection) loginRestrictionSection.style.display = 'none';
-                if (questionGenerationSection) questionGenerationSection.style.display = 'none';
-                if (mhDetectionSection) mhDetectionSection.style.display = 'none';
-                if (adminSection) adminSection.style.display = 'none';
-                if (llmModelSection) llmModelSection.style.display = 'none';
-                return false;
-            }
+            const result = await response.json();
+            const isAdmin = !!(result.success && result.canDeleteAll);
+            setAdminVisibility(isAdmin);
+            return isAdmin;
         } catch (error) {
             console.error('Error checking delete all permission:', error);
             // On error, hide the sections for security
-            const databaseSection = document.getElementById('database-management-section');
-            const loginRestrictionSection = document.getElementById('login-restriction-section');
-            const questionGenerationSection = document.getElementById('question-generation-section');
-            const mhDetectionSection = document.getElementById('mental-health-detection-section');
-            const adminSection = document.getElementById('system-admin-section');
-            const llmModelSection = document.getElementById('llm-model-section');
-            if (databaseSection) databaseSection.style.display = 'none';
-            if (loginRestrictionSection) loginRestrictionSection.style.display = 'none';
-            if (questionGenerationSection) questionGenerationSection.style.display = 'none';
-            if (mhDetectionSection) mhDetectionSection.style.display = 'none';
-            if (adminSection) adminSection.style.display = 'none';
-            if (llmModelSection) llmModelSection.style.display = 'none';
+            setAdminVisibility(false);
             return false;
         }
     }
-}); 
+});
