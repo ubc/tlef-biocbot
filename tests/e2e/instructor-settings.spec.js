@@ -305,6 +305,28 @@ async function openSettings(page, courseId = SETTINGS_COURSE_ID) {
     await expect(page.locator('#transfer-unit-grid .transfer-unit-row')).toHaveCount(2, { timeout: 15_000 });
 }
 
+async function openSettingsPanel(page, panelName) {
+    const hub = page.locator('#settings-hub');
+    if (await hub.isVisible()) {
+        await page.locator(`.settings-tile[data-panel="${panelName}"]`).click();
+    } else {
+        await page.locator(`.settings-rail-link[data-panel="${panelName}"]`).click();
+    }
+
+    await expect(page).toHaveURL(new RegExp(`#${panelName}$`));
+    await expect(page.locator('#settings-hub')).toBeHidden();
+    await expect(page.locator('#settings-panels')).toBeVisible();
+    await expect(page.locator(`#settings-panel-${panelName}`)).toBeVisible();
+    await expect(page.locator(`.settings-rail-link[data-panel="${panelName}"]`)).toHaveAttribute('aria-current', 'true');
+}
+
+async function returnToSettingsHub(page) {
+    await page.locator('.settings-rail-back').click();
+    await expect(page).toHaveURL(/\/instructor\/settings(?:\?[^#]*)?#?$/);
+    await expect(page.locator('#settings-hub')).toBeVisible();
+    await expect(page.locator('#settings-panels')).toBeHidden();
+}
+
 async function setInputChecked(page, selector, checked) {
     await page.evaluate(
         ({ selector, checked }) => {
@@ -460,6 +482,23 @@ async function setupMockedSettingsRoutes(page, options = {}) {
         if (pathname === '/api/settings/prompts') {
             if (method === 'POST') {
                 await route.fulfill(jsonResponse(state.promptSaveResult));
+                return;
+            }
+
+            if (!requestUrl.searchParams.has('courseId')) {
+                await route.fulfill(jsonResponse({
+                    success: true,
+                    prompts: {
+                        base: 'Default base prompt',
+                        protege: 'Default protege prompt',
+                        tutor: 'Default tutor prompt',
+                        explain: 'Default explain prompt',
+                        directive: 'Default directive prompt',
+                        quizHelp: 'Default quiz help prompt',
+                        additiveRetrieval: true,
+                        studentIdleTimeout: 240,
+                    },
+                }));
                 return;
             }
 
@@ -759,44 +798,88 @@ test.describe('Instructor settings UI', () => {
     test('hides system-admin-only settings for a regular instructor and loads course-scoped settings', async ({ page }) => {
         await openSettings(page);
 
+        await expect(page.locator('#settings-hub')).toBeVisible();
+        await expect(page.locator('#settings-panels')).toBeHidden();
+        await expect(page.locator('.settings-tile:visible')).toHaveCount(7);
+        await expect(page.locator('.settings-tile[data-panel="course-basics"]')).toContainText('Course basics');
+        await expect(page.locator('.settings-tile[data-panel="student-chat"]')).toContainText('Student chat');
+        await expect(page.locator('.settings-tile[data-panel="super-course"]')).toContainText('Super course');
+        await expect(page.locator('#admin-tile-group')).toBeHidden();
+        await expect(page.locator('#admin-rail-group')).toBeHidden();
         await expect(page.locator('#database-management-section')).toBeHidden();
         await expect(page.locator('#login-restriction-section')).toBeHidden();
         await expect(page.locator('#question-generation-section')).toBeHidden();
         await expect(page.locator('#mental-health-detection-section')).toBeHidden();
         await expect(page.locator('#system-admin-section')).toBeHidden();
         await expect(page.locator('#llm-model-section')).toBeHidden();
-        // Super Course settings (per-course bucket membership + bucket management)
-        // are open to instructors, not just admins.
-        await expect(page.locator('#ai-settings-section')).toBeVisible();
-        await expect(page.locator('#super-course-chat-section')).toBeVisible();
 
-        await expect(page.locator('#idle-timeout-input')).toHaveValue('3');
+        await openSettingsPanel(page, 'student-chat');
+        await expect(page.locator('#student-chat-section')).toBeVisible();
+        await expect(page.locator('#student-chat-topk-input')).toHaveValue('6');
         await expect(page.locator('#additive-retrieval-toggle')).not.toBeChecked();
         await expect(page.locator('#additional-material-secondary-toggle')).not.toBeChecked();
+        await expect(page.locator('#source-attribution-download-toggle')).not.toBeChecked();
+
+        await openSettingsPanel(page, 'super-course');
+        await expect(page.locator('#course-superchats-section')).toBeVisible();
+        await expect(page.locator('#super-course-chat-section')).toBeVisible();
+
+        await openSettingsPanel(page, 'privacy');
+        await expect(page.locator('#idle-timeout-input')).toHaveValue('3');
         await expect(page.locator('#anonymize-students-toggle')).not.toBeChecked();
+
+        await openSettingsPanel(page, 'quiz');
         await expect(page.locator('#quiz-enabled-toggle')).toBeChecked();
         await expect(page.locator('.testable-unit-checkbox[value="Unit 1"]')).toBeChecked();
         await expect(page.locator('.testable-unit-checkbox[value="Unit 2"]')).not.toBeChecked();
     });
 
+    test('navigates settings hub tiles, rail links, and back control', async ({ page }) => {
+        await openSettings(page);
+
+        await openSettingsPanel(page, 'student-chat');
+        await expect(page.locator('#settings-panel-student-chat .settings-panel-title')).toHaveText('Student chat');
+        await expect(page.locator('.settings-rail-link[aria-current="true"]')).toHaveText('Student chat');
+
+        await openSettingsPanel(page, 'privacy');
+        await expect(page.locator('#settings-panel-privacy .settings-panel-title')).toHaveText('Privacy & sessions');
+        await expect(page.locator('.settings-rail-link[aria-current="true"]')).toHaveText('Privacy & sessions');
+        await expect(page.locator('.settings-rail-link[data-panel="student-chat"]')).not.toHaveAttribute('aria-current', 'true');
+
+        await returnToSettingsHub(page);
+        await openSettingsPanel(page, 'lifecycle');
+        await expect(page.locator('#settings-panel-lifecycle .settings-panel-title')).toHaveText('Course lifecycle');
+    });
+
     test('saves prompts, retrieval, idle timeout, quiz download, and anonymize settings for the selected course', async ({ page }) => {
         await openSettings(page);
 
+        await openSettingsPanel(page, 'prompts');
         await page.locator('#base-prompt').fill('Updated base prompt from settings UI');
         await page.locator('#protege-prompt').fill('Updated protege prompt from settings UI');
         await page.locator('#tutor-prompt').fill('Updated tutor prompt from settings UI');
         await page.locator('#explain-prompt').fill('Updated explain prompt from settings UI');
         await page.locator('#directive-prompt').fill('Updated directive prompt from settings UI');
         await page.locator('#quiz-help-prompt').fill('Updated quiz help prompt from settings UI');
+        await page.locator('#save-prompts').click();
+        await expect(page.locator('.notification.success', { hasText: 'Prompts saved' })).toBeVisible({
+            timeout: 10_000,
+        });
+
+        await openSettingsPanel(page, 'privacy');
         await page.locator('#idle-timeout-input').fill('5.5');
+        await setInputChecked(page, '#anonymize-students-toggle', true);
+        await page.locator('#save-privacy-settings').click();
+        await expect(page.locator('.notification.success', { hasText: 'Privacy settings saved' })).toBeVisible({
+            timeout: 10_000,
+        });
+
+        await openSettingsPanel(page, 'student-chat');
         await setInputChecked(page, '#additive-retrieval-toggle', true);
         await setInputChecked(page, '#additional-material-secondary-toggle', true);
         await setInputChecked(page, '#source-attribution-download-toggle', true);
-        await setInputChecked(page, '#anonymize-students-toggle', true);
-
-        await page.locator('#save-settings').click();
-
-        await expect(page.locator('.notification.success', { hasText: 'Settings saved successfully' })).toBeVisible({
+        await page.locator('#save-student-chat').click();
+        await expect(page.locator('.notification.success', { hasText: 'Student chat settings saved' })).toBeVisible({
             timeout: 10_000,
         });
 
@@ -834,21 +917,29 @@ test.describe('Instructor settings UI', () => {
         await setSystemAdmin(instructorId, true);
         await openSettings(page);
 
-        await expect(page.locator('#database-management-section')).toBeVisible();
-        await expect(page.locator('#login-restriction-section')).toBeVisible();
+        await expect(page.locator('#admin-tile-group')).toBeVisible();
+        await expect(page.locator('#admin-rail-group')).toBeHidden();
+
+        await openSettingsPanel(page, 'admin-safety');
         await expect(page.locator('#question-generation-section')).toBeVisible();
         await expect(page.locator('#mental-health-detection-section')).toBeVisible();
-        await expect(page.locator('#system-admin-section')).toBeVisible();
-        await expect(page.locator('#llm-model-section')).toBeVisible();
-        await expect(page.locator('#ai-settings-section')).toBeVisible();
-        await expect(page.locator('#super-course-chat-section')).toBeVisible();
         await expect(page.locator('#mental-health-detection-prompt')).toHaveValue('Seed mental health detection prompt');
         await expect(page.locator('#question-system-prompt')).toHaveValue('Seed question system prompt');
+
+        await openSettingsPanel(page, 'student-chat');
+        await expect(page.locator('#student-chat-section')).toBeVisible();
         await expect(page.locator('#student-chat-topk-input')).toHaveValue('6');
         // NOTE: Super Course bucket membership + bucket management are covered by
         // the dedicated superchats specs; this test focuses on the admin-only
         // controls (LLM model rules, login restriction) plus per-course Top-K.
 
+        await openSettingsPanel(page, 'super-course');
+        await expect(page.locator('#course-superchats-section')).toBeVisible();
+        await expect(page.locator('#super-course-chat-section')).toBeVisible();
+
+        await openSettingsPanel(page, 'admin-platform');
+        await expect(page.locator('#admin-rail-group')).toBeVisible();
+        await expect(page.locator('#llm-model-section')).toBeVisible();
         await expect(page.locator('#llm-model-select')).toHaveValue('gpt-5-nano');
         await expect(page.locator('#llm-reasoning-item')).toBeVisible();
         await expect(page.locator('#llm-reasoning-select')).toHaveValue('minimal');
@@ -856,11 +947,24 @@ test.describe('Instructor settings UI', () => {
         await page.locator('#llm-model-select').selectOption('gpt-5.4-nano');
         await expect(page.locator('#llm-reasoning-select')).toHaveValue('low');
         await expect(page.locator('#llm-reasoning-select option[value="minimal"]')).toBeDisabled();
-        await setInputChecked(page, '#allow-local-login-toggle', false);
-        await page.locator('#student-chat-topk-input').fill('4');
+        await page.locator('#save-llm-settings').click();
+        await expect(page.locator('.notification.success', { hasText: 'Model settings saved' })).toBeVisible({
+            timeout: 10_000,
+        });
 
-        await page.locator('#save-settings').click();
-        await expect(page.locator('.notification.success', { hasText: 'Settings saved successfully' })).toBeVisible({
+        await openSettingsPanel(page, 'admin-access');
+        await expect(page.locator('#login-restriction-section')).toBeVisible();
+        await expect(page.locator('#system-admin-section')).toBeVisible();
+        await setInputChecked(page, '#allow-local-login-toggle', false);
+        await page.locator('#save-access-settings').click();
+        await expect(page.locator('.notification.success', { hasText: 'Login settings saved' })).toBeVisible({
+            timeout: 10_000,
+        });
+
+        await openSettingsPanel(page, 'student-chat');
+        await page.locator('#student-chat-topk-input').fill('4');
+        await page.locator('#save-student-chat').click();
+        await expect(page.locator('.notification.success', { hasText: 'Student chat settings saved' })).toBeVisible({
             timeout: 10_000,
         });
 
@@ -886,7 +990,7 @@ test.describe('Instructor settings UI', () => {
 
     test('deactivates and reactivates the selected course from the lifecycle panel', async ({ page }) => {
         await openSettings(page);
-        await page.locator('#course-lifecycle-section').scrollIntoViewIfNeeded();
+        await openSettingsPanel(page, 'lifecycle');
 
         await expect(page.locator('#course-status-badge')).toHaveText('Active');
         page.once('dialog', (dialog) => dialog.accept());
@@ -911,7 +1015,7 @@ test.describe('Instructor settings UI', () => {
     test('previews transfer selections and creates a course copy with selected units and options', async ({ page }) => {
         const copyName = `${SETTINGS_COPY_NAME_PREFIX} ${Date.now()}`;
         await openSettings(page);
-        await page.locator('#course-lifecycle-section').scrollIntoViewIfNeeded();
+        await openSettingsPanel(page, 'lifecycle');
 
         await page.locator('#transfer-course-name').fill(copyName);
         await setInputChecked(page, '#transfer-settings-toggle', false);
@@ -957,42 +1061,68 @@ test.describe('Instructor settings UI', () => {
         expect(unit2.assessmentQuestions).toHaveLength(1);
     });
 
-    test('resets course prompts and quiz defaults after confirmation', async ({ page }) => {
+    test('resets section defaults after confirmation', async ({ page }) => {
         await openMockedSettings(page, { canDeleteAll: false });
 
+        await openSettingsPanel(page, 'prompts');
         await page.locator('#base-prompt').fill('Dirty base prompt');
-        await setInputChecked(page, '#quiz-enabled-toggle', true);
-        await setInputChecked(page, '#quiz-material-access-toggle', false);
-        await setInputChecked(page, '#source-attribution-download-toggle', true);
-        await setInputChecked(page, '.testable-unit-checkbox[value="Unit 1"]', false);
 
         page.once('dialog', (dialog) => dialog.dismiss());
-        await page.locator('#reset-settings').click();
+        await page.locator('#reset-prompts').click();
         await expect(page.locator('#base-prompt')).toHaveValue('Dirty base prompt');
 
         page.once('dialog', (dialog) => dialog.accept());
-        await page.locator('#reset-settings').click();
+        await page.locator('#reset-prompts').click();
 
         await expect(page.locator('#base-prompt')).toHaveValue('Default base prompt');
         await expect(page.locator('#protege-prompt')).toHaveValue('Default protege prompt');
         await expect(page.locator('#tutor-prompt')).toHaveValue('Default tutor prompt');
         await expect(page.locator('#explain-prompt')).toHaveValue('Default explain prompt');
         await expect(page.locator('#directive-prompt')).toHaveValue('Default directive prompt');
+        await expect(page.locator('#quiz-help-prompt')).toHaveValue('Default quiz help prompt');
+        await expect(page.locator('.notification.success', { hasText: 'Prompts reset to defaults' })).toBeVisible();
+
+        await openSettingsPanel(page, 'student-chat');
+        await setInputChecked(page, '#additive-retrieval-toggle', false);
+        await setInputChecked(page, '#additional-material-secondary-toggle', true);
+        await setInputChecked(page, '#source-attribution-download-toggle', true);
+        page.once('dialog', (dialog) => dialog.accept());
+        await page.locator('#reset-student-chat').click();
         await expect(page.locator('#additive-retrieval-toggle')).toBeChecked();
+        await expect(page.locator('#additional-material-secondary-toggle')).not.toBeChecked();
+        await expect(page.locator('#source-attribution-download-toggle')).not.toBeChecked();
+        await expect(page.locator('#student-chat-topk-input')).toHaveValue('3');
+        await expect(page.locator('.notification.success', { hasText: 'Student chat settings reset to defaults' })).toBeVisible();
+
+        await openSettingsPanel(page, 'privacy');
+        await page.locator('#idle-timeout-input').fill('9');
+        await setInputChecked(page, '#anonymize-students-toggle', true);
+        page.once('dialog', (dialog) => dialog.accept());
+        await page.locator('#reset-privacy-settings').click();
         await expect(page.locator('#idle-timeout-input')).toHaveValue('4');
+        await expect(page.locator('#anonymize-students-toggle')).not.toBeChecked();
+        await expect(page.locator('.notification.success', { hasText: 'Privacy settings reset to defaults' })).toBeVisible();
+
+        await openSettingsPanel(page, 'quiz');
+        await setInputChecked(page, '#quiz-enabled-toggle', true);
+        await setInputChecked(page, '#quiz-material-access-toggle', false);
+        await setInputChecked(page, '.testable-unit-checkbox[value="Unit 1"]', false);
+        page.once('dialog', (dialog) => dialog.accept());
+        await page.locator('#reset-quiz-settings').click();
         await expect(page.locator('#quiz-enabled-toggle')).not.toBeChecked();
         await expect(page.locator('#quiz-material-access-toggle')).toBeChecked();
-        await expect(page.locator('#source-attribution-download-toggle')).not.toBeChecked();
         await expect(page.locator('.testable-unit-checkbox[value="Unit 1"]')).toBeChecked();
-        await expect(page.locator('.notification.success', { hasText: 'Settings reset to defaults' })).toBeVisible();
+        await expect(page.locator('.notification.success', { hasText: 'Quiz settings reset to defaults' })).toBeVisible();
     });
 
     test('covers admin reset, delete-all, and system-admin management states', async ({ page }) => {
         const state = await openMockedSettings(page);
-        await page.locator('#system-admin-section').scrollIntoViewIfNeeded();
 
+        await openSettingsPanel(page, 'admin-platform');
         await expect(page.locator('#llm-model-select')).toHaveValue('gpt-4.1-mini');
         await expect(page.locator('#llm-reasoning-item')).toBeHidden();
+
+        await openSettingsPanel(page, 'admin-access');
         await expect(page.locator('#system-admin-list')).toContainText('E2E Instructor');
         await expect(page.locator('#system-admin-list')).toContainText('You');
         await expect(page.locator('#system-admin-list')).toContainText('<Fresh & Admin>');
@@ -1025,6 +1155,7 @@ test.describe('Instructor settings UI', () => {
         await freshRevoke.click();
         await expect(page.locator('.notification.error', { hasText: 'Revoke rejected' })).toBeVisible();
 
+        await openSettingsPanel(page, 'admin-safety');
         page.once('dialog', (dialog) => dialog.dismiss());
         await page.locator('#reset-mh-prompt').click();
         await expect(page.locator('#mental-health-detection-prompt')).toHaveValue('Mock detection prompt');
@@ -1042,13 +1173,15 @@ test.describe('Instructor settings UI', () => {
         await expect(page.locator('#question-short-answer-prompt')).toHaveValue('Default short answer');
         await expect(page.locator('.notification.success', { hasText: 'Question prompts reset to defaults' })).toBeVisible();
 
+        await openSettingsPanel(page, 'student-chat');
         page.once('dialog', (dialog) => dialog.accept());
-        await page.locator('#reset-ai-settings').click();
+        await page.locator('#reset-student-chat').click();
         await expect(page.locator('#student-chat-topk-input')).toHaveValue('3');
-        await expect(page.locator('.notification.success', { hasText: 'AI settings reset to defaults' })).toBeVisible();
+        await expect(page.locator('.notification.success', { hasText: 'Student chat settings reset to defaults' })).toBeVisible();
         // (Super Course bucket reset/management is covered by the dedicated
         // superchats specs; the standalone "reset super course" button is gone.)
 
+        await openSettingsPanel(page, 'admin-database');
         page.once('dialog', (dialog) => dialog.dismiss());
         await page.locator('#delete-collection').click();
         await expect(page.locator('#delete-collection')).toHaveText('Delete All Data');
@@ -1069,7 +1202,7 @@ test.describe('Instructor settings UI', () => {
 
     test('handles transfer validation, master toggles, modal closing, errors, and warning success', async ({ page }) => {
         const state = await openMockedSettings(page, { canDeleteAll: false });
-        await page.locator('#course-lifecycle-section').scrollIntoViewIfNeeded();
+        await openSettingsPanel(page, 'lifecycle');
 
         await page.locator('#transfer-course-name').fill('');
         await page.locator('#transfer-course-btn').click();
@@ -1131,7 +1264,7 @@ test.describe('Instructor settings UI', () => {
 
     test('handles lifecycle cancel and API failure without changing status', async ({ page }) => {
         const state = await openMockedSettings(page, { canDeleteAll: false });
-        await page.locator('#course-lifecycle-section').scrollIntoViewIfNeeded();
+        await openSettingsPanel(page, 'lifecycle');
 
         page.once('dialog', (dialog) => dialog.dismiss());
         await page.locator('#toggle-course-active-btn').click();
@@ -1164,10 +1297,16 @@ test.describe('Instructor settings UI', () => {
         await page.goto('/instructor/settings?courseId=MOCK-SETTINGS');
         await expect(page.locator('h1')).toHaveText('Settings', { timeout: 15_000 });
 
+        await openSettingsPanel(page, 'admin-access');
         await expect(page.locator('#system-admin-list')).toContainText('No system admins found.');
+
+        await openSettingsPanel(page, 'lifecycle');
         await expect(page.locator('#transfer-unit-grid')).toContainText('No units found for this course yet.');
+
+        await openSettingsPanel(page, 'quiz');
         await expect(page.locator('#testable-units-container')).toContainText('Loading units...');
 
+        await openSettingsPanel(page, 'prompts');
         await page.locator('#base-prompt').fill('Mock base prompt');
         await page.locator('#protege-prompt').fill('Mock protege prompt');
         await page.locator('#tutor-prompt').fill('Mock tutor prompt');
@@ -1177,8 +1316,8 @@ test.describe('Instructor settings UI', () => {
             promptSaveResult: { success: false, message: 'Prompt save rejected' },
         });
         state.abortPaths.add('/api/settings/quiz');
-        await page.locator('#save-settings').click();
-        await expect(page.locator('.notification.error', { hasText: 'Error saving settings' })).toBeVisible();
+        await page.locator('#save-prompts').click();
+        await expect(page.locator('.notification.error', { hasText: 'Prompt save rejected' })).toBeVisible();
     });
 
     test('uses defensive lifecycle states when course context or course load is missing', async ({ page }) => {
@@ -1248,33 +1387,26 @@ test.describe('Instructor settings UI', () => {
             promptSaveResult: { success: false, message: 'Prompt save rejected' },
         });
 
+        await openSettingsPanel(page, 'admin-access');
         await expect(page.locator('#system-admin-list')).toContainText('Failed to load system admins.');
 
+        await openSettingsPanel(page, 'prompts');
         await page.locator('#base-prompt').fill('Mock base prompt');
         await page.locator('#protege-prompt').fill('Mock protege prompt');
         await page.locator('#tutor-prompt').fill('Mock tutor prompt');
-        await page.locator('#save-settings').click();
-        await expect(page.locator('.notification.error', { hasText: 'Failed to save settings: Prompt save rejected' })).toBeVisible();
+        await page.locator('#save-prompts').click();
+        await expect(page.locator('.notification.error', { hasText: 'Prompt save rejected' })).toBeVisible();
 
-        state.promptResetResult = {
-            success: false,
-            message: 'Reset rejected',
-            prompts: { base: '', protege: '', tutor: '', explain: '', directive: '' },
-        };
         page.once('dialog', (dialog) => dialog.accept());
-        await page.locator('#reset-settings').click();
-        await expect(page.locator('.notification.error', { hasText: 'Failed to reset settings: Reset rejected' })).toBeVisible();
+        await page.locator('#reset-prompts').click();
+        await expect(page.locator('.notification.error', { hasText: 'Prompt save rejected' }).last()).toBeVisible();
 
-        state.abortPaths.add('/api/settings/prompts/reset');
-        page.once('dialog', (dialog) => dialog.accept());
-        await page.locator('#reset-settings').click();
-        await expect(page.locator('.notification.error', { hasText: 'Error resetting settings' })).toBeVisible();
-        state.abortPaths.delete('/api/settings/prompts/reset');
+        await openSettingsPanel(page, 'admin-safety');
 
         state.abortPaths.add('/api/settings/mental-health-prompt/reset');
         page.once('dialog', (dialog) => dialog.accept());
         await page.locator('#reset-mh-prompt').click();
-        await expect(page.locator('.notification.error', { hasText: 'Failed to reset detection prompt' })).toBeVisible();
+        await expect(page.locator('.notification.error', { hasText: 'Failed to fetch' })).toBeVisible();
         state.abortPaths.delete('/api/settings/mental-health-prompt/reset');
 
         state.questionResetResult = {
@@ -1288,20 +1420,22 @@ test.describe('Instructor settings UI', () => {
 
         page.once('dialog', (dialog) => dialog.accept());
         await page.locator('#reset-question-prompts').click();
-        await expect(page.locator('.notification.error', { hasText: 'Failed to reset question prompts: Question reset rejected' })).toBeVisible();
+        await expect(page.locator('.notification.error', { hasText: 'Question reset rejected' })).toBeVisible();
 
         state.abortPaths.add('/api/settings/question-prompts/reset');
         page.once('dialog', (dialog) => dialog.accept());
         await page.locator('#reset-question-prompts').click();
-        await expect(page.locator('.notification.error', { hasText: 'Error resetting question prompts' })).toBeVisible();
+        await expect(page.locator('.notification.error', { hasText: 'Failed to fetch' }).last()).toBeVisible();
         state.abortPaths.delete('/api/settings/question-prompts/reset');
 
+        await openSettingsPanel(page, 'admin-database');
         state.abortPaths.add('/api/qdrant/delete-all-collections');
         page.once('dialog', (dialog) => dialog.accept());
         await page.locator('#delete-collection').click();
         await expect(page.locator('.notification.error', { hasText: 'Failed to delete data: Network or server error' })).toBeVisible();
         state.abortPaths.delete('/api/qdrant/delete-all-collections');
 
+        await openSettingsPanel(page, 'admin-access');
         state.systemAdminListError = false;
         state.abortPaths.add('/api/settings/system-admins');
         await page.locator('#system-admin-email-input').fill('grant-catch@test.local');
@@ -1335,6 +1469,7 @@ test.describe('Instructor settings UI', () => {
         await closeButtons.first().click();
         await expect.poll(async () => closeButtons.count()).toBe(closeButtonCount - 1);
 
+        await openSettingsPanel(page, 'lifecycle');
         await setInputChecked(page, '#transfer-all-objectives', false);
         await expect(page.locator('.transfer-objectives-checkbox:checked')).toHaveCount(0);
         await setInputChecked(page, '#transfer-all-questions', false);
