@@ -181,6 +181,7 @@ test.describe('prompts (course-level)', () => {
                 base: 'B', protege: 'P', tutor: 'T', explain: 'E', directive: 'D',
                 quizHelp: 'Q',
                 additiveRetrieval: true,
+                additionalMaterialSecondarySearch: true,
                 studentIdleTimeout: 300,
             },
         });
@@ -190,7 +191,16 @@ test.describe('prompts (course-level)', () => {
         );
         expect(doc.prompts.base).toBe('B');
         expect(doc.isAdditiveRetrieval).toBe(true);
+        expect(doc.additionalMaterialSecondarySearch).toBe(true);
         expect(doc.prompts.studentIdleTimeout).toBe(300);
+    });
+
+    test('GET /prompts defaults additionalMaterialSecondarySearch to false when unset', async ({ request: api }) => {
+        await seedCourse({ courseId: COURSE_A, instructorId });
+        const res = await api.get(`/api/settings/prompts?courseId=${COURSE_A}`);
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.prompts.additionalMaterialSecondarySearch).toBe(false);
     });
 
     test('POST /prompts/reset 400 when courseId missing', async ({ request: api }) => {
@@ -202,7 +212,7 @@ test.describe('prompts (course-level)', () => {
         await seedCourse({
             courseId: COURSE_A,
             instructorId,
-            overrides: { prompts: { base: 'old' } },
+            overrides: { prompts: { base: 'old' }, additionalMaterialSecondarySearch: true },
         });
         const res = await api.post('/api/settings/prompts/reset', {
             data: { courseId: COURSE_A },
@@ -213,6 +223,7 @@ test.describe('prompts (course-level)', () => {
         );
         expect(doc.prompts).toBeUndefined();
         expect(doc.isAdditiveRetrieval).toBe(true);
+        expect(doc.additionalMaterialSecondarySearch).toBe(false);
     });
 });
 

@@ -621,6 +621,29 @@ class QdrantService {
                 });
             }
 
+            // Additional-material chunks carry 'additional' in documentType and/or
+            // type (legacy points may only have one of the two set), so both keys
+            // are checked when scoping the search around them.
+            if (filters.excludeAdditionalMaterials) {
+                if (!searchParams.filter) {
+                    searchParams.filter = { must: [] };
+                }
+                searchParams.filter.must_not = [
+                    { key: 'documentType', match: { value: 'additional' } },
+                    { key: 'type', match: { value: 'additional' } }
+                ];
+            } else if (filters.additionalMaterialsOnly) {
+                if (!searchParams.filter) {
+                    searchParams.filter = { must: [] };
+                }
+                searchParams.filter.must.push({
+                    should: [
+                        { key: 'documentType', match: { value: 'additional' } },
+                        { key: 'type', match: { value: 'additional' } }
+                    ]
+                });
+            }
+
             // Perform search
             const searchResults = await this.client.search(
                 this.collectionName,

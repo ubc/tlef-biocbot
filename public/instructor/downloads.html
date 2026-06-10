@@ -50,10 +50,15 @@
         <main class="main-content">
             <header class="downloads-header">
                 <h1 id="course-title">BIOC202 - Chat Downloads</h1>
+                <div class="course-selector" id="scope-selector-container" style="display: none;">
+                    <select id="scope-selector" aria-label="Download scope">
+                        <!-- Course + superchat bucket options populated dynamically -->
+                    </select>
+                </div>
             </header>
 
             <div class="course-subtitle">
-                <p>Student Chat Downloads</p>
+                <p id="scope-subtitle">Student Chat Downloads</p>
             </div>
 
             <!-- Loading State -->
@@ -87,7 +92,7 @@
                         </div>
                         <div class="download-dropdown">
                             <button class="btn-primary download-dropdown-toggle" id="download-course-btn" onclick="toggleDownloadMenu(event, 'course-all')">
-                                Download All Course Data &#9662;
+                                <span id="download-all-label">Download All Course Data</span> &#9662;
                             </button>
                             <div class="download-dropdown-menu" id="download-menu-course-all">
                                 <button onclick="downloadAllCourseSessions('json')">Download JSON</button>

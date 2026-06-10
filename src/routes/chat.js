@@ -706,8 +706,20 @@ router.post('/', async (req, res) => {
 
         const ragSettings = CourseModel.resolveRagSettings(course);
 
-        // Retrieve top chunks from Qdrant
-        const searchResults = await qdrant.searchDocuments(message, { courseId, lectureNames }, ragSettings.student.topK);
+        // Retrieve top chunks from Qdrant.
+        // When the course de-prioritizes additional materials, search the main
+        // materials (lecture notes, practice questions) first and only fall back
+        // to additional materials if nothing was found there.
+        let searchResults;
+        if (course.additionalMaterialSecondarySearch === true) {
+            searchResults = await qdrant.searchDocuments(message, { courseId, lectureNames, excludeAdditionalMaterials: true }, ragSettings.student.topK);
+            if (!searchResults || searchResults.length === 0) {
+                console.log('🔎 [CHAT_RAG] No chunks found in main materials; falling back to additional materials');
+                searchResults = await qdrant.searchDocuments(message, { courseId, lectureNames, additionalMaterialsOnly: true }, ragSettings.student.topK);
+            }
+        } else {
+            searchResults = await qdrant.searchDocuments(message, { courseId, lectureNames }, ragSettings.student.topK);
+        }
 
         // Log summary of results by lecture to validate scope
         try {

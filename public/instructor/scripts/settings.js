@@ -647,6 +647,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const additiveToggle = document.getElementById('additive-retrieval-toggle');
                 if (additiveToggle) additiveToggle.checked = !!result.prompts.additiveRetrieval;
 
+                const additionalSecondaryToggle = document.getElementById('additional-material-secondary-toggle');
+                if (additionalSecondaryToggle) additionalSecondaryToggle.checked = !!result.prompts.additionalMaterialSecondarySearch;
+
                 // Convert seconds to minutes for display
                 const idleTimeoutInput = document.getElementById('idle-timeout-input');
                 if (idleTimeoutInput && result.prompts.studentIdleTimeout) {
@@ -882,6 +885,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 directive: document.getElementById('directive-prompt')?.value ?? '',
                 quizHelp: document.getElementById('quiz-help-prompt')?.value ?? '',
                 additiveRetrieval: document.getElementById('additive-retrieval-toggle')?.checked === true,
+                additionalMaterialSecondarySearch: document.getElementById('additional-material-secondary-toggle')?.checked === true,
                 studentIdleTimeout,
                 courseId
             })
@@ -1006,16 +1010,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     wireSectionButton('reset-student-chat', async () => {
         const topKInput = document.getElementById('student-chat-topk-input');
         const additiveToggle = document.getElementById('additive-retrieval-toggle');
+        const additionalSecondaryToggle = document.getElementById('additional-material-secondary-toggle');
         const sourceAttributionToggle = document.getElementById('source-attribution-download-toggle');
         if (topKInput) topKInput.value = 3;
         if (additiveToggle) additiveToggle.checked = true;
+        if (additionalSecondaryToggle) additionalSecondaryToggle.checked = false;
         if (sourceAttributionToggle) sourceAttributionToggle.checked = false;
         await saveAiSettingsToServer();
         await savePromptsConfigToServer();
         await saveQuizConfigToServer();
         showNotification('Student chat settings reset to defaults', 'success');
     }, {
-        confirmMessage: 'Reset student chat settings (Top-K, additive retrieval, source downloads) to defaults?',
+        confirmMessage: 'Reset student chat settings (Top-K, additive retrieval, additional material search, source downloads) to defaults?',
         busyLabel: 'Resetting...'
     });
 

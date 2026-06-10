@@ -125,13 +125,15 @@ router.get('/status', async (req, res) => {
  */
 router.post('/process-document', async (req, res) => {
     try {
-        const { 
-            courseId, 
-            lectureName, 
-            documentId, 
-            content, 
-            fileName, 
-            mimeType 
+        const {
+            courseId,
+            lectureName,
+            documentId,
+            content,
+            fileName,
+            mimeType,
+            documentType,
+            type
         } = req.body;
 
         const user = await requireDirectQdrantAccess(req, res, { courseId });
@@ -157,7 +159,9 @@ router.post('/process-document', async (req, res) => {
             documentId,
             content,
             fileName,
-            mimeType: mimeType || 'text/plain'
+            mimeType: mimeType || 'text/plain',
+            documentType,
+            type
         });
 
         if (result.success) {

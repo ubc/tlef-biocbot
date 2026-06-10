@@ -43,6 +43,12 @@ const ADD_UNIT1_DOC_ID = 'doc_e2e_chat_additive_unit1';
 const ADD_UNIT2_DOC_ID = 'doc_e2e_chat_additive_unit2';
 const ADD_UNIT1_SENTINEL = 'ADDITIVE-UNIT-ONE-317';
 const ADD_UNIT2_SENTINEL = 'ADDITIVE-UNIT-TWO-629';
+const SEC_MAIN_DOC_ID = 'doc_e2e_chat_secondary_main';
+const SEC_ADDL_DOC_ID = 'doc_e2e_chat_secondary_additional';
+const SEC_MAIN_SENTINEL = 'SECONDARY-MAIN-451';
+const SEC_ADDL_SENTINEL = 'SECONDARY-ADDL-872';
+const SEC_MAIN_FILE = 'e2e-secondary-main.txt';
+const SEC_ADDL_FILE = 'e2e-secondary-additional.txt';
 
 let instructorId;
 let studentId;
@@ -195,6 +201,8 @@ async function seedDocumentRecord({
     fileName = `${documentId}.txt`,
     originalName = `${documentId}.txt`,
     content,
+    documentType = 'lecture-notes',
+    type = 'lecture_notes',
 }) {
     const size = Buffer.byteLength(content, 'utf8');
     await withDb(async (db) => {
@@ -204,8 +212,8 @@ async function seedDocumentRecord({
             courseId,
             lectureName,
             instructorId,
-            documentType: 'lecture-notes',
-            type: 'lecture_notes',
+            documentType,
+            type,
             contentType: 'text',
             filename: fileName,
             originalName,
@@ -230,7 +238,7 @@ async function seedDocumentRecord({
                 $push: {
                     'lectures.$.documents': {
                         documentId,
-                        documentType: 'lecture-notes',
+                        documentType,
                         filename: fileName,
                         originalName,
                         mimeType: 'text/plain',
@@ -263,6 +271,8 @@ async function processQdrantDocument(context, {
     documentId,
     content,
     fileName = `${documentId}.txt`,
+    documentType = undefined,
+    type = undefined,
 }) {
     const res = await context.request.post('/api/qdrant/process-document', {
         data: {
@@ -272,6 +282,8 @@ async function processQdrantDocument(context, {
             content,
             fileName,
             mimeType: 'text/plain',
+            documentType,
+            type,
         },
         timeout: 90_000,
     });
@@ -576,6 +588,149 @@ test.describe('POST /api/chat — single vs additive RAG retrieval', () => {
         const citedLectures = new Set(body.citations.map((citation) => citation.lectureName));
         expect(citedLectures.has('Unit 1')).toBe(true);
         expect(citedLectures.has('Unit 2')).toBe(true);
+    });
+});
+
+// ----------------------------------------------------------------------------
+// Additional material secondary search. When the course flag is on, additional
+// materials are excluded from the primary retrieval pass and only searched as
+// a fallback when the main materials return nothing.
+// ----------------------------------------------------------------------------
+test.describe('POST /api/chat — additional material secondary search', () => {
+    test.use({ storageState: storageStatePath('student') });
+    test.setTimeout(180_000);
+
+    test.beforeEach(async ({ browser }) => {
+        await resetStudentChatData({ instructorId });
+        await cleanupSeededRows();
+        await cleanupQdrantOrphans(browser);
+    });
+
+    test.afterEach(async ({ browser }) => {
+        const instructorCtx = await browser.newContext({ storageState: storageStatePath('instructor') });
+        for (const documentId of [SEC_MAIN_DOC_ID, SEC_ADDL_DOC_ID]) {
+            await instructorCtx.request.delete(`/api/qdrant/document/${documentId}`).catch(() => {});
+        }
+        await instructorCtx.close();
+        await cleanupSeededRows();
+    });
+
+    async function seedSecondarySearchVectors(browser, { secondarySearch, includeMainMaterial }) {
+        const mainContent = [
+            'E2E secondary search lecture notes.',
+            `The lecture-notes marker is ${SEC_MAIN_SENTINEL}.`,
+            'These notes describe how catalase splits hydrogen peroxide in cells.',
+        ].join(' ');
+        const additionalContent = [
+            'E2E secondary search additional materials.',
+            `The additional-material marker is ${SEC_ADDL_SENTINEL}.`,
+            'This supplementary reading expands on peroxisome enzyme activity.',
+        ].join(' ');
+
+        await withDb((db) =>
+            db.collection('courses').updateOne(
+                { courseId: STU_COURSE_ID },
+                { $set: { additionalMaterialSecondarySearch: secondarySearch } }
+            )
+        );
+
+        await seedDocumentRecord({
+            documentId: SEC_ADDL_DOC_ID,
+            lectureName: 'Unit 1',
+            fileName: SEC_ADDL_FILE,
+            originalName: 'E2E Secondary Additional.txt',
+            content: additionalContent,
+            documentType: 'additional',
+            type: 'additional',
+        });
+        if (includeMainMaterial) {
+            await seedDocumentRecord({
+                documentId: SEC_MAIN_DOC_ID,
+                lectureName: 'Unit 1',
+                fileName: SEC_MAIN_FILE,
+                originalName: 'E2E Secondary Main.txt',
+                content: mainContent,
+            });
+        }
+
+        const instructorCtx = await browser.newContext({ storageState: storageStatePath('instructor') });
+        await processQdrantDocument(instructorCtx, {
+            documentId: SEC_ADDL_DOC_ID,
+            lectureName: 'Unit 1',
+            content: additionalContent,
+            fileName: SEC_ADDL_FILE,
+            documentType: 'additional',
+            type: 'additional',
+        });
+        if (includeMainMaterial) {
+            await processQdrantDocument(instructorCtx, {
+                documentId: SEC_MAIN_DOC_ID,
+                lectureName: 'Unit 1',
+                content: mainContent,
+                fileName: SEC_MAIN_FILE,
+                documentType: 'lecture-notes',
+                type: 'lecture_notes',
+            });
+        }
+        await instructorCtx.close();
+    }
+
+    test('with the flag on, additional materials are not cited when main materials exist', async ({ request: api, browser }) => {
+        await seedSecondarySearchVectors(browser, { secondarySearch: true, includeMainMaterial: true });
+
+        const res = await api.post('/api/chat', {
+            data: {
+                message: `Tell me about ${SEC_ADDL_SENTINEL} and ${SEC_MAIN_SENTINEL}.`,
+                courseId: STU_COURSE_ID,
+                unitName: 'Unit 1',
+                mode: 'tutor',
+            },
+            timeout: 120_000,
+        });
+        expect(res.ok()).toBeTruthy();
+
+        const body = await res.json();
+        expect(body.debug.searchResultsCount).toBeGreaterThan(0);
+        expect(body.citations.some((citation) => citation.fileName === SEC_MAIN_FILE)).toBe(true);
+        expect(body.citations.some((citation) => citation.fileName === SEC_ADDL_FILE)).toBe(false);
+    });
+
+    test('with the flag on, chat falls back to additional materials when the unit has no main materials', async ({ request: api, browser }) => {
+        await seedSecondarySearchVectors(browser, { secondarySearch: true, includeMainMaterial: false });
+
+        const res = await api.post('/api/chat', {
+            data: {
+                message: `Tell me about ${SEC_ADDL_SENTINEL}.`,
+                courseId: STU_COURSE_ID,
+                unitName: 'Unit 1',
+                mode: 'tutor',
+            },
+            timeout: 120_000,
+        });
+        expect(res.ok()).toBeTruthy();
+
+        const body = await res.json();
+        expect(body.debug.searchResultsCount).toBeGreaterThan(0);
+        expect(body.citations.some((citation) => citation.fileName === SEC_ADDL_FILE)).toBe(true);
+    });
+
+    test('with the flag off (default), additional materials are cited alongside main materials', async ({ request: api, browser }) => {
+        await seedSecondarySearchVectors(browser, { secondarySearch: false, includeMainMaterial: true });
+
+        const res = await api.post('/api/chat', {
+            data: {
+                message: `Tell me about ${SEC_ADDL_SENTINEL}.`,
+                courseId: STU_COURSE_ID,
+                unitName: 'Unit 1',
+                mode: 'tutor',
+            },
+            timeout: 120_000,
+        });
+        expect(res.ok()).toBeTruthy();
+
+        const body = await res.json();
+        expect(body.debug.searchResultsCount).toBeGreaterThan(0);
+        expect(body.citations.some((citation) => citation.fileName === SEC_ADDL_FILE)).toBe(true);
     });
 });
 

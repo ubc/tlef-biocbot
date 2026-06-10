@@ -573,7 +573,7 @@ router.get('/prompts', async (req, res) => {
         if (!courseId) {
             return res.json({
                 success: true,
-                prompts: { ...prompts.DEFAULT_PROMPTS, additiveRetrieval: false },
+                prompts: { ...prompts.DEFAULT_PROMPTS, additiveRetrieval: false, additionalMaterialSecondarySearch: false },
                 isCourseSpecific: false,
                 courseId: null
             });
@@ -594,6 +594,8 @@ router.get('/prompts', async (req, res) => {
             quizHelp: coursePrompts.quizHelp || prompts.DEFAULT_PROMPTS.quizHelp,
             // Course-level additive retrieval setting
             additiveRetrieval: course ? !!course.isAdditiveRetrieval : false,
+            // Course-level secondary search for additional materials (off by default)
+            additionalMaterialSecondarySearch: course ? !!course.additionalMaterialSecondarySearch : false,
             // Student idle timeout (seconds), default to 4 minutes (240s)
             studentIdleTimeout: coursePrompts.studentIdleTimeout || 240
         };
@@ -624,7 +626,7 @@ router.post('/prompts', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        const { base, protege, tutor, explain, directive, quizHelp, additiveRetrieval, studentIdleTimeout, courseId } = req.body;
+        const { base, protege, tutor, explain, directive, quizHelp, additiveRetrieval, additionalMaterialSecondarySearch, studentIdleTimeout, courseId } = req.body;
 
         if (!courseId) {
             return res.status(400).json({ success: false, message: 'courseId is required to save settings' });
@@ -661,6 +663,7 @@ router.post('/prompts', async (req, res) => {
                     'prompts.quizHelp': quizHelp || prompts.DEFAULT_PROMPTS.quizHelp,
                     'prompts.studentIdleTimeout': timeoutVal,
                     isAdditiveRetrieval: !!additiveRetrieval,
+                    additionalMaterialSecondarySearch: !!additionalMaterialSecondarySearch,
                     updatedAt: new Date()
                 } 
             }
@@ -704,9 +707,12 @@ router.post('/prompts/reset', async (req, res) => {
         // Unset the prompts field and isAdditiveRetrieval in the course document
         await db.collection('courses').updateOne(
             { courseId: courseId },
-            { 
+            {
                 $unset: { prompts: "" },
-                $set: { isAdditiveRetrieval: true } // Default to true
+                $set: {
+                    isAdditiveRetrieval: true, // Default to true
+                    additionalMaterialSecondarySearch: false // Default to off
+                }
             }
         );
 

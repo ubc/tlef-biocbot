@@ -817,6 +817,7 @@ test.describe('Instructor settings UI', () => {
         await expect(page.locator('#student-chat-section')).toBeVisible();
         await expect(page.locator('#student-chat-topk-input')).toHaveValue('6');
         await expect(page.locator('#additive-retrieval-toggle')).not.toBeChecked();
+        await expect(page.locator('#additional-material-secondary-toggle')).not.toBeChecked();
         await expect(page.locator('#source-attribution-download-toggle')).not.toBeChecked();
 
         await openSettingsPanel(page, 'super-course');
@@ -875,6 +876,7 @@ test.describe('Instructor settings UI', () => {
 
         await openSettingsPanel(page, 'student-chat');
         await setInputChecked(page, '#additive-retrieval-toggle', true);
+        await setInputChecked(page, '#additional-material-secondary-toggle', true);
         await setInputChecked(page, '#source-attribution-download-toggle', true);
         await page.locator('#save-student-chat').click();
         await expect(page.locator('.notification.success', { hasText: 'Student chat settings saved' })).toBeVisible({
@@ -892,6 +894,7 @@ test.describe('Instructor settings UI', () => {
                 quizHelp: course.prompts?.quizHelp,
                 studentIdleTimeout: course.prompts?.studentIdleTimeout,
                 isAdditiveRetrieval: course.isAdditiveRetrieval,
+                additionalMaterialSecondarySearch: course.additionalMaterialSecondarySearch,
                 allowSourceAttributionDownloads: course.quizSettings?.allowSourceAttributionDownloads,
                 anonymizeEnabled: course.anonymizeStudents?.[instructorId]?.enabled,
             };
@@ -904,6 +907,7 @@ test.describe('Instructor settings UI', () => {
             quizHelp: 'Updated quiz help prompt from settings UI',
             studentIdleTimeout: 330,
             isAdditiveRetrieval: true,
+            additionalMaterialSecondarySearch: true,
             allowSourceAttributionDownloads: true,
             anonymizeEnabled: true,
         });
@@ -1080,10 +1084,12 @@ test.describe('Instructor settings UI', () => {
 
         await openSettingsPanel(page, 'student-chat');
         await setInputChecked(page, '#additive-retrieval-toggle', false);
+        await setInputChecked(page, '#additional-material-secondary-toggle', true);
         await setInputChecked(page, '#source-attribution-download-toggle', true);
         page.once('dialog', (dialog) => dialog.accept());
         await page.locator('#reset-student-chat').click();
         await expect(page.locator('#additive-retrieval-toggle')).toBeChecked();
+        await expect(page.locator('#additional-material-secondary-toggle')).not.toBeChecked();
         await expect(page.locator('#source-attribution-download-toggle')).not.toBeChecked();
         await expect(page.locator('#student-chat-topk-input')).toHaveValue('3');
         await expect(page.locator('.notification.success', { hasText: 'Student chat settings reset to defaults' })).toBeVisible();
