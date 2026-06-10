@@ -772,6 +772,7 @@ test.describe('Instructor settings UI', () => {
 
         await expect(page.locator('#idle-timeout-input')).toHaveValue('3');
         await expect(page.locator('#additive-retrieval-toggle')).not.toBeChecked();
+        await expect(page.locator('#additional-material-secondary-toggle')).not.toBeChecked();
         await expect(page.locator('#anonymize-students-toggle')).not.toBeChecked();
         await expect(page.locator('#quiz-enabled-toggle')).toBeChecked();
         await expect(page.locator('.testable-unit-checkbox[value="Unit 1"]')).toBeChecked();
@@ -789,6 +790,7 @@ test.describe('Instructor settings UI', () => {
         await page.locator('#quiz-help-prompt').fill('Updated quiz help prompt from settings UI');
         await page.locator('#idle-timeout-input').fill('5.5');
         await setInputChecked(page, '#additive-retrieval-toggle', true);
+        await setInputChecked(page, '#additional-material-secondary-toggle', true);
         await setInputChecked(page, '#source-attribution-download-toggle', true);
         await setInputChecked(page, '#anonymize-students-toggle', true);
 
@@ -809,6 +811,7 @@ test.describe('Instructor settings UI', () => {
                 quizHelp: course.prompts?.quizHelp,
                 studentIdleTimeout: course.prompts?.studentIdleTimeout,
                 isAdditiveRetrieval: course.isAdditiveRetrieval,
+                additionalMaterialSecondarySearch: course.additionalMaterialSecondarySearch,
                 allowSourceAttributionDownloads: course.quizSettings?.allowSourceAttributionDownloads,
                 anonymizeEnabled: course.anonymizeStudents?.[instructorId]?.enabled,
             };
@@ -821,6 +824,7 @@ test.describe('Instructor settings UI', () => {
             quizHelp: 'Updated quiz help prompt from settings UI',
             studentIdleTimeout: 330,
             isAdditiveRetrieval: true,
+            additionalMaterialSecondarySearch: true,
             allowSourceAttributionDownloads: true,
             anonymizeEnabled: true,
         });

@@ -477,6 +477,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const directivePromptInput = document.getElementById('directive-prompt');
                 const quizHelpPromptInput = document.getElementById('quiz-help-prompt');
                 const additiveToggle = document.getElementById('additive-retrieval-toggle');
+                const additionalSecondaryToggle = document.getElementById('additional-material-secondary-toggle');
                 const idleTimeoutInput = document.getElementById('idle-timeout-input');
 
                 if (basePromptInput) basePromptInput.value = result.prompts.base || '';
@@ -486,6 +487,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (directivePromptInput) directivePromptInput.value = result.prompts.directive || '';
                 if (quizHelpPromptInput) quizHelpPromptInput.value = result.prompts.quizHelp || '';
                 if (additiveToggle) additiveToggle.checked = !!result.prompts.additiveRetrieval;
+                if (additionalSecondaryToggle) additionalSecondaryToggle.checked = !!result.prompts.additionalMaterialSecondarySearch;
                 
                 // Convert seconds to minutes for display
                 if (idleTimeoutInput && result.prompts.studentIdleTimeout) {
@@ -1245,6 +1247,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const directive = document.getElementById('directive-prompt')?.value;
                 const quizHelp = document.getElementById('quiz-help-prompt')?.value;
                 const additiveRetrieval = document.getElementById('additive-retrieval-toggle')?.checked;
+                const additionalMaterialSecondarySearch = document.getElementById('additional-material-secondary-toggle')?.checked;
                 const idleTimeoutInput = document.getElementById('idle-timeout-input');
                 const courseId = await getCurrentCourseId();
                 
@@ -1405,7 +1408,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         headers: {
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify({ base, protege, tutor, explain, directive, quizHelp, additiveRetrieval, studentIdleTimeout, courseId })
+                        body: JSON.stringify({ base, protege, tutor, explain, directive, quizHelp, additiveRetrieval, additionalMaterialSecondarySearch, studentIdleTimeout, courseId })
                     });
                     
                     const result = await response.json();
@@ -1471,6 +1474,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                         if (directivePromptInput) directivePromptInput.value = result.prompts.directive || '';
                         // Default for additive retrieval is true (on)
                         if (additiveToggle) additiveToggle.checked = true;
+                        // Default for additional material secondary search is false (off)
+                        const additionalSecondaryToggle = document.getElementById('additional-material-secondary-toggle');
+                        if (additionalSecondaryToggle) additionalSecondaryToggle.checked = false;
                         
                         const idleTimeoutInput = document.getElementById('idle-timeout-input');
                         if (idleTimeoutInput) idleTimeoutInput.value = 4; // Default 4 mins
