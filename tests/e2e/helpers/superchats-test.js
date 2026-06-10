@@ -90,6 +90,43 @@ async function cleanupSuperCourseSessions(sessionIds) {
     );
 }
 
+/**
+ * Insert (replacing any existing) a saved super-course chat session,
+ * shaped like the docs written by POST /api/student/super-course/save.
+ */
+async function seedSuperCourseSession({
+    sessionId,
+    superchatId,
+    studentId,
+    studentName = studentId,
+    title = 'Seeded Superchat Session',
+    savedAt,
+    messages = [],
+    isDeleted = false,
+}) {
+    const doc = {
+        sessionId,
+        studentId,
+        superchatId,
+        studentName,
+        title,
+        messageCount: messages.length,
+        duration: '0s',
+        savedAt,
+        chatData: { messages },
+        isDeleted,
+        createdAt: new Date(savedAt),
+        updatedAt: new Date(savedAt),
+    };
+
+    await withDb(async (db) => {
+        await db.collection('student_super_course_chat_sessions').deleteMany({ sessionId });
+        await db.collection('student_super_course_chat_sessions').insertOne(doc);
+    });
+
+    return doc;
+}
+
 module.exports = {
     SUPERCHATS_COLLECTION,
     seedSuperchat,
@@ -97,4 +134,5 @@ module.exports = {
     setCourseSuperchats,
     readSuperchat,
     cleanupSuperCourseSessions,
+    seedSuperCourseSession,
 };

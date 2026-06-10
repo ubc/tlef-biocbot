@@ -14,6 +14,12 @@
  * - POST   /api/superchats        create (instructor or admin)
  * - PUT    /api/superchats/:id    update (instructor or admin)
  * - DELETE /api/superchats/:id    soft-delete + detach from courses (instructor or admin)
+ *
+ * Chat session downloads (system admin only — matches /api/students download gating,
+ * since bucket transcripts span students from multiple courses):
+ * - GET /api/superchats/:id/chat-sessions                        students grouped with session metadata
+ * - GET /api/superchats/:id/chat-sessions/export[?studentId=]    bulk export with full chatData
+ * - GET /api/superchats/:id/chat-sessions/:studentId/:sessionId  single session with full chatData
  */
 
 const express = require('express');
@@ -32,6 +38,75 @@ function requireInstructorOrAdmin(req, res) {
         return false;
     }
     return true;
+}
+
+// Same gate as the per-course chat downloads in routes/students.js.
+function requireDownloadAdmin(req, res) {
+    if (!req.user) {
+        res.status(401).json({ success: false, message: 'Authentication required' });
+        return false;
+    }
+    if (req.user.role !== 'instructor' || !hasSystemAdminAccess(req.user)) {
+        res.status(403).json({ success: false, message: 'Only system admins can access student chat download data' });
+        return false;
+    }
+    return true;
+}
+
+const SESSIONS_COLLECTION = 'student_super_course_chat_sessions';
+const notDeletedFilter = { $or: [{ isDeleted: { $exists: false } }, { isDeleted: false }] };
+
+// First student message to last bot reply, from actual message timestamps
+// (stored durations are client-reported and unreliable).
+function calculateSessionDuration(session) {
+    const messages = (session && session.chatData && session.chatData.messages) || [];
+    const first = messages.find(msg => msg.type === 'user');
+    const lastBot = messages.slice().reverse().find(msg => msg.type === 'bot');
+    const last = lastBot || messages[messages.length - 1];
+    if (!first || !first.timestamp || !last || !last.timestamp) return '0s';
+
+    const diffMs = new Date(last.timestamp) - new Date(first.timestamp);
+    if (!Number.isFinite(diffMs) || diffMs < 0) return '0s';
+
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
+}
+
+function normalizeStudentName(raw) {
+    if (typeof raw === 'string' && raw.trim()) return raw;
+    if (raw && typeof raw === 'object') {
+        return raw.displayName || raw.name || raw.studentName || 'Unknown Student';
+    }
+    return 'Unknown Student';
+}
+
+// Group a flat session list by student, newest activity first.
+function groupSessionsByStudent(sessions, mapSession) {
+    const studentsMap = new Map();
+    for (const session of sessions) {
+        if (!studentsMap.has(session.studentId)) {
+            studentsMap.set(session.studentId, {
+                studentId: session.studentId,
+                studentName: normalizeStudentName(session.studentName),
+                totalSessions: 0,
+                lastActivity: null,
+                sessions: []
+            });
+        }
+        const student = studentsMap.get(session.studentId);
+        student.totalSessions++;
+        student.sessions.push(mapSession(session));
+        if (!student.lastActivity || new Date(session.savedAt) > new Date(student.lastActivity)) {
+            student.lastActivity = session.savedAt;
+        }
+    }
+    return Array.from(studentsMap.values()).sort(
+        (a, b) => new Date(b.lastActivity) - new Date(a.lastActivity)
+    );
 }
 
 // Count of courses currently in each bucket — handy for the admin list ("3 courses").
@@ -167,6 +242,123 @@ router.delete('/:id', async (req, res) => {
     } catch (error) {
         console.error('Error deleting superchat:', error);
         res.status(500).json({ success: false, message: 'Failed to delete superchat' });
+    }
+});
+
+// GET /api/superchats/:id/chat-sessions — students with saved sessions in this bucket (admin)
+router.get('/:id/chat-sessions', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) return res.status(503).json({ success: false, message: 'Database connection not available' });
+        if (!requireDownloadAdmin(req, res)) return;
+
+        const doc = await SuperchatModel.getSuperchatById(db, req.params.id);
+        if (!doc) return res.status(404).json({ success: false, message: 'Superchat not found' });
+
+        const sessions = await db.collection(SESSIONS_COLLECTION)
+            .find({ superchatId: doc.superchatId, ...notDeletedFilter })
+            .sort({ savedAt: -1 })
+            .toArray();
+
+        const students = groupSessionsByStudent(sessions, session => ({
+            sessionId: session.sessionId,
+            studentId: session.studentId,
+            title: session.title || 'Super Course Chat',
+            savedAt: session.savedAt,
+            messageCount: session.messageCount || 0,
+            duration: calculateSessionDuration(session)
+        }));
+
+        res.json({
+            success: true,
+            data: {
+                superchatId: doc.superchatId,
+                superchatName: doc.name,
+                students,
+                totalStudents: students.length,
+                totalSessions: sessions.length
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching superchat chat sessions:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch superchat chat sessions' });
+    }
+});
+
+// GET /api/superchats/:id/chat-sessions/export — full transcripts for the whole bucket,
+// or one student via ?studentId= (admin). Single round-trip so the client doesn't need
+// an N+1 fetch loop across a bucket spanning several courses.
+router.get('/:id/chat-sessions/export', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) return res.status(503).json({ success: false, message: 'Database connection not available' });
+        if (!requireDownloadAdmin(req, res)) return;
+
+        const doc = await SuperchatModel.getSuperchatById(db, req.params.id);
+        if (!doc) return res.status(404).json({ success: false, message: 'Superchat not found' });
+
+        const query = { superchatId: doc.superchatId, ...notDeletedFilter };
+        if (req.query.studentId) query.studentId = req.query.studentId;
+
+        const sessions = await db.collection(SESSIONS_COLLECTION)
+            .find(query, { projection: { _id: 0 } })
+            .sort({ savedAt: -1 })
+            .toArray();
+
+        const students = groupSessionsByStudent(sessions, session => ({
+            ...session,
+            duration: calculateSessionDuration(session)
+        }));
+
+        res.json({
+            success: true,
+            data: {
+                superchatId: doc.superchatId,
+                superchatName: doc.name,
+                exportDate: new Date().toISOString(),
+                students,
+                totalStudents: students.length,
+                totalSessions: sessions.length
+            }
+        });
+    } catch (error) {
+        console.error('Error exporting superchat chat sessions:', error);
+        res.status(500).json({ success: false, message: 'Failed to export superchat chat sessions' });
+    }
+});
+
+// GET /api/superchats/:id/chat-sessions/:studentId/:sessionId — single full session (admin)
+router.get('/:id/chat-sessions/:studentId/:sessionId', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) return res.status(503).json({ success: false, message: 'Database connection not available' });
+        if (!requireDownloadAdmin(req, res)) return;
+
+        const doc = await SuperchatModel.getSuperchatById(db, req.params.id);
+        if (!doc) return res.status(404).json({ success: false, message: 'Superchat not found' });
+
+        const session = await db.collection(SESSIONS_COLLECTION).findOne(
+            {
+                superchatId: doc.superchatId,
+                studentId: req.params.studentId,
+                sessionId: req.params.sessionId,
+                ...notDeletedFilter
+            },
+            { projection: { _id: 0 } }
+        );
+        if (!session) return res.status(404).json({ success: false, message: 'Chat session not found' });
+
+        res.json({
+            success: true,
+            data: {
+                ...session,
+                superchatName: doc.name,
+                duration: calculateSessionDuration(session)
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching superchat chat session:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch superchat chat session' });
     }
 });
 

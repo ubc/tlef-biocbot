@@ -8,6 +8,11 @@ let currentCourseId = null;
 let currentStudents = [];
 let currentStudentSessions = [];
 
+// Download scope: the instructor's course (default) or a superchat bucket.
+// { type: 'course' } or { type: 'superchat', superchatId, name }
+let currentScope = { type: 'course' };
+let currentCourseName = null;
+
 // Global variables to prevent multiple API calls and redirects
 let courseIdCache = null;
 let courseIdPromise = null;
@@ -178,7 +183,95 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Load the current course (the one the instructor is in)
     await loadCurrentCourse();
+
+    // Offer superchat buckets as additional download scopes
+    await populateScopeSelector();
 });
+
+/**
+ * Populate the scope selector with the current course plus every superchat bucket.
+ * Hidden unless at least one bucket exists.
+ */
+async function populateScopeSelector() {
+    const container = document.getElementById('scope-selector-container');
+    const selector = document.getElementById('scope-selector');
+    if (!container || !selector) return;
+
+    try {
+        const response = await fetch('/api/superchats', { credentials: 'include' });
+        if (!response.ok) return;
+
+        const result = await response.json();
+        const buckets = (result && result.superchats) || [];
+        if (buckets.length === 0) return;
+
+        selector.innerHTML = '';
+
+        const courseOption = document.createElement('option');
+        courseOption.value = 'course';
+        courseOption.textContent = `Course: ${currentCourseName || currentCourseId || 'Current course'}`;
+        selector.appendChild(courseOption);
+
+        buckets.forEach(bucket => {
+            const option = document.createElement('option');
+            option.value = `superchat:${bucket.superchatId}`;
+            option.textContent = `Superchat: ${bucket.name}`;
+            option.dataset.name = bucket.name;
+            selector.appendChild(option);
+        });
+
+        selector.addEventListener('change', handleScopeChange);
+        container.style.display = '';
+    } catch (error) {
+        console.error('Error loading superchat buckets for scope selector:', error);
+    }
+}
+
+/**
+ * Switch between course and superchat download scopes.
+ */
+async function handleScopeChange(event) {
+    const value = event.target.value;
+    const selectedOption = event.target.selectedOptions[0];
+
+    closeStudentModal();
+    clearStudentData();
+
+    if (value === 'course') {
+        currentScope = { type: 'course' };
+    } else {
+        currentScope = {
+            type: 'superchat',
+            superchatId: value.slice('superchat:'.length),
+            name: (selectedOption && selectedOption.dataset.name) || 'Superchat'
+        };
+    }
+
+    updateScopeLabels();
+    await loadStudentData();
+}
+
+/**
+ * Update title, subtitle, bulk-download label, and empty state for the active scope.
+ */
+function updateScopeLabels() {
+    const courseTitle = document.getElementById('course-title');
+    const subtitle = document.getElementById('scope-subtitle');
+    const downloadAllLabel = document.getElementById('download-all-label');
+    const emptyState = document.querySelector('#empty-state p');
+
+    if (currentScope.type === 'superchat') {
+        if (courseTitle) courseTitle.textContent = `${currentScope.name} - Download Chats`;
+        if (subtitle) subtitle.textContent = 'Superchat Student Chat Downloads';
+        if (downloadAllLabel) downloadAllLabel.textContent = 'Download All Superchat Data';
+        if (emptyState) emptyState.textContent = 'No students have saved chat sessions for this superchat yet.';
+    } else {
+        if (courseTitle) courseTitle.textContent = `${currentCourseName || currentCourseId} - Download Chats`;
+        if (subtitle) subtitle.textContent = 'Student Chat Downloads';
+        if (downloadAllLabel) downloadAllLabel.textContent = 'Download All Course Data';
+        if (emptyState) emptyState.textContent = 'No students have saved chat sessions for this course yet.';
+    }
+}
 
 /**
  * Set up event listeners
@@ -229,7 +322,8 @@ async function loadCurrentCourse() {
         
         // Set the course ID and load student data
         currentCourseId = courseId;
-        
+        currentCourseName = course.name;
+
         // Update course title
         const courseTitle = document.getElementById('course-title');
         if (courseTitle) {
@@ -247,45 +341,51 @@ async function loadCurrentCourse() {
 
 
 /**
- * Load student data for the selected course
+ * Load student data for the active scope (course or superchat bucket)
  */
 async function loadStudentData() {
     try {
-        if (!currentCourseId) {
+        const isSuperchat = currentScope.type === 'superchat';
+
+        if (!isSuperchat && !currentCourseId) {
             console.log('No course selected');
             return;
         }
-        
-        console.log(`Loading student data for course: ${currentCourseId}`);
+
+        const url = isSuperchat
+            ? `/api/superchats/${currentScope.superchatId}/chat-sessions`
+            : `/api/students/${currentCourseId}`;
+
+        console.log(`Loading student data for ${isSuperchat ? 'superchat' : 'course'}: ${isSuperchat ? currentScope.superchatId : currentCourseId}`);
         showLoadingState();
-        
-        const response = await fetch(`/api/students/${currentCourseId}`, {
+
+        const response = await fetch(url, {
             method: 'GET',
             credentials: 'include'
         });
-        
+
         if (!response.ok) {
             throw new Error(`Failed to load student data: ${response.status}`);
         }
-        
+
         const result = await response.json();
-        
+
         if (!result.success) {
             throw new Error(result.message || 'Failed to load student data');
         }
-        
+
         const data = result.data;
         currentStudents = data.students || [];
-        
+
         console.log(`Loaded ${currentStudents.length} students with saved chats`);
-        
+
         // Update UI
         updateStudentStats(data.totalStudents, data.totalSessions);
         displayStudents(currentStudents);
-        
+
         // Hide loading state
         hideLoadingState();
-        
+
     } catch (error) {
         console.error('Error loading student data:', error);
         showErrorState('Failed to load student data. Please try again.');
@@ -353,12 +453,18 @@ async function downloadAllCourseSessions(format = 'json') {
     try {
         console.log(`Downloading all course sessions as ${format}...`);
         document.querySelectorAll('.download-dropdown-menu.open').forEach(menu => menu.classList.remove('open'));
-        
+
         if (currentStudents.length === 0) {
             alert('No students found to download.');
             return;
         }
-        
+
+        // Superchat scope: the export endpoint returns the whole bucket in one request
+        if (currentScope.type === 'superchat') {
+            await downloadSuperchatExport(format);
+            return;
+        }
+
         // Show progress modal
         showDownloadProgress();
         const downloadStatus = document.getElementById('download-status');
@@ -453,6 +559,66 @@ async function downloadAllCourseSessions(format = 'json') {
 }
 
 /**
+ * Download superchat sessions via the bulk export endpoint —
+ * the whole bucket, or one student when studentId is given.
+ * @param {string} format - 'json' or 'txt'
+ * @param {string} [studentId] - Limit the export to a single student
+ */
+async function downloadSuperchatExport(format, studentId) {
+    try {
+        showDownloadProgress();
+        const downloadStatus = document.getElementById('download-status');
+        if (downloadStatus) downloadStatus.textContent = 'Fetching superchat sessions...';
+
+        const params = studentId ? `?studentId=${encodeURIComponent(studentId)}` : '';
+        const response = await fetch(
+            `/api/superchats/${currentScope.superchatId}/chat-sessions/export${params}`,
+            { method: 'GET', credentials: 'include' }
+        );
+
+        if (!response.ok) {
+            throw new Error(`Failed to export superchat sessions: ${response.status}`);
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to export superchat sessions');
+        }
+
+        const exportData = result.data;
+        const dateStamp = new Date().toISOString().split('T')[0];
+        let payload = exportData;
+        let baseFileName = `BiocBot_Superchat_${currentScope.name}_AllSessions_${dateStamp}`;
+
+        if (studentId) {
+            // Flatten the single-student export so it matches the per-student combined shape
+            const student = (exportData.students && exportData.students[0]) || { sessions: [] };
+            payload = {
+                studentName: student.studentName || 'Unknown Student',
+                superchatId: exportData.superchatId,
+                superchatName: exportData.superchatName,
+                totalSessions: student.sessions.length,
+                exportDate: exportData.exportDate,
+                sessions: student.sessions
+            };
+            baseFileName = `BiocBot_Superchat_${currentScope.name}_${payload.studentName}_${dateStamp}`;
+        }
+
+        if (format === 'txt') {
+            downloadTXT(payload, `${baseFileName}.txt`);
+        } else {
+            downloadJSON(payload, `${baseFileName}.json`);
+        }
+
+        hideDownloadProgress();
+    } catch (error) {
+        console.error('Error downloading superchat export:', error);
+        hideDownloadProgress();
+        alert('Failed to download superchat sessions. Please try again.');
+    }
+}
+
+/**
  * Helper to get display name from student object safely
  */
 function getStudentDisplayName(student) {
@@ -517,35 +683,43 @@ function createStudentCard(student) {
 async function viewStudentSessions(studentId, studentName) {
     try {
         console.log(`Loading sessions for student: ${studentName} (${studentId})`);
-        
+
+        // Superchat scope: session metadata (incl. studentId) is already in the listing
+        if (currentScope.type === 'superchat') {
+            const student = currentStudents.find(s => s.studentId === studentId);
+            currentStudentSessions = (student && student.sessions) || [];
+            showStudentModal(studentName, studentId, currentScope.name, currentStudentSessions);
+            return;
+        }
+
         if (!currentCourseId) {
             console.error('No course selected');
             return;
         }
-        
+
         const response = await fetch(`/api/students/${currentCourseId}/${studentId}/sessions`, {
             method: 'GET',
             credentials: 'include'
         });
-        
+
         if (!response.ok) {
             throw new Error(`Failed to load student sessions: ${response.status}`);
         }
-        
+
         const result = await response.json();
-        
+
         if (!result.success) {
             throw new Error(result.message || 'Failed to load student sessions');
         }
-        
+
         const data = result.data;
         currentStudentSessions = data.sessions || [];
-        
+
         console.log(`Loaded ${currentStudentSessions.length} sessions for student ${studentName}`);
-        
+
         // Show modal with sessions
         showStudentModal(studentName, data.studentName, currentCourseId, currentStudentSessions);
-        
+
     } catch (error) {
         console.error('Error loading student sessions:', error);
         alert('Failed to load student sessions. Please try again.');
@@ -619,8 +793,7 @@ function createSessionElement(session) {
             <div class="session-info">
                 <h4 class="session-title">${session.title}</h4>
                 <p class="session-details">
-                    Unit: ${session.unitName} |
-                    Messages: ${session.messageCount} |
+                    ${session.unitName ? `Unit: ${session.unitName} | ` : ''}Messages: ${session.messageCount} |
                     Duration: ${session.duration}
                 </p>
                 <p class="session-date">Saved: ${savedDate} at ${savedTime}</p>
@@ -689,7 +862,10 @@ async function toggleChatPreview(sessionId, studentId) {
     if (previewDiv.dataset.loaded === 'true') return;
 
     try {
-        const response = await fetch(`/api/students/${currentCourseId}/${studentId}/sessions/${sessionId}`, {
+        const url = currentScope.type === 'superchat'
+            ? `/api/superchats/${currentScope.superchatId}/chat-sessions/${studentId}/${sessionId}`
+            : `/api/students/${currentCourseId}/${studentId}/sessions/${sessionId}`;
+        const response = await fetch(url, {
             method: 'GET',
             credentials: 'include'
         });
@@ -789,7 +965,9 @@ async function downloadSession(sessionId, format = 'json') {
             menu.classList.remove('open');
         });
 
-        if (!currentCourseId) {
+        const isSuperchat = currentScope.type === 'superchat';
+
+        if (!isSuperchat && !currentCourseId) {
             console.error('No course selected');
             return;
         }
@@ -801,7 +979,10 @@ async function downloadSession(sessionId, format = 'json') {
             return;
         }
 
-        const response = await fetch(`/api/students/${currentCourseId}/${session.studentId}/sessions/${sessionId}`, {
+        const url = isSuperchat
+            ? `/api/superchats/${currentScope.superchatId}/chat-sessions/${session.studentId}/${sessionId}`
+            : `/api/students/${currentCourseId}/${session.studentId}/sessions/${sessionId}`;
+        const response = await fetch(url, {
             method: 'GET',
             credentials: 'include'
         });
@@ -818,7 +999,8 @@ async function downloadSession(sessionId, format = 'json') {
 
         const sessionData = result.data;
         const chatData = sessionData.chatData;
-        const baseFileName = `BiocBot_Chat_${sessionData.courseId}_${sessionData.studentName}_${new Date(sessionData.savedAt).toISOString().split('T')[0]}`;
+        const scopeLabel = isSuperchat ? `Superchat_${currentScope.name}` : sessionData.courseId;
+        const baseFileName = `BiocBot_Chat_${scopeLabel}_${sessionData.studentName}_${new Date(sessionData.savedAt).toISOString().split('T')[0]}`;
 
         if (format === 'txt') {
             downloadTXT(chatData, `${baseFileName}.txt`);
@@ -841,12 +1023,18 @@ async function downloadAllSessions(format = 'json') {
     try {
         console.log(`Downloading all sessions for current student as ${format}`);
         document.querySelectorAll('.download-dropdown-menu.open').forEach(menu => menu.classList.remove('open'));
-        
+
         if (currentStudentSessions.length === 0) {
             alert('No sessions to download.');
             return;
         }
-        
+
+        // Superchat scope: the export endpoint returns every session in one request
+        if (currentScope.type === 'superchat') {
+            await downloadSuperchatExport(format, currentStudentSessions[0].studentId);
+            return;
+        }
+
         // Show progress modal
         showDownloadProgress();
         
@@ -933,9 +1121,13 @@ function downloadJSON(data, fileName) {
 function formatChatAsText(data) {
     let lines = [];
 
-    // If it's a course-wide export with multiple students
+    // If it's a course/superchat-wide export with multiple students
     if (data.students) {
-        lines.push(`Course Chat Export - ${data.courseId}`);
+        if (data.superchatName) {
+            lines.push(`Superchat Chat Export - ${data.superchatName}`);
+        } else {
+            lines.push(`Course Chat Export - ${data.courseId}`);
+        }
         lines.push(`Export Date: ${new Date(data.exportDate).toLocaleString()}`);
         lines.push(`Total Students: ${data.totalStudents}`);
         lines.push('='.repeat(60));
@@ -961,7 +1153,11 @@ function formatChatAsText(data) {
     // If it's a combined export for one student (multiple sessions)
     if (data.sessions && Array.isArray(data.sessions)) {
         lines.push(`Student: ${data.studentName}`);
-        lines.push(`Course: ${data.courseId}`);
+        if (data.superchatName) {
+            lines.push(`Superchat: ${data.superchatName}`);
+        } else {
+            lines.push(`Course: ${data.courseId}`);
+        }
         lines.push(`Export Date: ${new Date(data.exportDate).toLocaleString()}`);
         lines.push(`Total Sessions: ${data.totalSessions}`);
         lines.push('='.repeat(60));
