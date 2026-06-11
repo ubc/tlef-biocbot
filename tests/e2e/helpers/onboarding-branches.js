@@ -41,6 +41,7 @@ function branchCourse(overrides = {}) {
  *   textUploadStatus?: number,
  *   approvedTopicsStatus?: number,
  *   extractTopicsStatus?: number,
+ *   extractTopicsSkippedAdditional?: boolean,
  *   learningObjectivesStatus?: number,
  *   questionsStatus?: number,
  *   thresholdStatus?: number,
@@ -260,6 +261,10 @@ async function installOnboardingRoutes(page, options = {}) {
         if (pathname.endsWith('/extract-topics') && method === 'POST') {
             if (options.extractTopicsStatus) {
                 await route.fulfill({ status: options.extractTopicsStatus, json: { success: false } });
+                return;
+            }
+            if (options.extractTopicsSkippedAdditional) {
+                await route.fulfill({ json: { success: true, data: { topics: [], skippedAdditionalMaterial: true } } });
                 return;
             }
             await route.fulfill({ json: { success: true, data: { topics: ['Branch Topic'] } } });

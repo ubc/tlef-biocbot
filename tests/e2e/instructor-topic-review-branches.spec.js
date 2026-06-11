@@ -27,6 +27,22 @@ test.describe('onboarding topic review branches', () => {
         })).rejects.toThrow(/Failed to extract topics: 500/);
     });
 
+    test('shows skip notice when extraction is skipped for additional material', async ({ page }) => {
+        await gotoOnboarding(page, { extractTopicsSkippedAdditional: true });
+
+        const modalPromise = page.evaluate(async () => {
+            const testWindow = /** @type {any} */ (window);
+            const topics = await testWindow.extractTopicsForUploadedDocument('COURSE-A', 'doc-1');
+            return testWindow.openTopicReviewModal('COURSE-A', 'Extra Notes', [], topics, 'Unit 1');
+        });
+        await expect(page.locator('#topic-review-modal')).toHaveClass(/show/);
+        await expect(page.locator('#topic-review-skip-notice')).toBeVisible();
+        await expect(page.locator('#topic-review-skip-notice')).toContainText('Additional material secondary search is turned on');
+        await page.locator('#topic-review-cancel-btn').click();
+
+        await expect(modalPromise).resolves.toBeNull();
+    });
+
     test('rejects when approved topics save request fails', async ({ page }) => {
         await gotoOnboarding(page, { approvedTopicsStatus: 500 });
 

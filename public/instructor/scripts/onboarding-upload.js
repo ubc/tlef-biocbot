@@ -32,6 +32,7 @@ function openTopicReviewModal(courseId, sourceName, existingTopics, suggestedTop
         : 'Detected concepts from the uploaded content.';
 
     modal.querySelector('#topic-review-context').textContent = contextText;
+    syncTopicExtractionSkipNotice(modal.querySelector('#topic-review-context'), 'topic-review-skip-notice');
     modal.querySelector('#topic-review-new-input').value = '';
     const unitSelect = modal.querySelector('#topic-review-new-unit-select');
     if (unitSelect) unitSelect.innerHTML = getTopicUnitOptions(unitId);
@@ -79,6 +80,7 @@ function showInlineTopicReview(courseId, sourceName, existingTopics, suggestedTo
             ? `Detected concepts after processing: ${sourceName}${currentWeek ? ` (${currentWeek})` : ''}`
             : 'Detected concepts from the uploaded content.';
     }
+    syncTopicExtractionSkipNotice(contextEl, 'upload-topic-skip-notice');
 
     // Populate topic rows
     const list = document.getElementById('upload-topic-review-list');
