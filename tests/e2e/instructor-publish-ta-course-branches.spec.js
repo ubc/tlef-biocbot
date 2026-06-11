@@ -61,7 +61,6 @@ async function installBranchRoutes(page, options = {}) {
     const controls = {
         publishMode: 'success',
         publishStatusMode: 'normal',
-        retrievalSaveMode: 'success',
         taCourses: [{ courseId: COURSE_ID, courseName: course.courseName }],
         taPermissions: { canAccessCourses: true, canAccessFlags: true },
         instructorCourses: [course],
@@ -75,7 +74,6 @@ async function installBranchRoutes(page, options = {}) {
         courseByIdCalls: 0,
         publishCalls: 0,
         publishStatusCalls: 0,
-        retrievalRequests: /** @type {Array<Record<string, unknown>>} */ ([]),
     };
     Object.assign(controls, options.controls || {});
 
@@ -205,16 +203,6 @@ async function installBranchRoutes(page, options = {}) {
             return;
         }
 
-        if (pathname === `/api/courses/${COURSE_ID}/retrieval-mode` && method === 'PUT') {
-            controls.retrievalRequests.push(request.postDataJSON());
-            if (controls.retrievalSaveMode === 'fail') {
-                await route.fulfill({ status: 500, json: { success: false, message: 'save failed' } });
-                return;
-            }
-            await route.fulfill({ json: { success: true, data: request.postDataJSON() } });
-            return;
-        }
-
         if (pathname === '/api/lectures/publish-status') {
             controls.publishStatusCalls += 1;
             if (controls.publishStatusMode === 'fail') {
@@ -328,17 +316,6 @@ async function openInstructorDocuments(page, options = {}) {
     return controls;
 }
 
-async function openInstructorSettings(page, options = {}) {
-    const controls = await installBranchRoutes(page, options);
-    await page.goto(`/instructor/settings?courseId=${options.withCourseParam === false ? '' : COURSE_ID}`);
-    await page.waitForFunction(() => {
-        const instructorWindow = /** @type {InstructorWindow} */ (window);
-        return typeof instructorWindow.showNotification === 'function'
-            && typeof instructorWindow.getCurrentCourseId === 'function';
-    });
-    return controls;
-}
-
 async function openInstructorScriptHarness(page, options = {}) {
     const controls = await installBranchRoutes(page, options);
     if (Object.prototype.hasOwnProperty.call(options, 'selectedCourseId')) {
@@ -378,6 +355,16 @@ async function openInstructorScriptHarness(page, options = {}) {
     <script src="/common/scripts/auth.js"></script>
     <script src="/common/scripts/ui-utils.js"></script>
     <script src="/common/scripts/topic-review.js"></script>
+    <script src="/instructor/scripts/instructor-state.js"></script>
+    <script src="/instructor/scripts/instructor-course.js"></script>
+    <script src="/instructor/scripts/instructor-ta.js"></script>
+    <script src="/instructor/scripts/instructor-publish.js"></script>
+    <script src="/instructor/scripts/instructor-units.js"></script>
+    <script src="/instructor/scripts/instructor-documents.js"></script>
+    <script src="/instructor/scripts/instructor-upload-topics.js"></script>
+    <script src="/instructor/scripts/instructor-objectives.js"></script>
+    <script src="/instructor/scripts/instructor-questions.js"></script>
+    <script src="/instructor/scripts/instructor-ai-generation.js"></script>
     <script src="/instructor/scripts/instructor.js"></script>
 </body>
 </html>`,
@@ -682,34 +669,10 @@ test.describe('instructor publish, TA, course, and polling branches', () => {
         await expect(page.locator('.accordion-item[data-unit-name="Unit 1"]')).toHaveClass(/published/);
     });
 
-    test('disables retrieval toggle when no course context exists', async ({ page }) => {
-        await openInstructorSettings(page, {
-            withCourseParam: false,
-            controls: { instructorCourses: [] },
-        });
-
-        await expect(page.locator('#additive-retrieval-toggle')).toBeDisabled();
-    });
-
-    test('restores retrieval toggle when save fails', async ({ page }) => {
-        const controls = await openInstructorSettings(page, {
-            controls: { retrievalSaveMode: 'fail' },
-        });
-
-        const toggle = page.locator('#additive-retrieval-toggle');
-        await expect(toggle).not.toBeChecked();
-        await toggle.evaluate((element) => {
-            const input = /** @type {HTMLInputElement} */ (element);
-            input.checked = true;
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-        });
-
-        await expect.poll(() => controls.retrievalRequests).toEqual([
-            { isAdditiveRetrieval: true },
-        ]);
-        await expect(toggle).not.toBeChecked();
-        await expect(page.locator('.notification').filter({ hasText: 'Failed to update retrieval mode' })).toBeVisible();
-    });
+    // The "retrieval toggle" tests were removed: the instructor.js listener
+    // that instant-saved #additive-retrieval-toggle was deleted as dead code.
+    // The toggle only exists on settings.html, where settings.js owns it
+    // (covered by instructor-settings.spec.js: init, save, and reset flows).
 
     test('skips polling when no document accordions exist', async ({ page }) => {
         await openInstructorDocuments(page);
