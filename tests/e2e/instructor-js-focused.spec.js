@@ -919,9 +919,6 @@ test.describe('instructor.js focused browser coverage', () => {
             myCourses.href = '#courses';
             const support = /** @type {HTMLAnchorElement} */ (ensureElement('ta-student-support-link', 'a'));
             support.href = '#support';
-            const additiveToggle = /** @type {HTMLInputElement} */ (ensureElement('additive-retrieval-toggle', 'input'));
-            additiveToggle.type = 'checkbox';
-            additiveToggle.disabled = true;
 
             instructorWindow.isTA = () => true;
             window.setInterval = /** @type {any} */ ((callback) => {
@@ -976,8 +973,6 @@ test.describe('instructor.js focused browser coverage', () => {
                 fileInput.dispatchEvent(new Event('change', { bubbles: true }));
             }
 
-            additiveToggle.checked = !additiveToggle.checked;
-            additiveToggle.dispatchEvent(new Event('change', { bubbles: true }));
             document.querySelector('.publish-toggle input')?.dispatchEvent(new Event('change', { bubbles: true }));
 
             const firstRenameInput = /** @type {HTMLInputElement} */ (document.querySelector('.unit-rename-input'));
@@ -996,13 +991,11 @@ test.describe('instructor.js focused browser coverage', () => {
             return {
                 instructorHomeDisplay: document.getElementById('instructor-home-nav')?.style.display,
                 taCoursesDisplay: document.getElementById('ta-courses-nav')?.style.display,
-                additiveDisabled: additiveToggle.disabled,
             };
         });
 
         expect(result.instructorHomeDisplay).toBe('none');
         expect(result.taCoursesDisplay).toBe('block');
-        expect(result.additiveDisabled).toBe(false);
     });
 
     test('covers route failure branches without changing production behavior', async ({ page }) => {

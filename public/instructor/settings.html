@@ -998,9 +998,11 @@
 
     <script src="../common/scripts/auth.js"></script>
     <script src="../common/scripts/notifications.js"></script>
-    <script src="../common/scripts/ui-utils.js"></script>
-    <script src="../common/scripts/topic-review.js"></script>
-    <script src="./scripts/instructor.js"></script>
+    <!-- settings.js only needs getCurrentCourseId/waitForAuth (and their
+         state) from the instructor modules; the rest of instructor.js is
+         documents-page functionality and is intentionally not loaded here. -->
+    <script src="./scripts/instructor-state.js"></script>
+    <script src="./scripts/instructor-course.js"></script>
     <script src="./scripts/settings.js"></script>
 </body>
 </html>
