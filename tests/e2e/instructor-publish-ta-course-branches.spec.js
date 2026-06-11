@@ -376,6 +376,8 @@ async function openInstructorScriptHarness(page, options = {}) {
     <div class="user-role"></div>
     <script src="/common/scripts/notifications.js"></script>
     <script src="/common/scripts/auth.js"></script>
+    <script src="/common/scripts/ui-utils.js"></script>
+    <script src="/common/scripts/topic-review.js"></script>
     <script src="/instructor/scripts/instructor.js"></script>
 </body>
 </html>`,
