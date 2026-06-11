@@ -360,6 +360,13 @@ async function openStudentScriptHarness(page, options = {}) {
         };
     })();
     </script>
+    <script src="/student/scripts/student-state.js"></script>
+    <script src="/student/scripts/student-chat-core.js"></script>
+    <script src="/student/scripts/student-practice.js"></script>
+    <script src="/student/scripts/student-session.js"></script>
+    <script src="/student/scripts/student-restore.js"></script>
+    <script src="/student/scripts/student-course.js"></script>
+    <script src="/student/scripts/student-calibration.js"></script>
     <script src="/student/scripts/student.js"></script>
 </body>
 </html>`,
