@@ -249,14 +249,19 @@ class LLMService {
             : '';
         const prompt =
             `You are extracting content from a lecture slide${slideInfo} so it can be used as ` +
-            `searchable course notes. Describe this image factually and concisely. ` +
-            `If it is a chart, graph, or diagram, summarize what it shows and any key data, ` +
-            `labels, or trends. If it contains text (e.g. a screenshot), transcribe that text. ` +
-            `If you identify topics or concepts, include only biochemistry topics. If there ` +
-            `are no biochemistry topics, do not mention that fact; just describe/transcribe ` +
-            `any visible factual content, or return nothing if there is no useful content. ` +
-            `Do not add commentary or preamble. If the image is purely decorative and carries ` +
-            `no information, respond with nothing.`;
+            `searchable course notes. Describe only what is genuinely visible in the image.\n\n` +
+            `If the image is purely decorative or non-scientific — for example an icon, ` +
+            `clip-art, logo, doodle, thought bubble, background, divider, emoji, or generic ` +
+            `stock photo — or if it is too unclear to describe at all, respond with exactly ` +
+            `NO_CONTENT and nothing else.\n\n` +
+            `Otherwise, describe it factually and concisely. This includes scientific figures, ` +
+            `diagrams, molecular or protein structures, micrographs, gels, blots, and plots: ` +
+            `describe these from what is visibly present (overall structure, shapes, colours, ` +
+            `panels, axes, trends) EVEN IF they have no text labels. If the image contains ` +
+            `text (e.g. labels or a screenshot), transcribe it. Crucially, describe only what ` +
+            `you can actually see — never invent or guess specific identities, names, labels, ` +
+            `values, or topics that are not visibly present, and do not reconstruct a diagram ` +
+            `you cannot clearly make out. Do not add commentary, preamble, or hedging.`;
 
         // Reuse provider/model handling (gpt-5 family param translation, etc.).
         const baseOptions = {
@@ -278,14 +283,20 @@ class LLMService {
         );
 
         const content = (response && response.content) ? response.content.trim() : '';
-        if (/^(nothing|no)\b.*\b(biochemistry|biochemical)\b/i.test(content)) {
+
+        // The prompt instructs the model to reply with the sentinel `NO_CONTENT`
+        // for decorative or unreadable images. Treat that — along with empty or
+        // trivially "nothing"-style replies — as nothing to inline, so the parser
+        // omits the image instead of emitting a fabricated or useless description.
+        const normalized = content.replace(/[^a-z]/gi, '').toUpperCase();
+        if (
+            !content ||
+            normalized === 'NOCONTENT' ||
+            normalized === 'NOTHING' ||
+            normalized === 'NONE' ||
+            normalized === 'NA'
+        ) {
             return '';
-        }
-        if (/\bno biochemistry topics?\b/i.test(content)) {
-            return content
-                .replace(/\.?\s*no biochemistry topics?[^.]*\./ig, '')
-                .replace(/\bThere are no biochemistry topics?[^.]*\./ig, '')
-                .trim();
         }
 
         return content;
