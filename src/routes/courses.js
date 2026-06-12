@@ -1145,6 +1145,21 @@ router.post('/:courseId/extract-topics', async (req, res) => {
                     message: 'Document not found in this course'
                 });
             }
+
+            // When the course de-prioritizes additional materials (secondary
+            // search enabled), struggle topics are not picked from them.
+            const isAdditionalMaterial = document.documentType === 'additional' || document.type === 'additional';
+            if (isAdditionalMaterial && course.additionalMaterialSecondarySearch === true) {
+                return res.json({
+                    success: true,
+                    data: {
+                        courseId,
+                        topics: [],
+                        skippedAdditionalMaterial: true
+                    }
+                });
+            }
+
             sourceContent = typeof document.content === 'string' ? document.content : '';
         }
 

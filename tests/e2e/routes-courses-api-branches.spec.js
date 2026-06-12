@@ -196,6 +196,35 @@ test.describe('POST /api/courses/:courseId/extract-topics', () => {
             await withDb((db) => db.collection('documents').deleteMany({ documentId: 'br-doc-in-course' }));
         });
 
+        test('skips additional material when secondary search is enabled', async ({ request: api }) => {
+            // seedDocumentAndAttach seeds documents with documentType
+            // 'additional'; with the course de-prioritizing additional
+            // materials, the route must skip extraction entirely.
+            await seedCourse({
+                courseId: COURSE_BR_A,
+                instructorId,
+                overrides: { additionalMaterialSecondarySearch: true },
+            });
+            await seedDocumentAndAttach({
+                documentId: 'br-doc-additional-skip',
+                courseId: COURSE_BR_A,
+                lectureName: 'Unit 1',
+                instructorId,
+                content: 'Enzyme kinetics describes rates of catalysis.',
+            });
+
+            const res = await api.post(`/api/courses/${COURSE_BR_A}/extract-topics`, {
+                data: { documentId: 'br-doc-additional-skip' },
+            });
+            expect(res.ok()).toBeTruthy();
+            const body = await res.json();
+            expect(body.success).toBe(true);
+            expect(body.data.topics).toEqual([]);
+            expect(body.data.skippedAdditionalMaterial).toBe(true);
+
+            await withDb((db) => db.collection('documents').deleteMany({ documentId: 'br-doc-additional-skip' }));
+        });
+
         test('caps maxTopics within [1,15] (parseInt fallback path)', async ({ request: api }) => {
             const res = await api.post(`/api/courses/${COURSE_BR_A}/extract-topics`, {
                 data: {

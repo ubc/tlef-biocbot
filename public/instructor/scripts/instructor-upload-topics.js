@@ -31,6 +31,7 @@ function openTopicReviewModal(courseId, sourceName, existingTopics, suggestedTop
         : 'New topics detected from the uploaded content.';
 
     modal.querySelector('#topic-review-context').textContent = contextText;
+    syncTopicExtractionSkipNotice(modal.querySelector('#topic-review-context'), 'topic-review-skip-notice');
     modal.querySelector('#topic-review-new-input').value = '';
     const unitSelect = modal.querySelector('#topic-review-new-unit-select');
     if (unitSelect) unitSelect.innerHTML = getTopicUnitOptions(unitId);
@@ -276,6 +277,7 @@ function showInlineTopicReview(courseId, sourceName, existingTopics, suggestedTo
             ? `New topics detected from: ${sourceName}${currentWeek ? ` (${currentWeek})` : ''}`
             : 'New topics detected from the uploaded content.';
     }
+    syncTopicExtractionSkipNotice(contextEl, 'upload-topic-skip-notice');
 
     // Show existing topic count
     const existingNote = document.getElementById('upload-topic-existing-note');

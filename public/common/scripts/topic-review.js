@@ -12,6 +12,32 @@
 let topicReviewResolve = null;
 let pendingTopicReviewData = null;
 
+// Set when the server skipped topic extraction because the uploaded document
+// is an additional material and the course de-prioritizes additional
+// materials ("Additional material secondary search" is turned on).
+let topicExtractionSkippedAdditionalMaterial = false;
+
+const TOPIC_EXTRACTION_SKIP_NOTICE = 'Additional material secondary search is turned on for this course, so struggle topics were not picked from this additional material. You can still add topics manually.';
+
+/**
+ * Ensure a notice paragraph exists right after the given anchor element and
+ * show it only when the last extraction was skipped for additional material.
+ */
+function syncTopicExtractionSkipNotice(anchorEl, noticeId) {
+    if (!anchorEl) return;
+
+    let notice = document.getElementById(noticeId);
+    if (!notice) {
+        notice = document.createElement('p');
+        notice.id = noticeId;
+        notice.className = 'topic-review-skip-notice';
+        anchorEl.insertAdjacentElement('afterend', notice);
+    }
+
+    notice.textContent = TOPIC_EXTRACTION_SKIP_NOTICE;
+    notice.style.display = topicExtractionSkippedAdditionalMaterial ? '' : 'none';
+}
+
 function normalizeTopicLabel(topic) {
     if (typeof topic === 'string') {
         return topic.replace(/\s+/g, ' ').trim();
@@ -124,6 +150,7 @@ async function fetchCourseApprovedTopics(courseId) {
 }
 
 async function extractTopicsForUploadedDocument(courseId, documentId) {
+    topicExtractionSkippedAdditionalMaterial = false;
     if (!documentId) return [];
 
     const response = await fetch(`/api/courses/${courseId}/extract-topics`, {
@@ -137,6 +164,7 @@ async function extractTopicsForUploadedDocument(courseId, documentId) {
     }
 
     const result = await response.json();
+    topicExtractionSkippedAdditionalMaterial = result?.data?.skippedAdditionalMaterial === true;
     return dedupeTopics(result?.data?.topicLabels || result?.data?.topics || []);
 }
 
@@ -173,6 +201,15 @@ function ensureTopicReviewModal(hintText = 'Edit, add, or remove topics before s
             .topic-review-hint {
                 margin: 0 0 12px;
                 color: #666;
+                font-size: 13px;
+            }
+            .topic-review-skip-notice {
+                margin: 0 0 12px;
+                padding: 8px 10px;
+                background: #fff8e6;
+                border: 1px solid #f0d48a;
+                border-radius: 6px;
+                color: #7a5b00;
                 font-size: 13px;
             }
             .topic-review-list {
@@ -348,6 +385,7 @@ function ensureTopicReviewStyles() {
     style.textContent = `
         .topic-review-context { margin: 0 0 10px; color: #333; font-size: 14px; }
         .topic-review-hint { margin: 0 0 12px; color: #666; font-size: 13px; }
+        .topic-review-skip-notice { margin: 0 0 12px; padding: 8px 10px; background: #fff8e6; border: 1px solid #f0d48a; border-radius: 6px; color: #7a5b00; font-size: 13px; }
         .topic-review-list { display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; margin-bottom: 10px; }
         .topic-review-item { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
         .topic-review-input { width: 100%; padding: 10px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
