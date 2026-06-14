@@ -1066,12 +1066,17 @@ async function submitShortAnswer(answer, questionIndex) {
             studentName = currentUser.displayName;
         }
 
+        // Short-answer evaluation is billed to the course's OpenAI key, so the
+        // request must carry the courseId for the per-course key to resolve.
+        const courseId = localStorage.getItem('selectedCourseId');
+
         const response = await fetch('/api/questions/check-answer', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
+                courseId,
                 question: question.question,
                 studentAnswer: answer,
                 expectedAnswer: expectedAnswer,

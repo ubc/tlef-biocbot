@@ -202,15 +202,18 @@ router.post('/search', async (req, res) => {
     try {
         const { query, courseId, lectureName, limit = 10 } = req.body;
 
+        // Authorize before validating inputs so unauthorized callers (e.g. a
+        // student hitting the API directly) get a 403 rather than a validation
+        // 400 that leaks request shape — matching /process-document's ordering.
+        const user = await requireDirectQdrantAccess(req, res, { courseId });
+        if (!user) return;
+
         if (!courseId) {
             return res.status(400).json({
                 success: false,
                 message: 'courseId is required for semantic search'
             });
         }
-
-        const user = await requireDirectQdrantAccess(req, res, { courseId });
-        if (!user) return;
 
         if (!query) {
             return res.status(400).json({

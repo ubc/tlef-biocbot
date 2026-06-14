@@ -668,9 +668,13 @@ test.describe('POST /api/questions/check-answer', () => {
         await enqueueLlmResponses(api, [
             JSON.stringify({ correct: true, feedback: 'E2E, your answer is correct.' }),
         ]);
+        // Short-answer eval is billed to the course key, so the route resolves
+        // the course's LLM via courseId — seed a keyed course and pass its id.
+        await seedCourse({ courseId: COURSE_A, instructorId });
 
         const res = await api.post('/api/questions/check-answer', {
             data: {
+                courseId: COURSE_A,
                 question: 'What molecule stores genetic information?',
                 studentAnswer: 'DNA',
                 expectedAnswer: 'Deoxyribonucleic acid (DNA)',
@@ -695,9 +699,11 @@ test.describe('POST /api/questions/check-answer', () => {
         await enqueueLlmResponses(api, [
             'Yes, correct": true — your reasoning is sound, well done.',
         ]);
+        await seedCourse({ courseId: COURSE_A, instructorId });
 
         const res = await api.post('/api/questions/check-answer', {
             data: {
+                courseId: COURSE_A,
                 question: 'What molecule stores genetic information?',
                 studentAnswer: 'DNA',
                 expectedAnswer: 'Deoxyribonucleic acid (DNA)',
@@ -718,9 +724,11 @@ test.describe('POST /api/questions/check-answer', () => {
         await enqueueLlmResponses(api, [
             '{ "correct": true, "feedback": "missing close brace',
         ]);
+        await seedCourse({ courseId: COURSE_A, instructorId });
 
         const res = await api.post('/api/questions/check-answer', {
             data: {
+                courseId: COURSE_A,
                 question: 'What molecule stores genetic information?',
                 studentAnswer: 'DNA',
                 expectedAnswer: 'Deoxyribonucleic acid (DNA)',
@@ -896,6 +904,7 @@ test.describe('POST /api/questions/auto-link-learning-objectives', () => {
                 ],
             }),
         ]);
+        await seedCourse({ courseId: COURSE_A, instructorId });
 
         const res = await api.post('/api/questions/auto-link-learning-objectives', {
             data: {
@@ -924,6 +933,7 @@ test.describe('POST /api/questions/auto-link-learning-objectives', () => {
         await enqueueLlmResponses(api, [
             'this is not JSON at all — just prose with no braces',
         ]);
+        await seedCourse({ courseId: COURSE_A, instructorId });
 
         const res = await api.post('/api/questions/auto-link-learning-objectives', {
             data: {

@@ -737,12 +737,15 @@ test.describe('qdrant.js — happy + validation branches', () => {
         });
         expect(searchC.ok()).toBeTruthy();
 
-        // Search with no filters at all — exercises the no-filter branch.
+        // Search with no courseId is now rejected: every semantic search embeds
+        // the query on the course's key, so courseId is required — there is no
+        // global, unbilled cross-course search through this endpoint anymore.
         const searchD = await api.post('/api/qdrant/search', {
             data: { query: sentinel, limit: 3 },
             timeout: 60_000,
+            failOnStatusCode: false,
         });
-        expect(searchD.ok()).toBeTruthy();
+        expect(searchD.status()).toBe(400);
 
         // Delete the document chunks — exercises happy delete branch.
         const del = await api.delete(`/api/qdrant/document/${documentId}`);

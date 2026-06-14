@@ -361,8 +361,10 @@ test.describe('POST /api/questions/check-answer', () => {
 
     test('happy path returns an LLM evaluation result', async ({ request: api }) => {
         test.setTimeout(120_000);
+        await seedCourse({ courseId: COURSE_A, instructorId });
         const res = await api.post('/api/questions/check-answer', {
             data: {
+                courseId: COURSE_A,
                 question: 'What molecule stores genetic information in cells?',
                 studentAnswer: 'DNA',
                 expectedAnswer: 'DNA (deoxyribonucleic acid)',
@@ -379,8 +381,10 @@ test.describe('POST /api/questions/check-answer', () => {
     test('happy path defaults studentName when omitted', async ({ request: api }) => {
         // Drives the `studentName || 'Student'` default branch on L1036.
         test.setTimeout(120_000);
+        await seedCourse({ courseId: COURSE_A, instructorId });
         const res = await api.post('/api/questions/check-answer', {
             data: {
+                courseId: COURSE_A,
                 question: 'What gas do plants take in for photosynthesis?',
                 studentAnswer: 'carbon dioxide',
                 expectedAnswer: 'CO2',

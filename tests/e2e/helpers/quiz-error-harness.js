@@ -60,6 +60,31 @@ function freshState() {
 
 let state = freshState();
 
+// The quiz routes resolve their LLM + Qdrant through req.app.locals.llmRegistry
+// (registry.forCourse(...)) rather than reading app.locals.llm directly.
+// Production wires this registry at boot; the harness hands back the
+// test-controlled state.llm plus a real QdrantService instance so the prototype
+// patches in chat-qdrant-returns-results still take effect. When state.llm is
+// null the middleware omits the registry entirely, so resolveCourseAi takes its
+// "registry not initialized" → 503 path — which is how the no-llm tests assert
+// an unavailable LLM.
+const stubRegistry = (() => {
+    const resolve = async () => ({
+        llm: state.llm,
+        qdrant: new QdrantService({ skipEmbeddings: true }),
+        embeddings: undefined,
+    });
+    return {
+        forCourse: resolve,
+        forSuperchat: resolve,
+        forNotes: resolve,
+        evictCourse() {},
+        evictSuperchat() {},
+        evictNotes() {},
+        clear() {},
+    };
+})();
+
 function applyMode(mode) {
     restoreOriginals();
     state = freshState();
@@ -352,8 +377,10 @@ app.use((req, _res, next) => {
     }
     if (state.llm === null) {
         delete req.app.locals.llm;
+        delete req.app.locals.llmRegistry;
     } else {
         req.app.locals.llm = state.llm;
+        req.app.locals.llmRegistry = stubRegistry;
     }
     req.user = state.user;
     next();

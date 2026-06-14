@@ -178,6 +178,30 @@ const state = {
     lastLlmRequest: null,
 };
 
+// chat.js / quiz.js / questions.js resolve their LLM + Qdrant through
+// req.app.locals.llmRegistry (registry.forCourse(...)) rather than reading
+// app.locals.llm directly. The harness hands back the test-controlled state.llm
+// plus a QdrantService instance whose prototype methods are patched by
+// configureQdrant (so searchDocuments still records lastQdrantSearch). When
+// state.llm is null the registry is omitted, so resolveCourseAi takes its
+// "registry not initialized" → 503 path.
+const stubRegistry = (() => {
+    const resolve = async () => ({
+        llm: state.llm,
+        qdrant: new QdrantService({ skipEmbeddings: true }),
+        embeddings: undefined,
+    });
+    return {
+        forCourse: resolve,
+        forSuperchat: resolve,
+        forNotes: resolve,
+        evictCourse() {},
+        evictSuperchat() {},
+        evictNotes() {},
+        clear() {},
+    };
+})();
+
 function fakeSession(session) {
     return {
         ...(session || {}),
@@ -197,6 +221,11 @@ function applyRequestState(req, _res, next) {
     req.app.locals.authService = state.authService;
     req.app.locals.passport = state.passportForLocals;
     req.app.locals.llm = state.llm;
+    if (state.llm) {
+        req.app.locals.llmRegistry = stubRegistry;
+    } else {
+        delete req.app.locals.llmRegistry;
+    }
     next();
 }
 
