@@ -129,6 +129,9 @@ function matchesQuery(doc, query = {}) {
                 .every(([, expected]) => docValue === expected);
         }
 
+        // MongoDB matches a scalar query against an array field by membership
+        // (e.g. courses.superchatIds: 'harness-bucket' matches ['harness-bucket']).
+        if (Array.isArray(docValue)) return docValue.includes(value);
         return docValue === value;
     });
 }
