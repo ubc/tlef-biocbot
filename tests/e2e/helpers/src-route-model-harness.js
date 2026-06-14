@@ -13,6 +13,7 @@ const UserAgreement = moduleRequire('../../../src/models/UserAgreement');
 const CourseModel = moduleRequire('../../../src/models/Course');
 const QdrantService = moduleRequire('../../../src/services/qdrantService');
 const createAuthMiddleware = moduleRequire('../../../src/middleware/auth');
+const { createValidLlmApiKey } = require('./llm-keys');
 
 const app = express();
 app.use(express.json());
@@ -470,6 +471,20 @@ function applyMode(mode) {
                 studentTopK: 8,
                 includeInactiveCourses: state.mode === 'instructor-super-chat-inactive',
                 showStudentSuperCourse: false,
+                instructorPrompt: 'Harness instructor super prompt',
+                studentPrompt: 'Harness student super prompt',
+            }]),
+            // Chat settings + key now live on the superchat bucket (not the global
+            // superCourseChat doc). resolveInstructorSuperchat picks the first bucket
+            // with a valid key, so the bucket must carry one to be aiAvailable.
+            superchats: new MemoryCollection([{
+                superchatId: 'harness-bucket',
+                name: 'Harness Bucket',
+                llmApiKey: createValidLlmApiKey('harness-bucket'),
+                instructorTopK: 6,
+                studentTopK: 8,
+                includeInactiveCourses: state.mode === 'instructor-super-chat-inactive',
+                showToStudents: false,
                 instructorPrompt: 'Harness instructor super prompt',
                 studentPrompt: 'Harness student super prompt',
             }]),

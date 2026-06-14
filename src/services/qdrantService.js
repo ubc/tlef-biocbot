@@ -1074,8 +1074,8 @@ class QdrantService {
             },
             embeddings: {
                 isInitialized: !!this.embeddings,
-                provider: llmService.getProviderName(),
-                isReady: llmService.isReady()
+                provider: (this.llmConfigOverride && this.llmConfigOverride.provider) || process.env.LLM_PROVIDER || null,
+                isReady: !!this.embeddings
             },
             chunking: {
                 isInitialized: !!this.chunker,
