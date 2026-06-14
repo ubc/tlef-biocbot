@@ -4,6 +4,7 @@ const SuperChatNote = require('../models/SuperChatNote');
 const prompts = require('./prompts');
 const CourseModel = require('../models/Course');
 const SuperchatModel = require('../models/Superchat');
+const { publicKeySummary } = require('./llmKeyStore');
 
 const SUPER_COURSE_SETTINGS_ID = 'superCourseChat';
 
@@ -93,6 +94,8 @@ async function getSuperchat(db, superchatId) {
         description: doc.description || '',
         yearLevel: doc.yearLevel ?? null,
         showToStudents: doc.showToStudents === true,
+        llmKey: publicKeySummary(doc.llmApiKey),
+        aiAvailable: publicKeySummary(doc.llmApiKey).status === 'valid',
         settings: resolveSuperCourseChatSettings(doc)
     };
 }
@@ -112,7 +115,9 @@ async function listSuperchats(db, options = {}) {
             name: doc.name,
             description: doc.description || '',
             yearLevel: doc.yearLevel ?? null,
-            showToStudents: doc.showToStudents === true
+            showToStudents: doc.showToStudents === true,
+            llmKey: publicKeySummary(doc.llmApiKey),
+            aiAvailable: publicKeySummary(doc.llmApiKey).status === 'valid'
         }));
 }
 
@@ -296,8 +301,8 @@ async function searchSuperCourse(db, query, limit, options = {}) {
     // the others out (see the Super Course "only one course ever cited" bug).
     let lectureResults = [];
     if (courseIds.length > 0 && lectureSlots > 0) {
-        const qdrant = new QdrantService();
-        await qdrant.initialize();
+        const qdrant = options.qdrant || new QdrantService();
+        if (!qdrant.client) await qdrant.initialize();
         const resultsByCourse = await qdrant.searchDocumentsByCourse(query, courseIds, totalK);
         lectureResults = mergeBalancedCourseResults(resultsByCourse, totalK);
     }
@@ -308,8 +313,14 @@ async function searchSuperCourse(db, query, limit, options = {}) {
         try {
             const minScore = normalizeNoteRatio(options.noteMinScore, NOTE_MIN_SCORE);
             const notesQdrant = new NotesQdrantService();
+            if (options.qdrant) {
+                await notesQdrant.initialize(options.qdrant);
+            }
             noteResults = await notesQdrant.searchNotes(query, noteSlots, { minScore });
         } catch (error) {
+            if (error && error.name === 'LlmKeyError') {
+                throw error;
+            }
             console.error('Super Course note retrieval failed:', error.message);
             noteResults = [];
         }

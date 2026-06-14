@@ -9,6 +9,7 @@
 
 require('dotenv').config();
 const { MongoClient } = require('mongodb');
+const { createValidLlmApiKey } = require('./llm-keys');
 
 const QUIZ_COURSE_ID = 'BIOC-E2E-QUIZ';
 const QUIZ_COURSE_NAME = 'BIOC E2E Quiz Test';
@@ -96,6 +97,7 @@ async function resetQuizCourse({ instructorId, quizSettings = {} }) {
             courseStructure: { weeks: 2, lecturesPerWeek: 1, totalUnits: 2 },
             isOnboardingComplete: true,
             status: 'active',
+            llmApiKey: createValidLlmApiKey(QUIZ_COURSE_ID),
             quizSettings: settings,
             studentEnrollment,
             lectures: [

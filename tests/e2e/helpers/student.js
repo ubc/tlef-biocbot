@@ -10,6 +10,7 @@
  */
 
 const { withDb, getUserIdByUsername } = require('./quiz');
+const { createValidLlmApiKey } = require('./llm-keys');
 
 const STU_COURSE_ID = 'BIOC-E2E-STU';
 const STU_COURSE_NAME = 'BIOC E2E Student Chat';
@@ -63,6 +64,7 @@ function buildCourseDoc({ courseId, courseName, instructorId, studentEnrollment,
         courseStructure: { weeks: 2, lecturesPerWeek: 1, totalUnits: 2 },
         isOnboardingComplete: true,
         status,
+        llmApiKey: createValidLlmApiKey(courseId),
         quizSettings: { enabled: true, testableUnits: 'all', allowLectureMaterialAccess: true },
         studentEnrollment,
         lectures: STU_UNITS.map((u) => ({

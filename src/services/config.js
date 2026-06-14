@@ -39,7 +39,7 @@ class ConfigService {
             case 'openai':
                 return {
                     provider: 'openai',
-                    apiKey: process.env.OPENAI_API_KEY,
+                    apiKey: process.env.OPENAI_API_KEY || undefined,
                     defaultModel: process.env.OPENAI_MODEL
                 };
                 
@@ -123,11 +123,11 @@ class ConfigService {
                 throw new Error('OLLAMA_MODEL is required for Ollama provider');
             }
         } else if (provider === 'openai') {
-            if (!process.env.OPENAI_API_KEY) {
-                throw new Error('OPENAI_API_KEY is required for OpenAI provider');
-            }
             if (!process.env.OPENAI_MODEL) {
                 throw new Error('OPENAI_MODEL is required for OpenAI provider');
+            }
+            if (!process.env.LLM_EMBEDDING_MODEL) {
+                throw new Error('LLM_EMBEDDING_MODEL is required for OpenAI provider');
             }
         } else if (provider === 'ubc-llm-sandbox') {
             if (!process.env.LLM_API_KEY) {

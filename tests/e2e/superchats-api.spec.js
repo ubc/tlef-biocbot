@@ -22,6 +22,7 @@ const { readSuperchat } = require('./helpers/superchats-test');
 const PREFIX = 'BIOC-E2E-SCAPI';
 const COURSE_ID = `${PREFIX}-COURSE`;
 const NAME_TAG = `${PREFIX}::bucket`; // unique marker so cleanup can find created buckets
+const VALID_API_KEY = 'sk-test-superchats-api';
 
 let instructorId;
 /** Track buckets created through the API so we can clean them up. */
@@ -58,7 +59,7 @@ test.describe('Superchats CRUD (instructor)', () => {
     test('an instructor can create, list, edit, and delete a bucket', async ({ request: api }) => {
         // Create
         const create = await api.post('/api/superchats', {
-            data: { name: `${NAME_TAG} create` },
+            data: { name: `${NAME_TAG} create`, apiKey: VALID_API_KEY },
         });
         expect(create.status()).toBe(201);
         const createBody = await create.json();
@@ -67,6 +68,7 @@ test.describe('Superchats CRUD (instructor)', () => {
         createdBucketIds.push(id);
         // New buckets are hidden from students by default.
         expect(createBody.superchat.showToStudents).toBe(false);
+        expect(createBody.superchat.llmKey).toMatchObject({ status: 'valid', last4: VALID_API_KEY.slice(-4) });
 
         // List includes it
         const list = await api.get('/api/superchats');
@@ -106,6 +108,15 @@ test.describe('Superchats CRUD (instructor)', () => {
         expect(resp.status()).toBe(400);
     });
 
+    test('create rejects invalid API keys', async ({ request: api }) => {
+        const resp = await api.post('/api/superchats', {
+            data: { name: `${NAME_TAG} invalid`, apiKey: 'not-a-real-key' },
+            failOnStatusCode: false,
+        });
+        expect(resp.status()).toBe(400);
+        expect(await resp.json()).toMatchObject({ success: false, code: 'LLM_KEY_INVALID' });
+    });
+
     test('GET/PUT/DELETE return 404 for an unknown bucket', async ({ request: api }) => {
         const getRes = await api.get('/api/superchats/does-not-exist', { failOnStatusCode: false });
         expect(getRes.status()).toBe(404);
@@ -119,8 +130,8 @@ test.describe('Superchats CRUD (instructor)', () => {
 test.describe('Per-course bucket membership (instructor)', () => {
     test('assigning a course to buckets round-trips and is reflected in availableSuperchats', async ({ request: api }) => {
         // Create two buckets.
-        const b1 = (await (await api.post('/api/superchats', { data: { name: `${NAME_TAG} A` } })).json()).superchat.superchatId;
-        const b2 = (await (await api.post('/api/superchats', { data: { name: `${NAME_TAG} B` } })).json()).superchat.superchatId;
+        const b1 = (await (await api.post('/api/superchats', { data: { name: `${NAME_TAG} A`, apiKey: VALID_API_KEY } })).json()).superchat.superchatId;
+        const b2 = (await (await api.post('/api/superchats', { data: { name: `${NAME_TAG} B`, apiKey: VALID_API_KEY } })).json()).superchat.superchatId;
         createdBucketIds.push(b1, b2);
 
         // GET ai-settings lists both buckets and shows no membership yet.
@@ -146,7 +157,7 @@ test.describe('Per-course bucket membership (instructor)', () => {
     });
 
     test('deleting a bucket detaches it from member courses', async ({ request: api }) => {
-        const bucketId = (await (await api.post('/api/superchats', { data: { name: `${NAME_TAG} detach` } })).json()).superchat.superchatId;
+        const bucketId = (await (await api.post('/api/superchats', { data: { name: `${NAME_TAG} detach`, apiKey: VALID_API_KEY } })).json()).superchat.superchatId;
         createdBucketIds.push(bucketId);
 
         await api.put('/api/settings/ai-settings', {

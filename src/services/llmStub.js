@@ -91,6 +91,13 @@ class LLMStub {
         return { content };
     }
 
+    async sendConversation(messages = [], options = {}) {
+        this.callLog.push({ kind: 'sendConversation', messages, options });
+        const lastUser = [...messages].reverse().find((m) => m && m.role === 'user');
+        const content = this._nextContent(lastUser ? lastUser.content : '', options);
+        return { content };
+    }
+
     createConversation() {
         const stub = this;
         const messages = [];

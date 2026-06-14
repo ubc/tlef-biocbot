@@ -272,6 +272,7 @@ async function handleCourseSetup(event) {
         course: formData.get('course') === 'custom' ? 
             document.getElementById('custom-course-name').value : 
             formData.get('course'),
+        apiKey: String(formData.get('apiKey') || '').trim(),
         weeks: weeks,
         lecturesPerWeek: lecturesPerWeek,
         totalUnits: weeks * lecturesPerWeek // Calculate total units
@@ -507,7 +508,8 @@ async function createCourse(courseData) {
                 weeks: courseData.weeks,
                 lecturesPerWeek: courseData.lecturesPerWeek,
                 totalUnits: courseData.totalUnits
-            }
+            },
+            apiKey: courseData.apiKey
         };
         
         console.log('📋 [ONBOARDING] Prepared onboarding data:', onboardingData);
@@ -581,6 +583,7 @@ function validateCourseSetup() {
     const courseSelect = document.getElementById('course-select');
     const weeksInput = document.getElementById('weeks-count');
     const lecturesInput = document.getElementById('lectures-per-week');
+    const apiKeyInput = document.getElementById('course-api-key');
     
     let isValid = true;
     
@@ -601,6 +604,11 @@ function validateCourseSetup() {
     
     // Only validate course structure fields if creating a new course (custom or no existing course)
     if (courseSelect.value === 'custom' || courseSelect.value === '') {
+        if (!apiKeyInput || !apiKeyInput.value.trim()) {
+            showFieldError(apiKeyInput, 'Enter the course OpenAI API key issued by the BiocBot team');
+            isValid = false;
+        }
+
         // Validate weeks input
         const weeks = parseInt(weeksInput.value);
         if (!weeks || weeks < 1 || weeks > 20) {

@@ -387,6 +387,38 @@
     cursor: not-allowed;
 }
 
+.llm-key-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.llm-key-input {
+    flex: 1 1 260px;
+    min-width: 220px;
+}
+
+.llm-key-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    margin-top: 2px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.llm-key-status.valid {
+    color: #1f7a46;
+}
+
+.llm-key-status.invalid,
+.llm-key-status.quota_exhausted,
+.llm-key-status.missing {
+    color: var(--danger-color);
+}
+
 /* Per-course Super Course bucket checklist */
 .superchat-checklist {
     display: flex;

@@ -8,9 +8,10 @@ const router = express.Router();
 const QdrantService = require('../services/qdrantService');
 const CourseModel = require('../models/Course');
 const { hasSystemAdminAccess } = require('../services/authorization');
+const { resolveCourseAi, sendLlmKeyError } = require('./llmKeyMiddleware');
 
 // Initialize Qdrant service
-const qdrantService = new QdrantService();
+const qdrantService = new QdrantService({ skipEmbeddings: true });
 
 // Middleware to parse JSON bodies
 router.use(express.json());
@@ -147,13 +148,11 @@ router.post('/process-document', async (req, res) => {
             });
         }
 
-        // Ensure service is initialized
-        if (!qdrantService.client) {
-            await qdrantService.initialize();
-        }
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
 
         // Process and store document
-        const result = await qdrantService.processAndStoreDocument({
+        const result = await ai.qdrant.processAndStoreDocument({
             courseId,
             lectureName,
             documentId,
@@ -185,6 +184,7 @@ router.post('/process-document', async (req, res) => {
         }
 
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error processing document:', error);
         res.status(500).json({
             success: false,
@@ -202,6 +202,13 @@ router.post('/search', async (req, res) => {
     try {
         const { query, courseId, lectureName, limit = 10 } = req.body;
 
+        if (!courseId) {
+            return res.status(400).json({
+                success: false,
+                message: 'courseId is required for semantic search'
+            });
+        }
+
         const user = await requireDirectQdrantAccess(req, res, { courseId });
         if (!user) return;
 
@@ -212,10 +219,8 @@ router.post('/search', async (req, res) => {
             });
         }
 
-        // Ensure service is initialized
-        if (!qdrantService.client) {
-            await qdrantService.initialize();
-        }
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
 
         // Build filters
         const filters = {};
@@ -223,7 +228,7 @@ router.post('/search', async (req, res) => {
         if (lectureName) filters.lectureName = lectureName;
 
         // Perform search
-        const searchResults = await qdrantService.searchDocuments(query, filters, limit);
+        const searchResults = await ai.qdrant.searchDocuments(query, filters, limit);
 
         res.json({
             success: true,
@@ -236,6 +241,7 @@ router.post('/search', async (req, res) => {
         });
 
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error searching documents:', error);
         res.status(500).json({
             success: false,

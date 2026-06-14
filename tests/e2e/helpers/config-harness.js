@@ -15,6 +15,12 @@ const path = require('path');
 const v8 = require('v8');
 
 const configPath = path.resolve(__dirname, '../../../src/services/config');
+const OPENAI_VALID_ENV = {
+    LLM_PROVIDER: 'openai',
+    OPENAI_API_KEY: 'k',
+    OPENAI_MODEL: 'm',
+    LLM_EMBEDDING_MODEL: 'embed',
+};
 
 function loadFresh(envOverrides) {
     delete require.cache[require.resolve(configPath)];
@@ -73,7 +79,12 @@ async function run() {
 
     // ---- getLLMConfig: openai ----
     withFreshConfig(
-        { LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'sk-test', OPENAI_MODEL: 'gpt-4.1-mini' },
+        {
+            LLM_PROVIDER: 'openai',
+            OPENAI_API_KEY: 'sk-test',
+            OPENAI_MODEL: 'gpt-4.1-mini',
+            LLM_EMBEDDING_MODEL: 'text-embedding-3-small',
+        },
         (config) => {
             const llm = config.getLLMConfig();
             assert.equal(llm.provider, 'openai');
@@ -119,14 +130,14 @@ async function run() {
         assert.throws(() => config.validateConfig(), /OLLAMA_MODEL is required/);
     });
 
-    // ---- validateConfig: openai missing key ----
+    // ---- validateConfig: openai missing model ----
     withFreshConfig({ LLM_PROVIDER: 'openai' }, (config) => {
-        assert.throws(() => config.validateConfig(), /OPENAI_API_KEY is required/);
+        assert.throws(() => config.validateConfig(), /OPENAI_MODEL is required/);
     });
 
-    // ---- validateConfig: openai missing model ----
-    withFreshConfig({ LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'k' }, (config) => {
-        assert.throws(() => config.validateConfig(), /OPENAI_MODEL is required/);
+    // ---- validateConfig: openai missing embedding model ----
+    withFreshConfig({ LLM_PROVIDER: 'openai', OPENAI_MODEL: 'm' }, (config) => {
+        assert.throws(() => config.validateConfig(), /LLM_EMBEDDING_MODEL is required/);
     });
 
     // ---- validateConfig: ubc-llm-sandbox missing api key ----
@@ -154,7 +165,7 @@ async function run() {
     });
 
     // ---- getServerConfig: defaults ----
-    withFreshConfig({ LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_MODEL: 'm' }, (config) => {
+    withFreshConfig(OPENAI_VALID_ENV, (config) => {
         const s = config.getServerConfig();
         assert.equal(s.port, 8080);
         assert.equal(s.nodeEnv, 'development');
@@ -162,7 +173,7 @@ async function run() {
 
     // ---- getServerConfig: explicit values ----
     withFreshConfig(
-        { LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_MODEL: 'm', TLEF_BIOCBOT_PORT: '9999', NODE_ENV: 'production' },
+        { ...OPENAI_VALID_ENV, TLEF_BIOCBOT_PORT: '9999', NODE_ENV: 'production' },
         (config) => {
             const s = config.getServerConfig();
             assert.equal(s.port, '9999');
@@ -171,14 +182,14 @@ async function run() {
     );
 
     // ---- getDatabaseConfig: default ----
-    withFreshConfig({ LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_MODEL: 'm' }, (config) => {
+    withFreshConfig(OPENAI_VALID_ENV, (config) => {
         const d = config.getDatabaseConfig();
         assert.equal(d.mongoUri, 'mongodb://localhost:27017/biocbot');
     });
 
     // ---- getDatabaseConfig: explicit ----
     withFreshConfig(
-        { LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_MODEL: 'm', MONGODB_URI: 'mongodb://db/host' },
+        { ...OPENAI_VALID_ENV, MONGODB_URI: 'mongodb://db/host' },
         (config) => {
             const d = config.getDatabaseConfig();
             assert.equal(d.mongoUri, 'mongodb://db/host');
@@ -187,7 +198,7 @@ async function run() {
 
     // ---- getVectorDBConfig: QDRANT_URL parsed correctly ----
     withFreshConfig(
-        { LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_MODEL: 'm', QDRANT_URL: 'http://qdrant.example:6333' },
+        { ...OPENAI_VALID_ENV, QDRANT_URL: 'http://qdrant.example:6333' },
         (config) => {
             const v = config.getVectorDBConfig();
             assert.equal(v.host, 'qdrant.example');
@@ -197,7 +208,7 @@ async function run() {
 
     // ---- getVectorDBConfig: QDRANT_URL without explicit port → defaults to 6333 ----
     withFreshConfig(
-        { LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_MODEL: 'm', QDRANT_URL: 'http://qdrant.example' },
+        { ...OPENAI_VALID_ENV, QDRANT_URL: 'http://qdrant.example' },
         (config) => {
             const v = config.getVectorDBConfig();
             assert.equal(v.host, 'qdrant.example');
@@ -207,7 +218,7 @@ async function run() {
 
     // ---- getVectorDBConfig: invalid QDRANT_URL falls back to defaults ----
     withFreshConfig(
-        { LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_MODEL: 'm', QDRANT_URL: 'not-a-url' },
+        { ...OPENAI_VALID_ENV, QDRANT_URL: 'not-a-url' },
         (config) => {
             const v = config.getVectorDBConfig();
             assert.equal(v.host, 'localhost');
@@ -217,7 +228,7 @@ async function run() {
 
     // ---- getVectorDBConfig: no QDRANT_URL, individual envs ----
     withFreshConfig(
-        { LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_MODEL: 'm', QDRANT_HOST: 'h1', QDRANT_PORT: '7000' },
+        { ...OPENAI_VALID_ENV, QDRANT_HOST: 'h1', QDRANT_PORT: '7000' },
         (config) => {
             const v = config.getVectorDBConfig();
             assert.equal(v.host, 'h1');
@@ -226,7 +237,7 @@ async function run() {
     );
 
     // ---- getVectorDBConfig: no env at all → defaults ----
-    withFreshConfig({ LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_MODEL: 'm' }, (config) => {
+    withFreshConfig(OPENAI_VALID_ENV, (config) => {
         const v = config.getVectorDBConfig();
         assert.equal(v.host, 'localhost');
         assert.equal(v.port, 6333);
@@ -234,7 +245,7 @@ async function run() {
 
     // ---- getEnvironment / isDevelopment / isProduction ----
     withFreshConfig(
-        { LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_MODEL: 'm', NODE_ENV: 'development' },
+        { ...OPENAI_VALID_ENV, NODE_ENV: 'development' },
         (config) => {
             assert.equal(config.getEnvironment(), 'development');
             assert.equal(config.isDevelopment(), true);
@@ -242,20 +253,20 @@ async function run() {
         }
     );
     withFreshConfig(
-        { LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_MODEL: 'm', NODE_ENV: 'production' },
+        { ...OPENAI_VALID_ENV, NODE_ENV: 'production' },
         (config) => {
             assert.equal(config.getEnvironment(), 'production');
             assert.equal(config.isProduction(), true);
             assert.equal(config.isDevelopment(), false);
         }
     );
-    withFreshConfig({ LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_MODEL: 'm' }, (config) => {
+    withFreshConfig(OPENAI_VALID_ENV, (config) => {
         // No NODE_ENV → defaults to development
         assert.equal(config.getEnvironment(), 'development');
     });
 
     // ---- ensureValidated caches isValidated after first use ----
-    withFreshConfig({ LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'k', OPENAI_MODEL: 'm' }, (config) => {
+    withFreshConfig(OPENAI_VALID_ENV, (config) => {
         config.getServerConfig();
         // second call hits the `if (!this.isValidated)` false branch
         config.getServerConfig();

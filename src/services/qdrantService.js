@@ -9,15 +9,20 @@ const { ChunkingModule } = require('ubc-genai-toolkit-chunking');
 const { ConsoleLogger } = require('ubc-genai-toolkit-core');
 const { randomUUID } = require('crypto');
 const config = require('./config');
-const llmService = require('./llm');
+const { LlmKeyError, mapOpenAIErrorToStatus } = require('./llmKeyStore');
 
 console.log('✅ Successfully imported embeddings library:', typeof EmbeddingsModule);
 
 class QdrantService {
-    constructor() {
+    constructor(options = {}) {
         this.client = null;
-        this.embeddings = null;
+        this.embeddings = options.embeddings || null;
         this.chunker = null;
+        this.llmConfigOverride = options.llmConfig || null;
+        this.skipEmbeddings = options.skipEmbeddings === true;
+        this.onProviderKeyFailure = typeof options.onProviderKeyFailure === 'function'
+            ? options.onProviderKeyFailure
+            : null;
         // Use a separate collection when the embeddings stub is active so the
         // stub's bag-of-words vectors don't mix with real-LLM vectors stored
         // by a prior dev/prod run against the same Qdrant instance.
@@ -71,71 +76,79 @@ class QdrantService {
             
             // Use the centralized LLM configuration from config service
             let llmConfig;
-            try {
-                llmConfig = config.getLLMConfig();
-                console.log('LLM config retrieved:', {
-                    provider: llmConfig.provider,
-                    endpoint: llmConfig.endpoint || llmConfig.apiKey ? 'SET' : 'NOT SET',
-                    model: llmConfig.defaultModel
-                });
-            } catch (configError) {
-                console.error('❌ Failed to get LLM config:', configError);
-                throw new Error(`LLM configuration error: ${configError.message}`);
-            }
-            
-            const logger = new ConsoleLogger('biocbot-qdrant');
-            
-            // Add embedding-specific configuration
-            const embeddingConfig = {
-                providerType: 'ubc-genai-toolkit-llm',
-                logger: logger,
-                llmConfig: {
-                    ...llmConfig,
-                    embeddingModel: process.env.LLM_EMBEDDING_MODEL,
-                    // // Drop unsupported parameters when talking to Ollama
-                    litellm: {
-                        drop_params: true
+            if (!this.skipEmbeddings) {
+                try {
+                    llmConfig = this.llmConfigOverride || config.getLLMConfig();
+                    console.log('LLM config retrieved:', {
+                        provider: llmConfig.provider,
+                        endpoint: llmConfig.endpoint || llmConfig.apiKey ? 'SET' : 'NOT SET',
+                        model: llmConfig.defaultModel
+                    });
+                } catch (configError) {
+                    console.error('❌ Failed to get LLM config:', configError);
+                    throw new Error(`LLM configuration error: ${configError.message}`);
+                }
+
+                const logger = new ConsoleLogger('biocbot-qdrant');
+
+                // Add embedding-specific configuration
+                const embeddingConfig = {
+                    providerType: 'ubc-genai-toolkit-llm',
+                    logger: logger,
+                    llmConfig: {
+                        ...llmConfig,
+                        embeddingModel: process.env.LLM_EMBEDDING_MODEL,
+                        // // Drop unsupported parameters when talking to Ollama
+                        litellm: {
+                            drop_params: true
+                        }
                     }
-                }
-            };
+                };
 
-            console.log('Embedding config:', {
-                providerType: embeddingConfig.providerType,
-                embeddingModel: embeddingConfig.llmConfig.embeddingModel,
-                llmProvider: embeddingConfig.llmConfig.provider
-            });
+                console.log('Embedding config:', {
+                    providerType: embeddingConfig.providerType,
+                    embeddingModel: embeddingConfig.llmConfig.embeddingModel,
+                    llmProvider: embeddingConfig.llmConfig.provider
+                });
 
-            try {
-                if (process.env.BIOCBOT_TEST_LLM_STUB === '1') {
-                    const { EmbeddingsStub } = require('./embeddingsStub');
-                    this.embeddings = new EmbeddingsStub({ vectorSize: 1536 });
-                    console.log('🧪 Embeddings stub active (BIOCBOT_TEST_LLM_STUB=1) — no OpenAI traffic');
-                } else {
-                    this.embeddings = await EmbeddingsModule.create(embeddingConfig);
-                    console.log('✅ Successfully initialized embeddings service');
+                try {
+                    if (this.embeddings) {
+                        console.log('✅ Using provided embeddings service');
+                    } else if (process.env.BIOCBOT_TEST_LLM_STUB === '1') {
+                        const { EmbeddingsStub } = require('./embeddingsStub');
+                        this.embeddings = new EmbeddingsStub({ vectorSize: 1536 });
+                        console.log('🧪 Embeddings stub active (BIOCBOT_TEST_LLM_STUB=1) — no OpenAI traffic');
+                    } else {
+                        this.embeddings = await EmbeddingsModule.create(embeddingConfig);
+                        console.log('✅ Successfully initialized embeddings service');
+                    }
+                } catch (embeddingError) {
+                    console.error('❌ Failed to initialize embeddings service:', embeddingError);
+                    throw new Error(`Embeddings initialization error: ${embeddingError.message}`);
                 }
-            } catch (embeddingError) {
-                console.error('❌ Failed to initialize embeddings service:', embeddingError);
-                throw new Error(`Embeddings initialization error: ${embeddingError.message}`);
+            } else {
+                console.log('ℹ️ Skipping embeddings initialization for Qdrant maintenance operation');
             }
 
             // Initialize chunking service using centralized configuration
             console.log('Initializing chunking service...');
-            const chunkLogger = new ConsoleLogger('biocbot-chunking');
-            
-            // Use centralized configuration for chunking parameters
-            const chunkingConfig = {
-                strategy: process.env.CHUNK_STRATEGY || 'recursiveCharacter',
-                defaultOptions: {
-                    chunkSize: Number(process.env.CHUNK_SIZE) || 1000,
-                    chunkOverlap: Number(process.env.CHUNK_OVERLAP) || 200,
-                    minChunkSize: Number(process.env.CHUNK_MIN) || 100
-                },
-                logger: chunkLogger
-            };
-            
-            this.chunker = new ChunkingModule(chunkingConfig);
-            console.log(`✅ Successfully initialized chunking service (strategy=${this.chunker.getDefaultStrategyName()})`);
+            if (!this.skipEmbeddings) {
+                const chunkLogger = new ConsoleLogger('biocbot-chunking');
+
+                // Use centralized configuration for chunking parameters
+                const chunkingConfig = {
+                    strategy: process.env.CHUNK_STRATEGY || 'recursiveCharacter',
+                    defaultOptions: {
+                        chunkSize: Number(process.env.CHUNK_SIZE) || 1000,
+                        chunkOverlap: Number(process.env.CHUNK_OVERLAP) || 200,
+                        minChunkSize: Number(process.env.CHUNK_MIN) || 100
+                    },
+                    logger: chunkLogger
+                };
+
+                this.chunker = new ChunkingModule(chunkingConfig);
+                console.log(`✅ Successfully initialized chunking service (strategy=${this.chunker.getDefaultStrategyName()})`);
+            }
 
             // Set vector size based on the embedding model (more reliable than test embedding)
             console.log('Setting vector size based on embedding model...');
@@ -159,9 +172,10 @@ class QdrantService {
             console.log(`✅ Successfully initialized embeddings service (vector size: ${this.vectorSize} dimensions)`);
             
             // Test embeddings service to verify it's working (but don't rely on it for vector size)
-            console.log('Testing embeddings service...');
-            try {
-                const testEmbedding = await this.embeddings.embed('test');
+            if (!this.skipEmbeddings) {
+                console.log('Testing embeddings service...');
+                try {
+                    const testEmbedding = await this.embed('test');
                 console.log(`🔍 Test embedding result:`, {
                     isArray: Array.isArray(testEmbedding),
                     length: testEmbedding ? testEmbedding.length : 'undefined',
@@ -189,9 +203,10 @@ class QdrantService {
                     console.warn(`⚠️ Embeddings service test returned unexpected result, but continuing with model-based vector size`);
                 }
                 
-            } catch (embeddingTestError) {
-                console.warn(`⚠️ Embeddings service test failed:`, embeddingTestError.message);
-                console.log(`🔧 Continuing with model-based vector size: ${this.vectorSize}`);
+                } catch (embeddingTestError) {
+                    console.warn(`⚠️ Embeddings service test failed:`, embeddingTestError.message);
+                    console.log(`🔧 Continuing with model-based vector size: ${this.vectorSize}`);
+                }
             }
 
             // Ensure collection exists
@@ -397,7 +412,7 @@ class QdrantService {
                 }
                 
                 try {
-                    const embedding = await this.embeddings.embed(chunk);
+                    const embedding = await this.embed(chunk);
                     
                     if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
                         throw new Error(`Invalid embedding returned for chunk ${i + 1}: ${typeof embedding}`);
@@ -504,7 +519,7 @@ class QdrantService {
      * @returns {Promise<number[]>} Normalized query embedding
      */
     async generateQueryVector(query) {
-        const rawEmbedding = await this.embeddings.embed(query);
+        const rawEmbedding = await this.embed(query);
         let queryVector = rawEmbedding;
         if (Array.isArray(rawEmbedding)) {
             // If provider returns a batch ([[...]]), unwrap the first vector
@@ -530,6 +545,23 @@ class QdrantService {
             console.warn(`Query embedding size (${queryVector.length}) does not match expected collection size (${this.vectorSize})`);
         }
         return queryVector;
+    }
+
+    async embed(input) {
+        try {
+            return await this.embeddings.embed(input);
+        } catch (error) {
+            const status = mapOpenAIErrorToStatus(error);
+            if (status && this.onProviderKeyFailure) {
+                try {
+                    await this.onProviderKeyFailure(status, error);
+                } catch (handlerError) {
+                    console.error('❌ Error handling scoped embeddings key failure:', handlerError.message);
+                }
+                throw new LlmKeyError(status);
+            }
+            throw error;
+        }
     }
 
     /**

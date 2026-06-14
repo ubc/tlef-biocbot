@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const notesService = require('../services/superChatNotesService');
 const { CONTENT_SOFT_LIMIT } = require('../models/SuperChatNote');
+const { resolveNotesAi, sendLlmKeyError } = require('./llmKeyMiddleware');
 
 // Hard ceiling above the soft UI limit, to reject obviously abusive payloads.
 const CONTENT_HARD_LIMIT = CONTENT_SOFT_LIMIT * 2;
@@ -62,9 +63,13 @@ router.post('/check-similar', async (req, res) => {
             return res.json({ success: true, similar: null });
         }
 
-        const similar = await notesService.checkSimilar(db, content, excludeNoteId);
+        const ai = await resolveNotesAi(req, res);
+        if (!ai) return;
+
+        const similar = await notesService.checkSimilar(db, content, excludeNoteId, ai.qdrant);
         res.json({ success: true, similar });
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error checking note similarity:', error);
         // Dedup is advisory — never block the author on a failure here.
         res.json({ success: true, similar: null });
@@ -105,16 +110,20 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ success: false, message: `Note is too long (max ${CONTENT_HARD_LIMIT} characters)` });
         }
 
+        const ai = await resolveNotesAi(req, res);
+        if (!ai) return;
+
         const note = await notesService.createNote(db, {
             authorId: userId,
             authorName: name,
             title,
             content,
             tags
-        });
+        }, ai.qdrant);
 
         res.status(201).json({ success: true, note: { ...publicNote(note), isOwn: true } });
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error creating Super Chat note:', error);
         res.status(500).json({ success: false, message: 'Failed to create note' });
     }
@@ -137,13 +146,21 @@ router.put('/:id', async (req, res) => {
             return res.status(400).json({ success: false, message: `Note is too long (max ${CONTENT_HARD_LIMIT} characters)` });
         }
 
-        const result = await notesService.updateNote(db, req.params.id, userId, { title, content, tags });
+        let qdrantBase = null;
+        if (content !== undefined) {
+            const ai = await resolveNotesAi(req, res);
+            if (!ai) return;
+            qdrantBase = ai.qdrant;
+        }
+
+        const result = await notesService.updateNote(db, req.params.id, userId, { title, content, tags }, qdrantBase);
         if (!result.ok) {
             return res.status(result.status || 400).json({ success: false, message: result.message });
         }
 
         res.json({ success: true, note: { ...publicNote(result.note), isOwn: true } });
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error updating Super Chat note:', error);
         res.status(500).json({ success: false, message: 'Failed to update note' });
     }

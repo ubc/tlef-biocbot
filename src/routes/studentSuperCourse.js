@@ -17,6 +17,8 @@ const TrackerService = require('../services/tracker');
 const User = require('../models/User');
 const StruggleActivity = require('../models/StruggleActivity');
 const CourseModel = require('../models/Course');
+const { resolveSuperchatAi, sendLlmKeyError } = require('./llmKeyMiddleware');
+const { structuredKeyError } = require('../services/llmKeyStore');
 
 // Resolve a course's effective year level: prefer the stored value, fall back to
 // deriving it from the course name (covers courses created before yearLevel
@@ -52,10 +54,6 @@ async function getStudentYearLevel(db, studentId) {
     return maxLevel;
 }
 
-// Lazily-initialized tracker, shared across requests once the LLM is ready
-// (mirrors the per-course chat route in src/routes/chat.js).
-let localTrackerService;
-
 /**
  * Detect cross-course struggle in a Super Chat message and record it against the
  * source course that owns the matched topic. See build spec — Option B (per-event
@@ -69,16 +67,14 @@ async function trackSuperCourseStruggle({ db, llmService, user, message, superch
     try {
         if (!db || !llmService || !user || !user.userId || !message) return;
 
-        if (!localTrackerService) {
-            localTrackerService = new TrackerService(llmService);
-        }
+        const trackerService = new TrackerService(llmService);
 
         // Scope candidate topics to THIS bucket's courses — fewer candidates means
         // more accurate cross-course attribution.
         const courseTopics = await getSuperCourseApprovedTopics(db, { superchatId, includeInactiveCourses });
         if (!courseTopics.length) return;
 
-        const analysis = await localTrackerService.analyzeMessageAcrossCourses(message, courseTopics);
+        const analysis = await trackerService.analyzeMessageAcrossCourses(message, courseTopics);
         if (!analysis.isStruggling || !analysis.isMapped || !analysis.courseId) {
             return;
         }
@@ -157,6 +153,11 @@ async function resolveStudentSuperchat(req, res) {
         return null;
     }
 
+    if (superchat.aiAvailable !== true) {
+        res.status(403).json(structuredKeyError((superchat.llmKey && superchat.llmKey.status) || 'missing'));
+        return null;
+    }
+
     const accessibleIds = await getStudentAccessibleSuperchatIds(db, studentId);
     if (!accessibleIds.has(superchatId)) {
         res.status(403).json({ success: false, message: 'You do not have access to this Super Course' });
@@ -185,7 +186,7 @@ router.get('/status', async (req, res) => {
             return res.json({ success: true, enabled: false });
         }
         const visible = await listSuperchats(db, { studentVisibleOnly: true });
-        const enabled = visible.some(b => accessibleIds.has(b.superchatId));
+        const enabled = visible.some(b => accessibleIds.has(b.superchatId) && b.aiAvailable === true);
         res.json({ success: true, enabled });
     } catch (error) {
         console.error('Error checking student Super Course status:', error);
@@ -214,7 +215,7 @@ router.get('/list', async (req, res) => {
         ]);
 
         const superchats = visible
-            .filter(b => accessibleIds.has(b.superchatId))
+            .filter(b => accessibleIds.has(b.superchatId) && b.aiAvailable === true)
             .map(b => ({
                 superchatId: b.superchatId,
                 name: b.name,
@@ -442,10 +443,9 @@ router.post('/chat', async (req, res) => {
         const ctx = await resolveStudentSuperchat(req, res);
         if (!ctx) return;
 
-        const llmService = req.app.locals.llm;
-        if (!llmService) {
-            return res.status(503).json({ success: false, message: 'LLM service is not initialized' });
-        }
+        const ai = await resolveSuperchatAi(req, res, ctx.superchatId);
+        if (!ai) return;
+        const llmService = ai.llm;
 
         const message = req.body && req.body.message;
         const conversationMessages = Array.isArray(req.body && req.body.conversationMessages)
@@ -475,7 +475,11 @@ router.post('/chat', async (req, res) => {
             ctx.db,
             message,
             ctx.settings.studentTopK,
-            { superchatId: ctx.superchatId, includeInactiveCourses: ctx.settings.includeInactiveCourses }
+            {
+                superchatId: ctx.superchatId,
+                includeInactiveCourses: ctx.settings.includeInactiveCourses,
+                qdrant: ai.qdrant
+            }
         );
 
         await strugglePromise;
@@ -524,6 +528,7 @@ router.post('/chat', async (req, res) => {
             sourceAttribution
         });
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error in student Super Course chat:', error);
         res.status(500).json({ success: false, message: 'Failed to process chat message' });
     }

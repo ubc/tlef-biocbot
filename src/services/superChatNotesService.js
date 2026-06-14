@@ -27,10 +27,11 @@ function notePayloadMeta(note) {
  * @param {Object} data - { authorId, authorName, title, content, tags }
  * @returns {Promise<Object>} The created note
  */
-async function createNote(db, data) {
+async function createNote(db, data, qdrantBase = null) {
     const note = await SuperChatNote.createNote(db, data);
 
     const qdrant = new NotesQdrantService();
+    if (qdrantBase) await qdrant.initialize(qdrantBase);
     const pointIds = await qdrant.addNote(note.noteId, note.content, notePayloadMeta(note));
 
     if (pointIds.length) {
@@ -58,7 +59,7 @@ async function getNoteById(db, noteId) {
  * Update a note (author-only). Re-embeds the content when it changes.
  * @returns {Promise<{ ok: boolean, status?: number, message?: string, note?: Object }>}
  */
-async function updateNote(db, noteId, requesterId, updates) {
+async function updateNote(db, noteId, requesterId, updates, qdrantBase = null) {
     const existing = await SuperChatNote.getNoteById(db, noteId);
     if (!existing) {
         return { ok: false, status: 404, message: 'Note not found' };
@@ -80,6 +81,7 @@ async function updateNote(db, noteId, requesterId, updates) {
     // Re-embed when the text changed; otherwise leave vectors untouched.
     if (contentChanged) {
         const qdrant = new NotesQdrantService();
+        if (qdrantBase) await qdrant.initialize(qdrantBase);
         const pointIds = await qdrant.updateNote(noteId, updated.content, notePayloadMeta(updated));
         const finalNote = await SuperChatNote.updateNote(db, noteId, { qdrantPointIds: pointIds });
         return { ok: true, note: finalNote };
@@ -122,8 +124,9 @@ async function deleteNote(db, noteId, requesterId) {
  * @param {string|null} excludeNoteId
  * @returns {Promise<Object|null>}
  */
-async function checkSimilar(db, content, excludeNoteId = null) {
+async function checkSimilar(db, content, excludeNoteId = null, qdrantBase = null) {
     const qdrant = new NotesQdrantService();
+    if (qdrantBase) await qdrant.initialize(qdrantBase);
     return qdrant.findSimilarTo(content, { excludeNoteId, threshold: DUP_THRESHOLD });
 }
 

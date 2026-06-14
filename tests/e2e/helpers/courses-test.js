@@ -14,6 +14,7 @@
 
 require('dotenv').config();
 const { MongoClient } = require('mongodb');
+const { createValidLlmApiKey } = require('./llm-keys');
 
 async function withDb(fn) {
     if (!process.env.MONGO_URI) {
@@ -116,6 +117,7 @@ async function seedCourse({
         },
         isOnboardingComplete: true,
         status,
+        llmApiKey: createValidLlmApiKey(courseId),
         studentEnrollment,
         lectures: defaultLectures,
         createdAt: now,

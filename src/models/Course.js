@@ -1474,6 +1474,7 @@ async function getCoursesForUser(db, userId, role) {
             instructors: 1,
             tas: 1,
             status: 1,
+            llmApiKey: 1,
             courseStructure: 1,
             createdAt: 1,
             updatedAt: 1

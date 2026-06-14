@@ -6,6 +6,12 @@
 const express = require('express');
 const router = express.Router();
 const CourseModel = require('../models/Course');
+const {
+    buildKeySubdocument,
+    publicKeySummary,
+    stripPrivateKeyFields,
+    validateApiKey
+} = require('../services/llmKeyStore');
 
 function hasInstructorAccess(course, userId) {
     return course.instructorId === userId ||
@@ -85,7 +91,8 @@ router.post('/', async (req, res) => {
         assessmentCriteria,
         courseMaterials,
         unitFiles,
-        courseStructure
+        courseStructure,
+        apiKey
     } = req.body;
     
     // Use authenticated user's ID
@@ -108,6 +115,16 @@ router.post('/', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const validation = await validateApiKey(apiKey);
+        if (!validation.ok) {
+            return res.status(400).json({
+                success: false,
+                code: validation.status === 'quota_exhausted' ? 'LLM_KEY_QUOTA' : 'LLM_KEY_INVALID',
+                message: validation.message || 'A valid OpenAI API key is required to create a course.',
+                detail: validation.detail
+            });
+        }
         
         // Prepare onboarding data
         const onboardingData = {
@@ -124,6 +141,16 @@ router.post('/', async (req, res) => {
         
         // Save to database using Course model
         const result = await CourseModel.createCourseFromOnboarding(db, onboardingData);
+
+        const llmApiKey = buildKeySubdocument(apiKey, user.userId);
+        await db.collection('courses').updateOne(
+            { courseId },
+            { $set: { llmApiKey, updatedAt: new Date() } }
+        );
+
+        if (req.app.locals.llmRegistry) {
+            req.app.locals.llmRegistry.evictCourse(courseId);
+        }
         
         console.log(`Course ${result.created ? 'created' : 'updated'} from onboarding for course ${courseId}`);
         
@@ -135,6 +162,7 @@ router.post('/', async (req, res) => {
                 created: result.created,
                 modifiedCount: result.modifiedCount,
                 totalUnits: result.totalUnits,
+                llmKey: publicKeySummary(llmApiKey),
                 timestamp: new Date().toISOString()
             }
         });
@@ -235,7 +263,7 @@ router.get('/:courseId', async (req, res) => {
         
         res.json({
             success: true,
-            data: courseData
+            data: stripPrivateKeyFields(courseData)
         });
         
     } catch (error) {
@@ -289,7 +317,7 @@ router.get('/instructor/:instructorId', async (req, res) => {
             ]
         }).toArray();
 
-        const sortedCourses = sortCoursesWithInactiveLast(courses);
+        const sortedCourses = sortCoursesWithInactiveLast(courses).map(stripPrivateKeyFields);
         
         res.json({
             success: true,

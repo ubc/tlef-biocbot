@@ -26,6 +26,7 @@ const COURSE_B = 'BIOC-E2E-API-COURSES-B';
 const COURSE_INACTIVE = 'BIOC-E2E-API-COURSES-INACTIVE';
 const COURSE_DELETED = 'BIOC-E2E-API-COURSES-DELETED';
 const COURSE_CREATED_VIA_API = 'bioc-e2e-api-created'; // populated dynamically; we clean by prefix
+const VALID_API_KEY = 'sk-test-courses-api';
 
 let instructorId;
 let instructorFreshId;
@@ -98,6 +99,7 @@ test.describe('POST /api/courses (create)', () => {
                     weeks: 3,
                     lecturesPerWeek: 2,
                     contentTypes: ['practice-quizzes', 'lecture-notes'],
+                    apiKey: VALID_API_KEY,
                 },
             });
             expect(res.status()).toBe(201);
@@ -115,6 +117,7 @@ test.describe('POST /api/courses (create)', () => {
             );
             expect(doc.courseStructure.totalUnits).toBe(6);
             expect(doc.lectures).toHaveLength(6);
+            expect(doc.llmApiKey.status).toBe('valid');
         });
     });
 
@@ -126,6 +129,60 @@ test.describe('POST /api/courses (create)', () => {
                 data: { course: 'NoGo', weeks: 1, lecturesPerWeek: 1 },
             });
             expect(res.status()).toBe(403);
+        });
+    });
+});
+
+test.describe('course LLM API keys', () => {
+    test.use({ storageState: storageStatePath('instructor') });
+
+    test('rejects invalid and quota-exhausted keys without replacing the saved key', async ({ request: api }) => {
+        await seedCourse({ courseId: COURSE_A, instructorId });
+        const before = await withDb((db) => db.collection('courses').findOne({ courseId: COURSE_A }));
+
+        const invalid = await api.put(`/api/courses/${COURSE_A}/llm-key`, {
+            data: { apiKey: 'not-a-real-key' },
+            failOnStatusCode: false,
+        });
+        expect(invalid.status()).toBe(400);
+        expect(await invalid.json()).toMatchObject({ success: false, code: 'LLM_KEY_INVALID' });
+
+        const quota = await api.put(`/api/courses/${COURSE_A}/llm-key`, {
+            data: { apiKey: 'sk-quota-courses-api' },
+            failOnStatusCode: false,
+        });
+        expect(quota.status()).toBe(400);
+        expect(await quota.json()).toMatchObject({ success: false, code: 'LLM_KEY_QUOTA' });
+
+        const after = await withDb((db) => db.collection('courses').findOne({ courseId: COURSE_A }));
+        expect(after.llmApiKey.ciphertext).toBe(before.llmApiKey.ciphertext);
+    });
+
+    test('saves course keys encrypted and can retest the saved key', async ({ request: api }) => {
+        await seedCourse({ courseId: COURSE_A, instructorId });
+        const apiKey = 'sk-test-courses-api-save-1234';
+
+        const save = await api.put(`/api/courses/${COURSE_A}/llm-key`, {
+            data: { apiKey },
+        });
+        expect(save.status()).toBe(200);
+        expect(await save.json()).toMatchObject({
+            success: true,
+            aiAvailable: true,
+            llmKey: { status: 'valid', last4: '1234' },
+        });
+
+        const doc = await withDb((db) => db.collection('courses').findOne({ courseId: COURSE_A }));
+        expect(doc.llmApiKey.status).toBe('valid');
+        expect(doc.llmApiKey.last4).toBe('1234');
+        expect(doc.llmApiKey.ciphertext).not.toContain(apiKey);
+
+        const testSaved = await api.post(`/api/courses/${COURSE_A}/llm-key/test`);
+        expect(testSaved.status()).toBe(200);
+        expect(await testSaved.json()).toMatchObject({
+            success: true,
+            aiAvailable: true,
+            llmKey: { status: 'valid', last4: '1234' },
         });
     });
 });
@@ -1165,6 +1222,7 @@ test.describe('POST /:courseId/transfer', () => {
                 transferSettings: true,
                 transferTAs: false,
                 deactivateSourceCourse: true,
+                apiKey: VALID_API_KEY,
                 units: [
                     { unitName: 'Unit 1', transferDocuments: false, transferLearningObjectives: true, transferAssessmentQuestions: false },
                 ],

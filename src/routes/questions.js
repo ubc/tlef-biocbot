@@ -5,6 +5,7 @@ const router = express.Router();
 const CourseModel = require('../models/Course');
 const prompts = require('../services/prompts');
 const { hasSystemAdminAccess } = require('../services/authorization');
+const { resolveCourseAi, sendLlmKeyError } = require('./llmKeyMiddleware');
 
 // Middleware for JSON parsing
 router.use(express.json());
@@ -454,13 +455,9 @@ router.post('/auto-link-learning-objectives', async (req, res) => {
         });
         if (!user) return;
 
-        const llmService = req.app.locals.llm;
-        if (!llmService) {
-            return res.status(503).json({
-                success: false,
-                message: 'LLM service not available'
-            });
-        }
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
+        const llmService = ai.llm;
 
         const normalizedObjectives = Array.isArray(learningObjectives)
             ? learningObjectives.map(objective => normalizeLearningObjective(objective)).filter(Boolean)
@@ -564,6 +561,7 @@ router.post('/auto-link-learning-objectives', async (req, res) => {
         });
 
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error auto-linking questions to learning objectives:', error);
         res.status(500).json({
             success: false,
@@ -1111,20 +1109,18 @@ router.post('/bulk', async (req, res) => {
         const needsAutoLinking = unitLearningObjectives.length > 0 && questionsToSave.some(question => !question.learningObjective);
 
         if (needsAutoLinking) {
-            const llmService = req.app.locals.llm;
-
-            if (llmService) {
-                try {
-                    questionsToSave = await linkQuestionsToLearningObjectives(
-                        llmService,
-                        unitLearningObjectives,
-                        questionsToSave,
-                        true
-                    );
-                    autoLinkedCount = questionsToSave.filter(question => question.learningObjective).length;
-                } catch (linkError) {
-                    console.error('Error auto-linking bulk questions to learning objectives:', linkError);
-                }
+            const ai = await resolveCourseAi(req, res, courseId);
+            if (!ai) return;
+            try {
+                questionsToSave = await linkQuestionsToLearningObjectives(
+                    ai.llm,
+                    unitLearningObjectives,
+                    questionsToSave,
+                    true
+                );
+                autoLinkedCount = questionsToSave.filter(question => question.learningObjective).length;
+            } catch (linkError) {
+                console.error('Error auto-linking bulk questions to learning objectives:', linkError);
             }
         }
         
@@ -1170,6 +1166,7 @@ router.post('/bulk', async (req, res) => {
         });
         
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error bulk creating questions:', error);
         res.status(500).json({
             success: false,
@@ -1185,22 +1182,18 @@ router.post('/bulk', async (req, res) => {
  */
 router.post('/check-answer', async (req, res) => {
     try {
-        const { question, studentAnswer, expectedAnswer, questionType, studentName } = req.body;
+        const { courseId, question, studentAnswer, expectedAnswer, questionType, studentName } = req.body;
 
-        if (!question || !studentAnswer || !expectedAnswer) {
+        if (!courseId || !question || !studentAnswer || !expectedAnswer) {
             return res.status(400).json({
                 success: false,
-                message: 'Missing required fields: question, studentAnswer, expectedAnswer'
+                message: 'Missing required fields: courseId, question, studentAnswer, expectedAnswer'
             });
         }
 
-        const llmService = req.app.locals.llm;
-        if (!llmService) {
-            return res.status(503).json({
-                success: false,
-                message: 'LLM service not available'
-            });
-        }
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
+        const llmService = ai.llm;
 
         const result = await llmService.evaluateStudentAnswer(
             question,
@@ -1216,6 +1209,7 @@ router.post('/check-answer', async (req, res) => {
         });
 
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error checking answer:', error);
         res.status(500).json({
             success: false,
@@ -1438,13 +1432,9 @@ router.post('/generate-ai', async (req, res) => {
         }
         
         // Get the initialized LLM service from app.locals
-        const llmService = req.app.locals.llm;
-        if (!llmService) {
-            return res.status(503).json({
-                success: false,
-                message: 'LLM service not available'
-            });
-        }
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
+        const llmService = ai.llm;
         
         try {
             const normalizedLearningObjectives = Array.isArray(learningObjectives)
@@ -1583,6 +1573,7 @@ router.post('/generate-ai', async (req, res) => {
         }
         
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error generating AI question:', error);
         res.status(500).json({
             success: false,

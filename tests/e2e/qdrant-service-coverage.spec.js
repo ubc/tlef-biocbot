@@ -44,6 +44,7 @@ const {
 
 const SVC_COURSE_A = 'BIOC-E2E-QDRSVC-A';
 const SVC_COURSE_TRANSFER_SRC = 'BIOC-E2E-QDRSVC-XFER-SRC';
+const VALID_API_KEY = 'sk-test-qdrant-transfer';
 const ALLOW_DESTRUCTIVE_QDRANT_E2E = process.env.ALLOW_DESTRUCTIVE_QDRANT_E2E === '1';
 
 let instructorId;
@@ -233,6 +234,7 @@ test.describe('qdrantService.cloneDocumentChunks — full clone with real chunks
                     transferSettings: false,
                     transferTAs: false,
                     deactivateSourceCourse: false,
+                    apiKey: VALID_API_KEY,
                     units: [
                         {
                             unitName: 'Unit 1',
