@@ -200,6 +200,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 await loadAdminSettings();
                 await loadLLMSettings();
                 await loadNotesLlmKey();
+                await loadInstructorSuperchatLlmKey();
                 await loadQuestionPrompts();
                 await loadSystemAdmins();
             }
@@ -359,6 +360,20 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         } catch (error) {
             console.error('Error loading notes API key status:', error);
+        }
+    }
+
+    async function loadInstructorSuperchatLlmKey() {
+        try {
+            const response = await fetch('/api/settings/instructor-superchat-llm-key', {
+                credentials: 'include'
+            });
+            const result = await parseJsonResponse(response);
+            if (response.ok && result.success) {
+                renderLlmKeyStatus('instructor-superchat', result.llmKey);
+            }
+        } catch (error) {
+            console.error('Error loading instructor Super Course chat API key status:', error);
         }
     }
 
@@ -1180,6 +1195,23 @@ document.addEventListener('DOMContentLoaded', async () => {
             statusPrefix: 'notes',
             url: '/api/settings/notes-llm-key/test',
             successMessage: 'Notes API key is valid'
+        });
+    }, { busyLabel: 'Testing...' });
+
+    wireSectionButton('save-instructor-superchat-llm-key', async () => {
+        await saveLlmKey({
+            inputId: 'instructor-superchat-llm-key-input',
+            statusPrefix: 'instructor-superchat',
+            url: '/api/settings/instructor-superchat-llm-key',
+            successMessage: 'Instructor Super Course chat API key saved'
+        });
+    }, { busyLabel: 'Saving...' });
+
+    wireSectionButton('test-instructor-superchat-llm-key', async () => {
+        await testSavedLlmKey({
+            statusPrefix: 'instructor-superchat',
+            url: '/api/settings/instructor-superchat-llm-key/test',
+            successMessage: 'Instructor Super Course chat API key is valid'
         });
     }, { busyLabel: 'Testing...' });
 
@@ -2102,7 +2134,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             'mental-health-detection-section',
             'system-admin-section',
             'llm-model-section',
-            'notes-llm-key-section'
+            'notes-llm-key-section',
+            'instructor-superchat-llm-key-section'
         ];
 
         function setAdminVisibility(isAdmin) {

@@ -301,6 +301,8 @@ async function updateOwnerKeyStatus(db, scope, status) {
         await db.collection('superchats').updateOne({ superchatId: scope.id }, { $set: set });
     } else if (scope.type === 'notes') {
         await db.collection('settings').updateOne({ _id: 'notesLlm' }, { $set: set });
+    } else if (scope.type === 'superCourseChat') {
+        await db.collection('settings').updateOne({ _id: 'superCourseChat' }, { $set: set });
     }
 }
 

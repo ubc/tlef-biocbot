@@ -38,6 +38,10 @@ class LlmRegistry {
         this.evict({ type: 'notes', id: 'notesLlm' });
     }
 
+    evictSuperCourseChat() {
+        this.evict({ type: 'superCourseChat', id: 'superCourseChat' });
+    }
+
     clear() {
         this.cache.clear();
     }
@@ -66,6 +70,20 @@ class LlmRegistry {
             { projection: { llmApiKey: 1 } }
         );
         return this._resolve(db, { type: 'notes', id: 'notesLlm' }, settings && settings.llmApiKey);
+    }
+
+    /**
+     * Resolve the dedicated key for the global instructor Super Course chat.
+     * This is its OWN key (stored on the superCourseChat settings doc), not tied
+     * to any student-facing bucket — so the instructor chat works even when no
+     * bucket has a key.
+     */
+    async forSuperCourseChat(db) {
+        const settings = await db.collection('settings').findOne(
+            { _id: 'superCourseChat' },
+            { projection: { llmApiKey: 1 } }
+        );
+        return this._resolve(db, { type: 'superCourseChat', id: 'superCourseChat' }, settings && settings.llmApiKey);
     }
 
     async _resolve(db, scope, llmApiKey) {

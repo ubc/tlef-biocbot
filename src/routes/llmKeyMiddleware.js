@@ -55,9 +55,24 @@ async function resolveNotesAi(req, res) {
     }
 }
 
+async function resolveSuperCourseChatAi(req, res) {
+    try {
+        const registry = req.app.locals.llmRegistry;
+        if (!registry) {
+            res.status(503).json({ success: false, message: 'LLM registry is not initialized' });
+            return null;
+        }
+        return await registry.forSuperCourseChat(req.app.locals.db);
+    } catch (error) {
+        if (sendLlmKeyError(res, error)) return null;
+        throw error;
+    }
+}
+
 module.exports = {
     resolveCourseAi,
     resolveNotesAi,
+    resolveSuperCourseChatAi,
     resolveSuperchatAi,
     sendLlmKeyError
 };

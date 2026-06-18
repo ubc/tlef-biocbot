@@ -101,6 +101,27 @@ async function getSuperchat(db, superchatId) {
 }
 
 /**
+ * Resolve the global instructor Super Course chat. Unlike a student-facing
+ * bucket, this pools every opted-in course (+ notes) and is billed to its OWN
+ * dedicated key stored on the superCourseChat settings doc — so the instructor
+ * chat works even when no bucket has a key. superchatId is null to signal the
+ * global (non-bucket) retrieval pool.
+ * @param {Object} db
+ * @returns {Promise<Object>}
+ */
+async function getInstructorSuperCourseChat(db) {
+    const settingsDoc = (await db.collection('settings').findOne({ _id: SUPER_COURSE_SETTINGS_ID })) || {};
+    return {
+        superchatId: null,
+        name: 'Instructor Super Course',
+        showToStudents: false,
+        llmKey: publicKeySummary(settingsDoc.llmApiKey),
+        aiAvailable: publicKeySummary(settingsDoc.llmApiKey).status === 'valid',
+        settings: resolveSuperCourseChatSettings(settingsDoc)
+    };
+}
+
+/**
  * List superchat buckets as lightweight summaries (no resolved settings).
  * @param {Object} db
  * @param {Object} options - { studentVisibleOnly: boolean }
@@ -494,6 +515,7 @@ module.exports = {
     resolveSuperCourseChatSettings,
     getSuperCourseChatSettings,
     getSuperchat,
+    getInstructorSuperCourseChat,
     listSuperchats,
     getEnrolledCourseIds,
     getStudentAccessibleSuperchatIds,

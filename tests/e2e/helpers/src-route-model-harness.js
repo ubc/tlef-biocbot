@@ -199,9 +199,11 @@ const stubRegistry = (() => {
         forCourse: resolve,
         forSuperchat: resolve,
         forNotes: resolve,
+        forSuperCourseChat: resolve,
         evictCourse() {},
         evictSuperchat() {},
         evictNotes() {},
+        evictSuperCourseChat() {},
         clear() {},
     };
 })();
@@ -468,26 +470,16 @@ function applyMode(mode) {
         state.user = { ...baseUser, userId: 'inst', role: 'instructor', permissions: { systemAdmin: true } };
         state.db = memoryDb({
             users: new MemoryCollection([{ ...baseUser, userId: 'inst', role: 'instructor' }]),
+            // The global instructor super chat now has its OWN dedicated key on the
+            // superCourseChat settings doc (no longer borrowed from a bucket).
+            // getInstructorSuperCourseChat reads it for aiAvailable + settings.
             settings: new MemoryCollection([{
                 _id: 'superCourseChat',
+                llmApiKey: createValidLlmApiKey('instructor-superchat'),
                 instructorTopK: 6,
                 studentTopK: 8,
                 includeInactiveCourses: state.mode === 'instructor-super-chat-inactive',
                 showStudentSuperCourse: false,
-                instructorPrompt: 'Harness instructor super prompt',
-                studentPrompt: 'Harness student super prompt',
-            }]),
-            // Chat settings + key now live on the superchat bucket (not the global
-            // superCourseChat doc). resolveInstructorSuperchat picks the first bucket
-            // with a valid key, so the bucket must carry one to be aiAvailable.
-            superchats: new MemoryCollection([{
-                superchatId: 'harness-bucket',
-                name: 'Harness Bucket',
-                llmApiKey: createValidLlmApiKey('harness-bucket'),
-                instructorTopK: 6,
-                studentTopK: 8,
-                includeInactiveCourses: state.mode === 'instructor-super-chat-inactive',
-                showToStudents: false,
                 instructorPrompt: 'Harness instructor super prompt',
                 studentPrompt: 'Harness student super prompt',
             }]),

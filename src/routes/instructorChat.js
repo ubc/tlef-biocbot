@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
     getSuperchat,
-    listSuperchats,
+    getInstructorSuperCourseChat,
     getSuperCourseRetrievalPool,
     searchSuperCourse,
     buildSuperCourseContext,
@@ -11,17 +11,17 @@ const {
     buildSuperCourseSourceAttribution
 } = require('../services/superCourseService');
 const prompts = require('../services/prompts');
-const { resolveSuperchatAi, sendLlmKeyError } = require('./llmKeyMiddleware');
+const { resolveSuperchatAi, resolveSuperCourseChatAi, sendLlmKeyError } = require('./llmKeyMiddleware');
 const { structuredKeyError } = require('../services/llmKeyStore');
 
 async function resolveInstructorSuperchat(db, requestedId = null) {
     if (requestedId) {
         return getSuperchat(db, requestedId);
     }
-
-    const buckets = await listSuperchats(db);
-    const available = buckets.find(bucket => bucket.aiAvailable === true);
-    return available ? getSuperchat(db, available.superchatId) : null;
+    // The global instructor Super Course chat has its OWN dedicated key and pools
+    // every opted-in course — it is no longer tied to "the first student bucket
+    // that happens to have a valid key".
+    return getInstructorSuperCourseChat(db);
 }
 
 // Resolve a user-selected answer level to its configured modifier, falling back
@@ -259,7 +259,11 @@ router.post('/', async (req, res) => {
             return res.status(403).json(structuredKeyError((superchat && superchat.llmKey && superchat.llmKey.status) || 'missing'));
         }
 
-        const ai = await resolveSuperchatAi(req, res, superchat.superchatId);
+        // A specific bucket bills its own key; the global instructor chat
+        // (superchatId === null) bills its dedicated super-course-chat key.
+        const ai = superchat.superchatId
+            ? await resolveSuperchatAi(req, res, superchat.superchatId)
+            : await resolveSuperCourseChatAi(req, res);
         if (!ai) return;
         const llmService = ai.llm;
         const settings = superchat.settings;
