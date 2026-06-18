@@ -660,6 +660,21 @@ async function setupMockedSettingsRoutes(page, options = {}) {
             return;
         }
 
+        if (pathname === '/api/settings/instructor-superchat-llm-key' || pathname === '/api/settings/instructor-superchat-llm-key/test') {
+            await route.fulfill(jsonResponse({
+                success: true,
+                message: 'Instructor Super Course chat API key is valid',
+                llmKey: {
+                    status: 'valid',
+                    last4: 'mock',
+                    validatedAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                },
+                aiAvailable: true,
+            }));
+            return;
+        }
+
         if (pathname === '/api/settings/ai-settings') {
             if (method === 'PUT') {
                 await route.fulfill(jsonResponse({ success: true }));
