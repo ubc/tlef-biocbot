@@ -12,7 +12,7 @@
     "grant:system-admin": "node scripts/grant-system-admin.js",
     "test": "playwright test",
     "test:e2e": "playwright test",
-    "test:a11y": "playwright test tests/e2e/a11y",
+    "test:a11y": "playwright test --config=playwright.a11y.config.js",
     "test:unit": "jest",
     "test:unit:watch": "jest --watch",
     "test:unit:coverage": "jest --coverage",
