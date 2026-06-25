@@ -549,6 +549,7 @@ test('questions route no-db, no-llm, and dependency-throw branches are covered',
     expect(res.status()).toBe(503);
 
     res = await postJson('/api/questions/check-answer', {
+        courseId: 'BIOC-H',
         question: 'Q?',
         studentAnswer: 'A',
         expectedAnswer: 'B',
@@ -571,6 +572,7 @@ test('questions route no-db, no-llm, and dependency-throw branches are covered',
 
     await configure('questions-llm-throws');
     res = await postJson('/api/questions/check-answer', {
+        courseId: 'BIOC-H',
         question: 'Q?',
         studentAnswer: 'A',
         expectedAnswer: 'B',

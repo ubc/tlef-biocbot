@@ -12,6 +12,7 @@ const ownerUser = TEST_USERS.instructor;
 const LECTURE_FIXTURE = path.join(__dirname, 'fixtures', 'sample-lecture.txt');
 const PRACTICE_FIXTURE = path.join(__dirname, 'fixtures', 'sample-practice-quiz.txt');
 const COURSE_NAME = 'BIOC E2E - Onboarding Test';
+const VALID_API_KEY = 'sk-test-onboarding-ui';
 const LEARNING_OBJECTIVE = 'Identify the four main classes of biomolecules.';
 const SECOND_LEARNING_OBJECTIVE = 'Explain how peptide bonds form between amino acids.';
 const REMOVED_LEARNING_OBJECTIVE = 'This learning objective should be removed before completion.';
@@ -182,6 +183,7 @@ async function startCustomCourse(page, courseName = COURSE_NAME) {
     await expect(page.locator('#course-select option[value="custom"]')).toHaveCount(1);
     await page.locator('#course-select').selectOption('custom');
     await page.locator('#custom-course-name').fill(courseName);
+    await page.locator('#course-api-key').fill(VALID_API_KEY);
     await page.locator('#weeks-count').fill('1');
     await page.locator('#lectures-per-week').fill('1');
     await page.locator('#continue-btn').click();
@@ -341,6 +343,7 @@ test.describe('instructor onboarding', () => {
         await page.locator('#course-select').selectOption('custom');
         await page.locator('#weeks-count').fill('1');
         await page.locator('#lectures-per-week').fill('1');
+        await page.locator('#course-api-key').fill(VALID_API_KEY);
         await page.locator('#continue-btn').click();
         await expect(page.locator('#step-2.onboarding-step.active')).toBeVisible();
         await expect(page.locator('#custom-course-name').locator('..').locator('.error-message')).toHaveText('Please enter a course name');
@@ -994,6 +997,7 @@ test.describe('instructor onboarding', () => {
         await expect(page.locator('#step-2.onboarding-step.active')).toBeVisible();
         await page.locator('#course-select').selectOption('custom');
         await page.locator('#custom-course-name').fill(COURSE_NAME);
+        await page.locator('#course-api-key').fill(VALID_API_KEY);
         await page.locator('#weeks-count').fill('1');
         await page.locator('#lectures-per-week').fill('1');
         await page.locator('#continue-btn').click();

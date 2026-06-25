@@ -44,6 +44,7 @@ const COURSE_BR_B = 'BIOC-E2E-API-COURSES-BR-B';
 const COURSE_BR_INACTIVE = 'BIOC-E2E-API-COURSES-BR-INACTIVE';
 const COURSE_BR_TRANSFER_SRC = 'BIOC-E2E-API-COURSES-BR-XFER-SRC';
 const COURSE_BR_UNIT_DOCS = 'BIOC-E2E-API-COURSES-BR-UNIT-DOCS';
+const VALID_API_KEY = 'sk-test-courses-branches';
 
 let instructorId;
 let instructorFreshId;
@@ -471,6 +472,7 @@ test.describe('POST /api/courses/:courseId/transfer (documents path)', () => {
                 transferSettings: true,
                 transferTAs: true,
                 deactivateSourceCourse: false,
+                apiKey: VALID_API_KEY,
                 units: [
                     // Unit 1 transfers documents, LOs, AQs
                     { unitName: 'Unit 1', transferDocuments: true, transferLearningObjectives: true, transferAssessmentQuestions: true },

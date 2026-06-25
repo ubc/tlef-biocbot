@@ -4,6 +4,7 @@
 # Dependencies
 /node_modules
 /playwright-report
+/playwright-report-a11y
 /monocart-report
 /coverage-reports
 /test-results

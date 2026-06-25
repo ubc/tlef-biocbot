@@ -230,6 +230,24 @@
                                     <button id="save-course-basics" class="primary-button">Save course basics</button>
                                 </div>
                             </section>
+
+                            <section class="settings-section" id="course-llm-key-section">
+                                <h3>Course API key</h3>
+                                <p class="section-description">AI is unavailable for this course until a valid key is saved. Contact <a href="mailto:LT.hub@ubc.ca">LT.hub@ubc.ca</a> for a new or replacement key.</p>
+                                <div class="settings-content">
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="course-llm-key-label">OpenAI API key</h4>
+                                            <p id="course-llm-key-status" class="llm-key-status">Loading key status...</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control llm-key-controls">
+                                            <input type="password" id="course-llm-key-input" class="text-input llm-key-input" placeholder="sk-..." autocomplete="off" aria-labelledby="course-llm-key-label" aria-describedby="course-llm-key-status">
+                                            <button id="test-course-llm-key" class="secondary-button">Test saved key</button>
+                                            <button id="save-course-llm-key" class="primary-button">Save key</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
                         </div>
 
                         <!-- Student chat -->
@@ -477,6 +495,7 @@
                                         </div>
                                         <div class="setting-controls superchat-manage-controls">
                                             <input type="text" id="new-superchat-name" class="text-input" placeholder="New bucket name" aria-labelledby="new-superchat-label" aria-describedby="new-superchat-desc">
+                                            <input type="password" id="new-superchat-key" class="text-input llm-key-input" placeholder="OpenAI key" autocomplete="off" aria-label="New bucket OpenAI API key">
                                             <button type="button" id="new-superchat-btn" class="secondary-button">Create bucket</button>
                                         </div>
                                     </div>
@@ -525,6 +544,17 @@
                                                 <option value="4">4th Year</option>
                                                 <option value="5">Graduate</option>
                                             </select>
+                                        </div>
+                                    </div>
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="superchat-llm-key-label">Bucket API key</h4>
+                                            <p id="superchat-llm-key-status" class="llm-key-status">Select a bucket to view key status.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control llm-key-controls">
+                                            <input type="password" id="superchat-llm-key-input" class="text-input llm-key-input" placeholder="sk-..." autocomplete="off" aria-labelledby="superchat-llm-key-label" aria-describedby="superchat-llm-key-status">
+                                            <button id="test-superchat-llm-key" class="secondary-button">Test saved key</button>
+                                            <button id="save-superchat-llm-key" class="primary-button">Save key</button>
                                         </div>
                                     </div>
                                     <div class="setting-item">
@@ -696,6 +726,16 @@
                                                         placeholder="e.g. CPSC 430 Winter 2027"
                                                     >
                                                 </div>
+                                                <div class="transfer-field-group">
+                                                    <label for="transfer-course-api-key">New course OpenAI API key</label>
+                                                    <input
+                                                        type="password"
+                                                        id="transfer-course-api-key"
+                                                        class="number-input transfer-course-name-input"
+                                                        placeholder="sk-..."
+                                                        autocomplete="off"
+                                                    >
+                                                </div>
 
                                                 <div class="transfer-global-options">
                                                     <label class="transfer-option">
@@ -787,6 +827,42 @@
                                 <div class="settings-section-actions">
                                     <span class="settings-dirty-note" hidden>Unsaved changes</span>
                                     <button id="save-llm-settings" class="primary-button">Save model settings</button>
+                                </div>
+                            </section>
+
+                            <section class="settings-section" id="notes-llm-key-section" style="display: none;">
+                                <h3>Instructor notes API key</h3>
+                                <p class="section-description">Super Chat notes uploads and note retrieval require a valid key. Contact <a href="mailto:LT.hub@ubc.ca">LT.hub@ubc.ca</a> for a new or replacement key.</p>
+                                <div class="settings-content">
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="notes-llm-key-label">OpenAI API key</h4>
+                                            <p id="notes-llm-key-status" class="llm-key-status">Loading key status...</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control llm-key-controls">
+                                            <input type="password" id="notes-llm-key-input" class="text-input llm-key-input" placeholder="sk-..." autocomplete="off" aria-labelledby="notes-llm-key-label" aria-describedby="notes-llm-key-status">
+                                            <button id="test-notes-llm-key" class="secondary-button">Test saved key</button>
+                                            <button id="save-notes-llm-key" class="primary-button">Save key</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section class="settings-section" id="instructor-superchat-llm-key-section" style="display: none;">
+                                <h3>Instructor Super Course chat API key</h3>
+                                <p class="section-description">The instructor Super Course chat (where you talk to the AI across all courses) runs on its own dedicated key — independent of any student bucket. Contact <a href="mailto:LT.hub@ubc.ca">LT.hub@ubc.ca</a> for a new or replacement key.</p>
+                                <div class="settings-content">
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="instructor-superchat-llm-key-label">OpenAI API key</h4>
+                                            <p id="instructor-superchat-llm-key-status" class="llm-key-status">Loading key status...</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control llm-key-controls">
+                                            <input type="password" id="instructor-superchat-llm-key-input" class="text-input llm-key-input" placeholder="sk-..." autocomplete="off" aria-labelledby="instructor-superchat-llm-key-label" aria-describedby="instructor-superchat-llm-key-status">
+                                            <button id="test-instructor-superchat-llm-key" class="secondary-button">Test saved key</button>
+                                            <button id="save-instructor-superchat-llm-key" class="primary-button">Save key</button>
+                                        </div>
+                                    </div>
                                 </div>
                             </section>
                         </div>

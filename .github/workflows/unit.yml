@@ -1,0 +1,40 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  unit:
+    name: Unit (jest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        # package-lock.json is gitignored in this repo (see playwright.yml), so we
+        # use `npm install` rather than `npm ci`. The unit job needs no Mongo,
+        # Qdrant, server, or browsers — it just runs jest against src/.
+        run: npm install
+
+      - name: Run unit tests with coverage
+        run: npm run test:unit:coverage
+
+      - name: Upload unit coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-coverage
+          path: coverage-reports/unit/
+          retention-days: 14

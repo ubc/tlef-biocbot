@@ -15,6 +15,7 @@ const {
 
 const COURSE_A = 'BIOC-E2E-API-ONB-A';
 const COURSE_B = 'BIOC-E2E-API-ONB-B';
+const VALID_API_KEY = 'sk-test-onboarding-api';
 
 let instructorId;
 let instructorFreshId;
@@ -67,6 +68,7 @@ test.describe('POST /api/onboarding (create from onboarding)', () => {
                     courseMaterials: [],
                     unitFiles: {},
                     courseStructure: { weeks: 2, lecturesPerWeek: 2 },
+                    apiKey: VALID_API_KEY,
                 },
             });
             expect(res.ok()).toBeTruthy();

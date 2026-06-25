@@ -4,6 +4,7 @@ const { expect } = require('../fixtures/monocart');
 
 const INSTRUCTOR_ID = 'e2e_onboarding_branch_instructor';
 const COURSE_ID = 'ONBOARDING-BRANCH-COURSE';
+const VALID_API_KEY = 'sk-test-onboarding-branch-helper';
 
 function branchCourse(overrides = {}) {
     return {
@@ -369,6 +370,7 @@ async function startCustomCourse(page, name = 'Onboarding Branch Custom Course')
     await expect(page.locator('#step-2.onboarding-step.active')).toBeVisible();
     await page.locator('#course-select').selectOption('custom');
     await page.locator('#custom-course-name').fill(name);
+    await page.locator('#course-api-key').fill(VALID_API_KEY);
     await page.locator('#weeks-count').fill('1');
     await page.locator('#lectures-per-week').fill('1');
     await page.locator('#continue-btn').click();

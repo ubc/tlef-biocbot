@@ -11,6 +11,11 @@
     "diagnose": "node diagnose.js",
     "grant:system-admin": "node scripts/grant-system-admin.js",
     "test": "playwright test",
+    "test:e2e": "playwright test",
+    "test:a11y": "playwright test --config=playwright.a11y.config.js",
+    "test:unit": "jest",
+    "test:unit:watch": "jest --watch",
+    "test:unit:coverage": "jest --coverage",
     "test:monocart": "playwright test",
     "test:monocart:chat-rag": "playwright test tests/e2e/chat-rag-documents.spec.js",
     "test:headed": "playwright test --headed",
@@ -47,12 +52,15 @@
     "ubc-genai-toolkit-llm": "^0.2.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.59.1",
     "browser-sync": "^3.0.4",
     "cross-env": "^7.0.3",
     "delegates": "^1.0.0",
+    "jest": "^30.4.2",
     "monocart-reporter": "^2.11.2",
     "nodemon": "^3.1.10",
-    "npm-run-all": "^4.1.5"
+    "npm-run-all": "^4.1.5",
+    "supertest": "^7.2.2"
   }
 }

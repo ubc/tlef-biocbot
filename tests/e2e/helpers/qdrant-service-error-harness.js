@@ -12,6 +12,14 @@ const Module = require('module');
 const express = require('express');
 const path = require('path');
 
+// This harness drives the REAL qdrantService.initialize against mocked toolkit
+// modules (EmbeddingsModule/QdrantClient/config). Stub mode
+// (BIOCBOT_TEST_LLM_STUB=1, inherited from the test runner) makes initialize
+// divert to the in-process EmbeddingsStub and never call the mocked
+// EmbeddingsModule.create, so the embedding-failure branch can't be reached.
+// Clear it for this child process.
+delete process.env.BIOCBOT_TEST_LLM_STUB;
+
 const servicePath = path.resolve(__dirname, '../../../src/services/qdrantService.js');
 const moduleWithLoad = /** @type {any} */ (Module);
 const originalLoad = moduleWithLoad._load;

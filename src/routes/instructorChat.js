@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const {
-    getSuperCourseChatSettings,
+    getSuperchat,
+    getInstructorSuperCourseChat,
     getSuperCourseRetrievalPool,
     searchSuperCourse,
     buildSuperCourseContext,
@@ -10,6 +11,18 @@ const {
     buildSuperCourseSourceAttribution
 } = require('../services/superCourseService');
 const prompts = require('../services/prompts');
+const { resolveSuperchatAi, resolveSuperCourseChatAi, sendLlmKeyError } = require('./llmKeyMiddleware');
+const { structuredKeyError } = require('../services/llmKeyStore');
+
+async function resolveInstructorSuperchat(db, requestedId = null) {
+    if (requestedId) {
+        return getSuperchat(db, requestedId);
+    }
+    // The global instructor Super Course chat has its OWN dedicated key and pools
+    // every opted-in course — it is no longer tied to "the first student bucket
+    // that happens to have a valid key".
+    return getInstructorSuperCourseChat(db);
+}
 
 // Resolve a user-selected answer level to its configured modifier, falling back
 // to the default level when the requested one is unknown. Empty modifier (the
@@ -28,8 +41,14 @@ router.get('/pool', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        const settings = await getSuperCourseChatSettings(db);
+        const requestedSuperchatId = (req.query && req.query.superchatId) || null;
+        const superchat = await resolveInstructorSuperchat(db, requestedSuperchatId);
+        if (!superchat || superchat.aiAvailable !== true) {
+            return res.status(403).json(structuredKeyError((superchat && superchat.llmKey && superchat.llmKey.status) || 'missing'));
+        }
+        const settings = superchat.settings;
         const pool = await getSuperCourseRetrievalPool(db, {
+            superchatId: superchat.superchatId,
             includeInactiveCourses: settings.includeInactiveCourses
         });
 
@@ -40,8 +59,10 @@ router.get('/pool', async (req, res) => {
                 courseName: course.courseName || course.courseCode || course.courseId,
                 status: course.status || null
             })),
+            superchatId: superchat.superchatId,
+            superchatName: superchat.name,
             includeInactiveCourses: settings.includeInactiveCourses,
-            showStudentSuperCourse: settings.showStudentSuperCourse,
+            showStudentSuperCourse: superchat.showToStudents === true,
             topK: settings.instructorTopK
         });
     } catch (error) {
@@ -218,14 +239,9 @@ router.delete('/sessions/:sessionId', async (req, res) => {
 router.post('/', async (req, res) => {
     try {
         const db = req.app.locals.db;
-        const llmService = req.app.locals.llm;
 
         if (!db) {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
-        }
-
-        if (!llmService) {
-            return res.status(503).json({ success: false, message: 'LLM service is not initialized' });
         }
 
         const message = req.body && req.body.message;
@@ -237,16 +253,31 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Message is required' });
         }
 
-        const settings = await getSuperCourseChatSettings(db);
+        const requestedSuperchatId = (req.body && req.body.superchatId) || (req.query && req.query.superchatId) || null;
+        const superchat = await resolveInstructorSuperchat(db, requestedSuperchatId);
+        if (!superchat || superchat.aiAvailable !== true) {
+            return res.status(403).json(structuredKeyError((superchat && superchat.llmKey && superchat.llmKey.status) || 'missing'));
+        }
+
+        // A specific bucket bills its own key; the global instructor chat
+        // (superchatId === null) bills its dedicated super-course-chat key.
+        const ai = superchat.superchatId
+            ? await resolveSuperchatAi(req, res, superchat.superchatId)
+            : await resolveSuperCourseChatAi(req, res);
+        if (!ai) return;
+        const llmService = ai.llm;
+        const settings = superchat.settings;
         const { pool, results } = await searchSuperCourse(
             db,
             message,
             settings.instructorTopK,
             {
+                superchatId: superchat.superchatId,
                 includeInactiveCourses: settings.includeInactiveCourses,
                 includeNotes: settings.includeNotesInRetrieval,
                 noteRatio: settings.noteRetrievalRatio,
-                noteMinScore: settings.noteMinScore
+                noteMinScore: settings.noteMinScore,
+                qdrant: ai.qdrant
             }
         );
 
@@ -295,12 +326,15 @@ router.post('/', async (req, res) => {
             retrieval: {
                 topK: settings.instructorTopK,
                 includeInactiveCourses: settings.includeInactiveCourses,
+                superchatId: superchat.superchatId,
+                superchatName: superchat.name,
                 poolCourseIds: pool.map(course => course.courseId),
                 poolCourses: sourceAttribution.poolCourses,
                 resultCount: results.length
             }
         });
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error in instructor Super Course chat:', error);
         res.status(500).json({
             success: false,

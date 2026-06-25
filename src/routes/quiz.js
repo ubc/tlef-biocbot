@@ -9,10 +9,11 @@ const router = express.Router();
 const CourseModel = require('../models/Course');
 const QuizAttempt = require('../models/QuizAttempt');
 const DocumentModel = require('../models/Document');
-const QdrantService = require('../services/qdrantService');
 const gridfs = require('../services/gridfs');
 const prompts = require('../services/prompts');
 const BadWordsFilter = require('bad-words');
+const { resolveCourseAi, sendLlmKeyError } = require('./llmKeyMiddleware');
+const { publicKeySummary } = require('../services/llmKeyStore');
 const profanityFilter = new BadWordsFilter();
 
 router.use(express.json());
@@ -127,7 +128,14 @@ router.get('/status', async (req, res) => {
         }
 
         const settings = await CourseModel.getQuizSettings(db, courseId);
-        res.json({ success: true, enabled: settings.enabled });
+        const course = await CourseModel.getCourseById(db, courseId);
+        const aiAvailable = publicKeySummary(course && course.llmApiKey).status === 'valid';
+        res.json({
+            success: true,
+            enabled: settings.enabled && aiAvailable,
+            aiAvailable,
+            llmKey: publicKeySummary(course && course.llmApiKey)
+        });
     } catch (error) {
         console.error('Error checking quiz status:', error);
         res.status(500).json({ success: false, message: 'Internal server error' });
@@ -155,6 +163,9 @@ router.get('/questions', async (req, res) => {
         if (!settings.enabled) {
             return res.status(403).json({ success: false, message: 'Quiz practice is not enabled for this course' });
         }
+
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
 
         // getPublishedLectures returns an array of lecture name strings
         const publishedNames = await CourseModel.getPublishedLectures(db, courseId);
@@ -221,6 +232,7 @@ router.get('/questions', async (req, res) => {
             allowLectureMaterialAccess: settings.allowLectureMaterialAccess
         });
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error fetching quiz questions:', error);
         res.status(500).json({ success: false, message: 'Internal server error' });
     }
@@ -253,6 +265,9 @@ router.post('/check-answer', async (req, res) => {
         }
         const { question } = lookup;
 
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
+
         // MC and TF: direct comparison, no LLM needed
         if (isObjectiveQuestion(question)) {
             return res.json({
@@ -262,10 +277,7 @@ router.post('/check-answer', async (req, res) => {
         }
 
         // Short-answer: AI evaluation
-        const llmService = req.app.locals.llm;
-        if (!llmService) {
-            return res.status(503).json({ success: false, message: 'LLM service not available' });
-        }
+        const llmService = ai.llm;
 
         const result = await llmService.evaluateStudentAnswer(
             question.question,
@@ -277,6 +289,7 @@ router.post('/check-answer', async (req, res) => {
 
         res.json({ success: true, data: result });
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error checking quiz answer:', error);
         res.status(500).json({ success: false, message: 'Internal server error while checking answer' });
     }
@@ -309,6 +322,9 @@ router.post('/attempt', async (req, res) => {
             return res.status(lookup.status).json(lookup.body);
         }
 
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
+
         const { question } = lookup;
         if (isObjectiveQuestion(question)) {
             const evaluated = evaluateObjectiveAnswer(question, studentAnswer);
@@ -333,6 +349,7 @@ router.post('/attempt', async (req, res) => {
 
         res.json({ success: true, attemptId: result.attemptId });
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error recording quiz attempt:', error);
         res.status(500).json({ success: false, message: 'Internal server error' });
     }
@@ -389,6 +406,9 @@ router.get('/materials', async (req, res) => {
             return res.status(403).json({ success: false, message: 'Lecture material access is not enabled' });
         }
 
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
+
         const documents = await DocumentModel.getDocumentsForLecture(db, courseId, lectureName);
 
         const materials = (documents || []).map(doc => ({
@@ -401,6 +421,7 @@ router.get('/materials', async (req, res) => {
 
         res.json({ success: true, materials });
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error fetching quiz materials:', error);
         res.status(500).json({ success: false, message: 'Internal server error' });
     }
@@ -429,6 +450,9 @@ router.get('/materials/:documentId/download', async (req, res) => {
         if (!settings.allowLectureMaterialAccess) {
             return res.status(403).json({ success: false, message: 'Lecture material access is not enabled' });
         }
+
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
 
         const document = await DocumentModel.getDocumentById(db, documentId);
         if (!document || document.courseId !== courseId) {
@@ -470,6 +494,7 @@ router.get('/materials/:documentId/download', async (req, res) => {
         res.setHeader('Content-Type', `${document.mimeType || 'text/plain'}; charset=utf-8`);
         return res.send(textContent);
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error downloading quiz material:', error);
         res.status(500).json({ success: false, message: 'Internal server error' });
     }
@@ -505,10 +530,9 @@ router.post('/chat', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        const llmService = req.app.locals.llm;
-        if (!llmService) {
-            return res.status(503).json({ success: false, message: 'LLM service not available' });
-        }
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
+        const llmService = ai.llm;
 
         // Profanity filter
         const cleanedMessage = profanityFilter.clean(message);
@@ -555,8 +579,7 @@ router.post('/chat', async (req, res) => {
         // RAG Retrieval (single unit only)
         let contextText = '';
         try {
-            const qdrant = new QdrantService();
-            await qdrant.initialize();
+            const qdrant = ai.qdrant;
 
             const searchResults = await qdrant.searchDocuments(
                 message,
@@ -626,6 +649,7 @@ Student's new message: ${message}`;
         });
 
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error in quiz chat endpoint:', error);
         res.status(500).json({
             success: false,

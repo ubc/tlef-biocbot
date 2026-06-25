@@ -17,6 +17,7 @@ const SETTINGS_COURSE_NAME = 'BIOC E2E Settings Test';
 const SETTINGS_OTHER_COURSE_NAME = 'BIOC E2E Settings Other Owner';
 const SETTINGS_COPY_NAME_PREFIX = 'BIOC E2E Settings Copy';
 const SETTINGS_TEST_COURSE_IDS = [SETTINGS_COURSE_ID, SETTINGS_OTHER_COURSE_ID];
+const VALID_API_KEY = 'sk-test-settings-transfer';
 
 let instructorId;
 let freshInstructorId;
@@ -452,6 +453,13 @@ async function setupMockedSettingsRoutes(page, options = {}) {
                 warnings: [],
             },
         },
+        transferRequests: [],
+        notesLlmKey: {
+            status: 'valid',
+            last4: 'mock',
+            validatedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        },
         courseGetStatus: 200,
         courseGetResult: null,
         lifecycleStatus: 200,
@@ -542,7 +550,26 @@ async function setupMockedSettingsRoutes(page, options = {}) {
         }
 
         if (pathname.startsWith('/api/courses/') && pathname.endsWith('/transfer')) {
+            try {
+                state.transferRequests.push(route.request().postDataJSON());
+            } catch (error) {
+                state.transferRequests.push(null);
+            }
             await route.fulfill(jsonResponse(state.transferResult, state.transferStatus));
+            return;
+        }
+
+        if (pathname.startsWith('/api/courses/') && (pathname.endsWith('/llm-key') || pathname.endsWith('/llm-key/test'))) {
+            await route.fulfill(jsonResponse({
+                success: true,
+                message: 'Course API key is valid',
+                llmKey: {
+                    status: 'valid',
+                    last4: 'mock',
+                    validatedAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                },
+            }));
             return;
         }
 
@@ -624,6 +651,30 @@ async function setupMockedSettingsRoutes(page, options = {}) {
             return;
         }
 
+        if (pathname === '/api/settings/notes-llm-key' || pathname === '/api/settings/notes-llm-key/test') {
+            await route.fulfill(jsonResponse({
+                success: true,
+                message: 'Notes API key is valid',
+                llmKey: state.notesLlmKey,
+            }));
+            return;
+        }
+
+        if (pathname === '/api/settings/instructor-superchat-llm-key' || pathname === '/api/settings/instructor-superchat-llm-key/test') {
+            await route.fulfill(jsonResponse({
+                success: true,
+                message: 'Instructor Super Course chat API key is valid',
+                llmKey: {
+                    status: 'valid',
+                    last4: 'mock',
+                    validatedAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                },
+                aiAvailable: true,
+            }));
+            return;
+        }
+
         if (pathname === '/api/settings/ai-settings') {
             if (method === 'PUT') {
                 await route.fulfill(jsonResponse({ success: true }));
@@ -645,6 +696,20 @@ async function setupMockedSettingsRoutes(page, options = {}) {
             return;
         }
         if (pathname.startsWith('/api/superchats/')) {
+            if (pathname.endsWith('/llm-key') || pathname.endsWith('/llm-key/test')) {
+                await route.fulfill(jsonResponse({
+                    success: true,
+                    message: 'Bucket API key is valid',
+                    llmKey: {
+                        status: 'valid',
+                        last4: 'mock',
+                        validatedAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString(),
+                    },
+                }));
+                return;
+            }
+
             if (method === 'GET') {
                 const id = pathname.split('/').pop();
                 const bucket = (state.superchats || []).find((b) => b.superchatId === id);
@@ -1018,6 +1083,7 @@ test.describe('Instructor settings UI', () => {
         await openSettingsPanel(page, 'lifecycle');
 
         await page.locator('#transfer-course-name').fill(copyName);
+        await page.locator('#transfer-course-api-key').fill(VALID_API_KEY);
         await setInputChecked(page, '#transfer-settings-toggle', false);
         await setInputChecked(page, '#transfer-tas-toggle', false);
         await setInputChecked(page, '#deactivate-source-after-transfer-toggle', true);
@@ -1029,6 +1095,7 @@ test.describe('Instructor settings UI', () => {
         const modal = page.locator('#transfer-course-modal');
         await expect(modal).toHaveClass(/show/);
         await expect(page.locator('#transfer-modal-summary')).toContainText(`New course name: ${copyName}`);
+        await expect(page.locator('#transfer-modal-summary')).toContainText('A new course API key will be validated before the copy is created.');
         await expect(page.locator('#transfer-modal-summary')).toContainText('2 of 2 units will copy docs and existing chunks.');
         await expect(page.locator('#transfer-modal-summary')).toContainText('1 of 2 units will copy learning objectives.');
         await expect(page.locator('#transfer-modal-summary')).toContainText('1 of 2 units will copy assessment questions.');
@@ -1051,6 +1118,7 @@ test.describe('Instructor settings UI', () => {
         expect(copiedCourse.status).toBe('active');
         expect(copiedCourse.instructorId).toBe(instructorId);
         expect(copiedCourse.tas).toEqual([]);
+        expect(copiedCourse.llmApiKey?.status).toBe('valid');
         expect(copiedCourse.quizSettings).toBeUndefined();
         expect(copiedCourse.prompts).toBeUndefined();
         expect(unit1.isPublished).toBe(false);
@@ -1210,6 +1278,11 @@ test.describe('Instructor settings UI', () => {
         await expect(page.locator('#transfer-course-name')).toBeFocused();
 
         await page.locator('#transfer-course-name').fill('Mock Copy One');
+        await page.locator('#transfer-course-btn').click();
+        await expect(page.locator('.notification.error', { hasText: 'Please enter an OpenAI API key for the new course.' })).toBeVisible();
+        await expect(page.locator('#transfer-course-api-key')).toBeFocused();
+        await page.locator('#transfer-course-api-key').fill(VALID_API_KEY);
+
         await setInputChecked(page, '#transfer-all-docs', false);
         await expect(page.locator('.transfer-docs-checkbox:checked')).toHaveCount(0);
         await setInputChecked(page, '.transfer-unit-row[data-unit-name="Unit 1"] .transfer-docs-checkbox', true);
@@ -1241,6 +1314,7 @@ test.describe('Instructor settings UI', () => {
         await page.locator('#transfer-modal-confirm').click();
         await expect(page.locator('.notification.error', { hasText: 'Transfer rejected' })).toBeVisible();
         await expect(page.locator('#transfer-course-btn')).toHaveText('Create Course Copy');
+        expect(state.transferRequests[0]?.apiKey).toBe(VALID_API_KEY);
 
         state.transferStatus = 200;
         state.transferResult = {
@@ -1341,6 +1415,7 @@ test.describe('Instructor settings UI', () => {
                             <section id="course-lifecycle-section">
                                 <button id="toggle-course-active-btn">Deactivate Course</button>
                                 <input id="transfer-course-name">
+                                <input id="transfer-course-api-key">
                                 <button id="transfer-course-btn">Create Course Copy</button>
                                 <div id="transfer-unit-grid"></div>
                             </section>

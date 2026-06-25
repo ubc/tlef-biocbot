@@ -7,16 +7,22 @@
 const { LLMModule } = require('ubc-genai-toolkit-llm');
 const config = require('./config');
 const prompts = require('./prompts');
+const { LlmKeyError, mapOpenAIErrorToStatus } = require('./llmKeyStore');
 
 const ALLOWED_LLM_MODELS = ['gpt-4.1-mini', 'gpt-5-nano', 'gpt-5.4-nano'];
 const ALLOWED_REASONING_EFFORTS = ['minimal', 'low', 'medium', 'high'];
 const MODEL_SETTINGS_TTL_MS = 30 * 1000; // Re-read at most every 30 seconds
 
 class LLMService {
-    constructor() {
+    constructor(options = {}) {
         this.llm = null;
         this.isInitialized = false;
         this.llmConfig = null;
+        this.llmConfigOverride = options.llmConfig || null;
+        this.onProviderKeyFailure = typeof options.onProviderKeyFailure === 'function'
+            ? options.onProviderKeyFailure
+            : null;
+        this.scope = options.scope || null;
         this._dbAccessor = null;
         this._modelSettingsCache = null;
         this._modelSettingsCacheAt = 0;
@@ -140,8 +146,8 @@ class LLMService {
      * Initialize the LLM service instance
      * @returns {Promise<LLMService>} The initialized service
      */
-    static async create() {
-        const service = new LLMService();
+    static async create(options = {}) {
+        const service = new LLMService(options);
         await service._performInitialization();
         return service;
     }
@@ -166,7 +172,7 @@ class LLMService {
             }
 
             // Get configuration for current environment
-            this.llmConfig = config.getLLMConfig();
+            this.llmConfig = this.llmConfigOverride || config.getLLMConfig();
 
             console.log(`🚀 Initializing LLM service with provider: ${this.llmConfig.provider}`);
 
@@ -216,7 +222,42 @@ class LLMService {
             return response;
 
         } catch (error) {
+            const keyError = await this._handleProviderError(error);
+            if (keyError) throw keyError;
             console.error('❌ Error sending message to LLM:', error.message);
+            throw error;
+        }
+    }
+
+    async _handleProviderError(error) {
+        const status = mapOpenAIErrorToStatus(error);
+        if (status && this.onProviderKeyFailure) {
+            try {
+                await this.onProviderKeyFailure(status, error);
+            } catch (handlerError) {
+                console.error('❌ Error handling scoped LLM key failure:', handlerError.message);
+            }
+            return new LlmKeyError(status, this.scope || {});
+        }
+        return null;
+    }
+
+    async _sendRawMessage(message, options = {}) {
+        try {
+            return await this.llm.sendMessage(message, options);
+        } catch (error) {
+            const keyError = await this._handleProviderError(error);
+            if (keyError) throw keyError;
+            throw error;
+        }
+    }
+
+    async _sendRawConversation(messages, options = {}) {
+        try {
+            return await this.llm.sendConversation(messages, options);
+        } catch (error) {
+            const keyError = await this._handleProviderError(error);
+            if (keyError) throw keyError;
             throw error;
         }
     }
@@ -271,7 +312,7 @@ class LLMService {
         };
         const finalOptions = await this._applyModelOptions(baseOptions);
 
-        const response = await this.llm.sendConversation(
+        const response = await this._sendRawConversation(
             [
                 {
                     role: 'user',
@@ -539,7 +580,7 @@ class LLMService {
             console.log('⏳ This may take up to 2 minutes for complex questions...');
 
             const response = await Promise.race([
-                this.llm.sendMessage(prompt, generationOptions),
+                this._sendRawMessage(prompt, generationOptions),
                 timeoutPromise
             ]);
 
@@ -655,7 +696,7 @@ Return ONLY a JSON object with the following structure:
                 temperature: 0.1,
                 max_tokens: 256
             });
-            const response = await this.llm.sendMessage(conversationText, mhOptions);
+            const response = await this._sendRawMessage(conversationText, mhOptions);
 
             if (!response || !response.content) {
                 return { concernLevel: 'no concern', reason: 'No response from detection model' };
@@ -743,7 +784,7 @@ Return ONLY a JSON object with the following structure:
             console.log('⏳ This may take up to 2 minutes...');
 
             const response = await Promise.race([
-                this.llm.sendMessage(prompt, generationOptions),
+                this._sendRawMessage(prompt, generationOptions),
                 timeoutPromise
             ]);
 

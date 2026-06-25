@@ -13,6 +13,7 @@ const UserAgreement = moduleRequire('../../../src/models/UserAgreement');
 const CourseModel = moduleRequire('../../../src/models/Course');
 const QdrantService = moduleRequire('../../../src/services/qdrantService');
 const createAuthMiddleware = moduleRequire('../../../src/middleware/auth');
+const { createValidLlmApiKey } = require('./llm-keys');
 
 const app = express();
 app.use(express.json());
@@ -128,6 +129,9 @@ function matchesQuery(doc, query = {}) {
                 .every(([, expected]) => docValue === expected);
         }
 
+        // MongoDB matches a scalar query against an array field by membership
+        // (e.g. courses.superchatIds: 'harness-bucket' matches ['harness-bucket']).
+        if (Array.isArray(docValue)) return docValue.includes(value);
         return docValue === value;
     });
 }
@@ -178,6 +182,32 @@ const state = {
     lastLlmRequest: null,
 };
 
+// chat.js / quiz.js / questions.js resolve their LLM + Qdrant through
+// req.app.locals.llmRegistry (registry.forCourse(...)) rather than reading
+// app.locals.llm directly. The harness hands back the test-controlled state.llm
+// plus a QdrantService instance whose prototype methods are patched by
+// configureQdrant (so searchDocuments still records lastQdrantSearch). When
+// state.llm is null the registry is omitted, so resolveCourseAi takes its
+// "registry not initialized" → 503 path.
+const stubRegistry = (() => {
+    const resolve = async () => ({
+        llm: state.llm,
+        qdrant: new QdrantService({ skipEmbeddings: true }),
+        embeddings: undefined,
+    });
+    return {
+        forCourse: resolve,
+        forSuperchat: resolve,
+        forNotes: resolve,
+        forSuperCourseChat: resolve,
+        evictCourse() {},
+        evictSuperchat() {},
+        evictNotes() {},
+        evictSuperCourseChat() {},
+        clear() {},
+    };
+})();
+
 function fakeSession(session) {
     return {
         ...(session || {}),
@@ -197,6 +227,11 @@ function applyRequestState(req, _res, next) {
     req.app.locals.authService = state.authService;
     req.app.locals.passport = state.passportForLocals;
     req.app.locals.llm = state.llm;
+    if (state.llm) {
+        req.app.locals.llmRegistry = stubRegistry;
+    } else {
+        delete req.app.locals.llmRegistry;
+    }
     next();
 }
 
@@ -435,8 +470,12 @@ function applyMode(mode) {
         state.user = { ...baseUser, userId: 'inst', role: 'instructor', permissions: { systemAdmin: true } };
         state.db = memoryDb({
             users: new MemoryCollection([{ ...baseUser, userId: 'inst', role: 'instructor' }]),
+            // The global instructor super chat now has its OWN dedicated key on the
+            // superCourseChat settings doc (no longer borrowed from a bucket).
+            // getInstructorSuperCourseChat reads it for aiAvailable + settings.
             settings: new MemoryCollection([{
                 _id: 'superCourseChat',
+                llmApiKey: createValidLlmApiKey('instructor-superchat'),
                 instructorTopK: 6,
                 studentTopK: 8,
                 includeInactiveCourses: state.mode === 'instructor-super-chat-inactive',

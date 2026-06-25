@@ -10,6 +10,12 @@ const CourseModel = require('../models/Course');
 const SuperchatModel = require('../models/Superchat');
 const { hasSystemAdminAccess, normalizeEmail } = require('../services/authorization');
 const {
+    buildKeySubdocument,
+    decryptApiKey,
+    publicKeySummary,
+    validateApiKey
+} = require('../services/llmKeyStore');
+const {
     listSystemAdmins,
     grantSystemAdminByEmail,
     revokeSystemAdminByEmail
@@ -954,6 +960,9 @@ router.post('/llm', async (req, res) => {
         if (llmService && typeof llmService.invalidateModelSettingsCache === 'function') {
             llmService.invalidateModelSettingsCache();
         }
+        if (req.app.locals.llmRegistry && typeof req.app.locals.llmRegistry.clear === 'function') {
+            req.app.locals.llmRegistry.clear();
+        }
 
         res.json({
             success: true,
@@ -1362,6 +1371,287 @@ router.post('/mental-health-prompt/reset', async (req, res) => {
     } catch (error) {
         console.error('Error resetting mental health detection prompt:', error);
         res.status(500).json({ success: false, message: 'Failed to reset mental health detection prompt' });
+    }
+});
+
+router.get('/notes-llm-key', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const doc = await db.collection('settings').findOne(
+            { _id: 'notesLlm' },
+            { projection: { llmApiKey: 1 } }
+        );
+
+        res.json({
+            success: true,
+            llmKey: publicKeySummary(doc && doc.llmApiKey),
+            aiAvailable: publicKeySummary(doc && doc.llmApiKey).status === 'valid'
+        });
+    } catch (error) {
+        console.error('Error fetching notes API key status:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch notes API key status' });
+    }
+});
+
+router.put('/notes-llm-key', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const validation = await validateApiKey(req.body && req.body.apiKey);
+        if (!validation.ok) {
+            return res.status(400).json({
+                success: false,
+                code: validation.status === 'quota_exhausted' ? 'LLM_KEY_QUOTA' : 'LLM_KEY_INVALID',
+                message: validation.message || 'API key validation failed',
+                detail: validation.detail
+            });
+        }
+
+        const llmApiKey = buildKeySubdocument(req.body.apiKey, req.user.userId);
+        await db.collection('settings').updateOne(
+            { _id: 'notesLlm' },
+            {
+                $set: {
+                    llmApiKey,
+                    updatedAt: new Date(),
+                    updatedBy: normalizeEmail(req.user.email)
+                }
+            },
+            { upsert: true }
+        );
+
+        if (req.app.locals.llmRegistry) {
+            req.app.locals.llmRegistry.evictNotes();
+        }
+
+        res.json({
+            success: true,
+            message: 'Notes API key saved',
+            llmKey: publicKeySummary(llmApiKey),
+            aiAvailable: true
+        });
+    } catch (error) {
+        console.error('Error saving notes API key:', error);
+        res.status(500).json({ success: false, message: 'Failed to save notes API key' });
+    }
+});
+
+router.post('/notes-llm-key/test', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const doc = await db.collection('settings').findOne({ _id: 'notesLlm' });
+        if (!doc || !doc.llmApiKey || !doc.llmApiKey.ciphertext) {
+            return res.status(400).json({
+                success: false,
+                code: 'LLM_KEY_MISSING',
+                message: 'No API key is saved for instructor notes.'
+            });
+        }
+
+        const apiKey = decryptApiKey(doc.llmApiKey.ciphertext);
+        const validation = await validateApiKey(apiKey);
+        const now = new Date();
+        const status = validation.ok ? 'valid' : validation.status;
+        const set = {
+            'llmApiKey.status': status,
+            'llmApiKey.updatedAt': now,
+            updatedAt: now,
+            updatedBy: normalizeEmail(req.user.email)
+        };
+        if (validation.ok) {
+            set['llmApiKey.validatedAt'] = now;
+        }
+
+        await db.collection('settings').updateOne(
+            { _id: 'notesLlm' },
+            { $set: set }
+        );
+
+        if (req.app.locals.llmRegistry) {
+            req.app.locals.llmRegistry.evictNotes();
+        }
+
+        res.status(validation.ok ? 200 : 400).json({
+            success: validation.ok,
+            code: validation.ok ? undefined : (status === 'quota_exhausted' ? 'LLM_KEY_QUOTA' : 'LLM_KEY_INVALID'),
+            message: validation.ok ? 'Notes API key is valid' : validation.message,
+            llmKey: {
+                ...publicKeySummary(doc.llmApiKey),
+                status,
+                validatedAt: validation.ok ? now : doc.llmApiKey.validatedAt,
+                updatedAt: now
+            },
+            aiAvailable: validation.ok
+        });
+    } catch (error) {
+        console.error('Error testing notes API key:', error);
+        res.status(500).json({ success: false, message: 'Failed to test notes API key' });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// Instructor Super Course chat key — the dedicated key powering the global
+// instructor chat (its own key, not borrowed from a student bucket). Lives on
+// the superCourseChat settings doc alongside that chat's other settings.
+// ---------------------------------------------------------------------------
+router.get('/instructor-superchat-llm-key', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const doc = await db.collection('settings').findOne(
+            { _id: SUPER_COURSE_SETTINGS_ID },
+            { projection: { llmApiKey: 1 } }
+        );
+
+        res.json({
+            success: true,
+            llmKey: publicKeySummary(doc && doc.llmApiKey),
+            aiAvailable: publicKeySummary(doc && doc.llmApiKey).status === 'valid'
+        });
+    } catch (error) {
+        console.error('Error fetching instructor Super Course chat API key status:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch instructor Super Course chat API key status' });
+    }
+});
+
+router.put('/instructor-superchat-llm-key', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const validation = await validateApiKey(req.body && req.body.apiKey);
+        if (!validation.ok) {
+            return res.status(400).json({
+                success: false,
+                code: validation.status === 'quota_exhausted' ? 'LLM_KEY_QUOTA' : 'LLM_KEY_INVALID',
+                message: validation.message || 'API key validation failed',
+                detail: validation.detail
+            });
+        }
+
+        const llmApiKey = buildKeySubdocument(req.body.apiKey, req.user.userId);
+        await db.collection('settings').updateOne(
+            { _id: SUPER_COURSE_SETTINGS_ID },
+            {
+                $set: {
+                    llmApiKey,
+                    updatedAt: new Date(),
+                    updatedBy: normalizeEmail(req.user.email)
+                }
+            },
+            { upsert: true }
+        );
+
+        if (req.app.locals.llmRegistry) {
+            req.app.locals.llmRegistry.evictSuperCourseChat();
+        }
+
+        res.json({
+            success: true,
+            message: 'Instructor Super Course chat API key saved',
+            llmKey: publicKeySummary(llmApiKey),
+            aiAvailable: true
+        });
+    } catch (error) {
+        console.error('Error saving instructor Super Course chat API key:', error);
+        res.status(500).json({ success: false, message: 'Failed to save instructor Super Course chat API key' });
+    }
+});
+
+router.post('/instructor-superchat-llm-key/test', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!requireSystemAdmin(req, res)) {
+            return;
+        }
+
+        const doc = await db.collection('settings').findOne({ _id: SUPER_COURSE_SETTINGS_ID });
+        if (!doc || !doc.llmApiKey || !doc.llmApiKey.ciphertext) {
+            return res.status(400).json({
+                success: false,
+                code: 'LLM_KEY_MISSING',
+                message: 'No API key is saved for the instructor Super Course chat.'
+            });
+        }
+
+        const apiKey = decryptApiKey(doc.llmApiKey.ciphertext);
+        const validation = await validateApiKey(apiKey);
+        const now = new Date();
+        const status = validation.ok ? 'valid' : validation.status;
+        const set = {
+            'llmApiKey.status': status,
+            'llmApiKey.updatedAt': now,
+            updatedAt: now,
+            updatedBy: normalizeEmail(req.user.email)
+        };
+        if (validation.ok) {
+            set['llmApiKey.validatedAt'] = now;
+        }
+
+        await db.collection('settings').updateOne(
+            { _id: SUPER_COURSE_SETTINGS_ID },
+            { $set: set }
+        );
+
+        if (req.app.locals.llmRegistry) {
+            req.app.locals.llmRegistry.evictSuperCourseChat();
+        }
+
+        res.status(validation.ok ? 200 : 400).json({
+            success: validation.ok,
+            code: validation.ok ? undefined : (status === 'quota_exhausted' ? 'LLM_KEY_QUOTA' : 'LLM_KEY_INVALID'),
+            message: validation.ok ? 'Instructor Super Course chat API key is valid' : validation.message,
+            llmKey: {
+                ...publicKeySummary(doc.llmApiKey),
+                status,
+                validatedAt: validation.ok ? now : doc.llmApiKey.validatedAt,
+                updatedAt: now
+            },
+            aiAvailable: validation.ok
+        });
+    } catch (error) {
+        console.error('Error testing instructor Super Course chat API key:', error);
+        res.status(500).json({ success: false, message: 'Failed to test instructor Super Course chat API key' });
     }
 });
 

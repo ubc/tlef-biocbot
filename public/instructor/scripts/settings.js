@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', async () => {
     const SUPER_STUDENT_LEVELS = ['intro', 'undergraduate', 'graduate'];
     const SUPER_INSTRUCTOR_LEVELS = ['overview', 'standard', 'deepDive'];
+    const LLM_KEY_CONTACT_EMAIL = 'LT.hub@ubc.ca';
 
     const settingsHub = document.getElementById('settings-hub');
     const settingsPanels = document.getElementById('settings-panels');
@@ -10,6 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const transferCourseBtn = document.getElementById('transfer-course-btn');
     const transferUnitGrid = document.getElementById('transfer-unit-grid');
     const transferCourseNameInput = document.getElementById('transfer-course-name');
+    const transferCourseApiKeyInput = document.getElementById('transfer-course-api-key');
     const transferAllDocsToggle = document.getElementById('transfer-all-docs');
     const transferAllObjectivesToggle = document.getElementById('transfer-all-objectives');
     const transferAllQuestionsToggle = document.getElementById('transfer-all-questions');
@@ -181,6 +183,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             // Load course year level
             await loadCourseLevel();
+            await loadCourseLlmKey();
 
             // Load privacy settings (anonymize students)
             await loadAnonymizeStudentsSetting();
@@ -196,6 +199,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (canManageDB) {
                 await loadAdminSettings();
                 await loadLLMSettings();
+                await loadNotesLlmKey();
+                await loadInstructorSuperchatLlmKey();
                 await loadQuestionPrompts();
                 await loadSystemAdmins();
             }
@@ -232,6 +237,143 @@ document.addEventListener('DOMContentLoaded', async () => {
                     minimalOption.disabled = false;
                 }
             }
+        }
+    }
+
+    function formatLlmKeyTimestamp(value) {
+        if (!value) return '';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '';
+        return date.toLocaleString();
+    }
+
+    function renderLlmKeyStatus(prefix, llmKey) {
+        const statusElement = document.getElementById(`${prefix}-llm-key-status`);
+        if (!statusElement) return;
+
+        const keyStatus = llmKey && llmKey.status ? llmKey.status : 'missing';
+        const last4 = llmKey && llmKey.last4 ? ` ending ${llmKey.last4}` : '';
+        const checkedAt = formatLlmKeyTimestamp(llmKey && llmKey.validatedAt);
+        statusElement.className = `llm-key-status ${keyStatus}`;
+
+        if (keyStatus === 'valid') {
+            statusElement.textContent = checkedAt
+                ? `Valid key${last4}. Last checked ${checkedAt}.`
+                : `Valid key${last4}.`;
+            return;
+        }
+
+        if (keyStatus === 'quota_exhausted') {
+            statusElement.textContent = `AI disabled. Saved key is out of quota. Contact ${LLM_KEY_CONTACT_EMAIL}.`;
+            return;
+        }
+
+        if (keyStatus === 'invalid') {
+            statusElement.textContent = `AI disabled. Saved key failed validation. Contact ${LLM_KEY_CONTACT_EMAIL}.`;
+            return;
+        }
+
+        statusElement.textContent = `AI disabled. Save a key or contact ${LLM_KEY_CONTACT_EMAIL}.`;
+    }
+
+    async function parseJsonResponse(response) {
+        try {
+            return await response.json();
+        } catch (error) {
+            return { success: false, message: response.statusText || 'Request failed' };
+        }
+    }
+
+    async function saveLlmKey({ inputId, statusPrefix, url, successMessage }) {
+        const input = document.getElementById(inputId);
+        const apiKey = input && input.value ? input.value.trim() : '';
+        if (!apiKey) {
+            input?.focus();
+            throw new Error('Enter an OpenAI API key first');
+        }
+
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ apiKey })
+        });
+        const result = await parseJsonResponse(response);
+        if (result.llmKey) {
+            renderLlmKeyStatus(statusPrefix, result.llmKey);
+        }
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'API key validation failed');
+        }
+
+        input.value = '';
+        showNotification(successMessage || result.message || 'API key saved', 'success');
+        return result;
+    }
+
+    async function testSavedLlmKey({ statusPrefix, url, successMessage }) {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include'
+        });
+        const result = await parseJsonResponse(response);
+        if (result.llmKey) {
+            renderLlmKeyStatus(statusPrefix, result.llmKey);
+        }
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Saved API key failed validation');
+        }
+
+        showNotification(successMessage || result.message || 'Saved API key is valid', 'success');
+        return result;
+    }
+
+    async function loadCourseLlmKey() {
+        try {
+            const courseId = await getCurrentCourseId();
+            if (!courseId) {
+                renderLlmKeyStatus('course', null);
+                return;
+            }
+
+            const response = await fetch(`/api/courses/${encodeURIComponent(courseId)}`, {
+                credentials: 'include'
+            });
+            const result = await parseJsonResponse(response);
+            if (response.ok && result.success && result.data) {
+                renderLlmKeyStatus('course', result.data.llmKey);
+            }
+        } catch (error) {
+            console.error('Error loading course API key status:', error);
+        }
+    }
+
+    async function loadNotesLlmKey() {
+        try {
+            const response = await fetch('/api/settings/notes-llm-key', {
+                credentials: 'include'
+            });
+            const result = await parseJsonResponse(response);
+            if (response.ok && result.success) {
+                renderLlmKeyStatus('notes', result.llmKey);
+            }
+        } catch (error) {
+            console.error('Error loading notes API key status:', error);
+        }
+    }
+
+    async function loadInstructorSuperchatLlmKey() {
+        try {
+            const response = await fetch('/api/settings/instructor-superchat-llm-key', {
+                credentials: 'include'
+            });
+            const result = await parseJsonResponse(response);
+            if (response.ok && result.success) {
+                renderLlmKeyStatus('instructor-superchat', result.llmKey);
+            }
+        } catch (error) {
+            console.error('Error loading instructor Super Course chat API key status:', error);
         }
     }
 
@@ -390,6 +532,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (nameInput) nameInput.value = (superchat && superchat.name) || '';
         if (yearSelect) yearSelect.value = (superchat && superchat.yearLevel) ? String(superchat.yearLevel) : '';
         if (showStudentToggle) showStudentToggle.checked = superchat && superchat.showToStudents === true;
+        renderLlmKeyStatus('superchat', superchat && superchat.llmKey);
         fillSuperchatChatSettingsFields(s);
     }
 
@@ -426,6 +569,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             'include-inactive-super-course-toggle', 'show-student-super-course-toggle',
             'include-notes-super-course-toggle', 'super-note-ratio-input', 'super-note-min-score-input',
             'super-instructor-prompt', 'super-student-prompt',
+            'superchat-llm-key-input', 'test-superchat-llm-key', 'save-superchat-llm-key',
             'reset-superchat-bucket', 'save-superchat-bucket'
         ];
         for (const id of ids) {
@@ -439,6 +583,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!superchatId) {
             selectedSuperchatId = null;
             setSuperchatEditorEnabled(false);
+            renderLlmKeyStatus('superchat', null);
             return;
         }
         try {
@@ -490,6 +635,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const select = document.getElementById('superchat-select');
         const newBtn = document.getElementById('new-superchat-btn');
         const newNameInput = document.getElementById('new-superchat-name');
+        const newKeyInput = document.getElementById('new-superchat-key');
         const deleteBtn = document.getElementById('delete-superchat-btn');
 
         if (select) {
@@ -503,13 +649,19 @@ document.addEventListener('DOMContentLoaded', async () => {
                 newNameInput?.focus();
                 return;
             }
+            const apiKey = (newKeyInput?.value || '').trim();
+            if (!apiKey) {
+                showNotification('Enter an OpenAI API key for the new bucket first.', 'error');
+                newKeyInput?.focus();
+                return;
+            }
             newBtn.disabled = true;
             try {
                 const response = await fetch('/api/superchats', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'include',
-                    body: JSON.stringify({ name })
+                    body: JSON.stringify({ name, apiKey })
                 });
                 const result = await response.json();
                 if (!response.ok || !result.success) throw new Error(result.message || 'Failed to create bucket');
@@ -517,6 +669,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const newId = result.superchat.superchatId;
                 newlyCreatedSuperchatIds.add(newId);
                 if (newNameInput) newNameInput.value = '';
+                if (newKeyInput) newKeyInput.value = '';
 
                 // Refresh the bucket editor select AND the per-course checklist in
                 // place (no page refresh needed). The new bucket starts checked for
@@ -538,6 +691,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         if (newNameInput) {
             newNameInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    createBucket();
+                }
+            });
+        }
+        if (newKeyInput) {
+            newKeyInput.addEventListener('keydown', (event) => {
                 if (event.key === 'Enter') {
                     event.preventDefault();
                     createBucket();
@@ -976,6 +1137,84 @@ document.addEventListener('DOMContentLoaded', async () => {
        Per-section save / reset wiring
        ============================================= */
 
+    wireSectionButton('save-course-llm-key', async () => {
+        const courseId = await getCurrentCourseId();
+        if (!courseId) throw new Error('Select a course first');
+        await saveLlmKey({
+            inputId: 'course-llm-key-input',
+            statusPrefix: 'course',
+            url: `/api/courses/${encodeURIComponent(courseId)}/llm-key`,
+            successMessage: 'Course API key saved'
+        });
+    }, { busyLabel: 'Saving...' });
+
+    wireSectionButton('test-course-llm-key', async () => {
+        const courseId = await getCurrentCourseId();
+        if (!courseId) throw new Error('Select a course first');
+        await testSavedLlmKey({
+            statusPrefix: 'course',
+            url: `/api/courses/${encodeURIComponent(courseId)}/llm-key/test`,
+            successMessage: 'Course API key is valid'
+        });
+    }, { busyLabel: 'Testing...' });
+
+    wireSectionButton('save-superchat-llm-key', async () => {
+        if (!selectedSuperchatId) throw new Error('Select a bucket first');
+        await saveLlmKey({
+            inputId: 'superchat-llm-key-input',
+            statusPrefix: 'superchat',
+            url: `/api/superchats/${encodeURIComponent(selectedSuperchatId)}/llm-key`,
+            successMessage: 'Bucket API key saved'
+        });
+        await loadSuperchatList(selectedSuperchatId);
+        refreshCourseSuperchatChecklist();
+    }, { busyLabel: 'Saving...' });
+
+    wireSectionButton('test-superchat-llm-key', async () => {
+        if (!selectedSuperchatId) throw new Error('Select a bucket first');
+        await testSavedLlmKey({
+            statusPrefix: 'superchat',
+            url: `/api/superchats/${encodeURIComponent(selectedSuperchatId)}/llm-key/test`,
+            successMessage: 'Bucket API key is valid'
+        });
+        await loadSuperchatList(selectedSuperchatId);
+        refreshCourseSuperchatChecklist();
+    }, { busyLabel: 'Testing...' });
+
+    wireSectionButton('save-notes-llm-key', async () => {
+        await saveLlmKey({
+            inputId: 'notes-llm-key-input',
+            statusPrefix: 'notes',
+            url: '/api/settings/notes-llm-key',
+            successMessage: 'Notes API key saved'
+        });
+    }, { busyLabel: 'Saving...' });
+
+    wireSectionButton('test-notes-llm-key', async () => {
+        await testSavedLlmKey({
+            statusPrefix: 'notes',
+            url: '/api/settings/notes-llm-key/test',
+            successMessage: 'Notes API key is valid'
+        });
+    }, { busyLabel: 'Testing...' });
+
+    wireSectionButton('save-instructor-superchat-llm-key', async () => {
+        await saveLlmKey({
+            inputId: 'instructor-superchat-llm-key-input',
+            statusPrefix: 'instructor-superchat',
+            url: '/api/settings/instructor-superchat-llm-key',
+            successMessage: 'Instructor Super Course chat API key saved'
+        });
+    }, { busyLabel: 'Saving...' });
+
+    wireSectionButton('test-instructor-superchat-llm-key', async () => {
+        await testSavedLlmKey({
+            statusPrefix: 'instructor-superchat',
+            url: '/api/settings/instructor-superchat-llm-key/test',
+            successMessage: 'Instructor Super Course chat API key is valid'
+        });
+    }, { busyLabel: 'Testing...' });
+
     // Course basics
     wireSectionButton('save-course-basics', async () => {
         const courseId = await getCurrentCourseId();
@@ -1345,6 +1584,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const counts = getTransferSelectionCounts(payload.units || []);
         const summaryItems = [
             `New course name: ${payload.newCourseName}`,
+            'A new course API key will be validated before the copy is created.',
             `${counts.docsCount} of ${counts.totalUnits} unit${counts.totalUnits === 1 ? '' : 's'} will copy docs and existing chunks.`,
             `${counts.objectivesCount} of ${counts.totalUnits} unit${counts.totalUnits === 1 ? '' : 's'} will copy learning objectives.`,
             `${counts.questionsCount} of ${counts.totalUnits} unit${counts.totalUnits === 1 ? '' : 's'} will copy assessment questions.`,
@@ -1580,6 +1820,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         transferSettings: pendingTransferPayload.transferSettings,
                         transferTAs: pendingTransferPayload.transferTAs,
                         deactivateSourceCourse: pendingTransferPayload.deactivateSourceCourse,
+                        apiKey: pendingTransferPayload.apiKey,
                         units: pendingTransferPayload.units
                     })
                 });
@@ -1698,6 +1939,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return;
             }
 
+            const apiKey = transferCourseApiKeyInput?.value?.trim() || '';
+            if (!apiKey) {
+                showNotification('Please enter an OpenAI API key for the new course.', 'error');
+                transferCourseApiKeyInput?.focus();
+                return;
+            }
+
             const unitRows = Array.from(document.querySelectorAll('.transfer-unit-row'));
             const units = unitRows.map(row => {
                 const unitName = row.getAttribute('data-unit-name');
@@ -1715,6 +1963,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 transferSettings: document.getElementById('transfer-settings-toggle')?.checked === true,
                 transferTAs: document.getElementById('transfer-tas-toggle')?.checked === true,
                 deactivateSourceCourse,
+                apiKey,
                 units
             });
         });
@@ -1884,7 +2133,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             'question-generation-section',
             'mental-health-detection-section',
             'system-admin-section',
-            'llm-model-section'
+            'llm-model-section',
+            'notes-llm-key-section',
+            'instructor-superchat-llm-key-section'
         ];
 
         function setAdminVisibility(isAdmin) {

@@ -110,6 +110,10 @@ async function createSuperchat(db, data = {}, createdById = null) {
         isDeleted: false
     };
 
+    if (data.llmApiKey && typeof data.llmApiKey === 'object') {
+        doc.llmApiKey = data.llmApiKey;
+    }
+
     await collection.insertOne(doc);
     return doc;
 }

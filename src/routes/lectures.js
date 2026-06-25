@@ -3,6 +3,7 @@ const router = express.Router();
 
 // Import the Course model
 const CourseModel = require('../models/Course');
+const { isKeyValid, structuredKeyError } = require('../services/llmKeyStore');
 
 // Middleware for JSON parsing
 router.use(express.json());
@@ -41,6 +42,17 @@ router.post('/publish', async (req, res) => {
         if (!hasAccess) {
             return res.status(403).json({ success: false, message: 'No access to this course' });
         }
+
+        if (isPublished) {
+            const course = await CourseModel.getCourseById(db, courseId);
+            if (!isKeyValid(course && course.llmApiKey)) {
+                return res.status(400).json({
+                    ...structuredKeyError((course && course.llmApiKey && course.llmApiKey.status) || 'missing'),
+                    message: 'Add a valid course OpenAI API key before publishing content to students.'
+                });
+            }
+        }
+
         // Update the publish status in MongoDB (track who updated without overwriting instructorId)
         const result = await CourseModel.updateLecturePublishStatus(
             db,
@@ -388,4 +400,4 @@ router.get('/published-with-questions', async (req, res) => {
     }
 });
 
-module.exports = router; 
+module.exports = router;

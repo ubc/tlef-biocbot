@@ -33,6 +33,7 @@ const mentalHealthFlagsRoutes = require('./routes/mentalHealthFlags');
 const superChatNotesRoutes = require('./routes/superChatNotes');
 const superchatsRoutes = require('./routes/superchats');
 const LLMService = require('./services/llm');
+const LlmRegistry = require('./services/llmRegistry');
 const AuthService = require('./services/authService');
 const createAuthMiddleware = require('./middleware/auth');
 const initializePassport = require('./config/passport');
@@ -61,6 +62,7 @@ app.use('/common', express.static(path.join(__dirname, '../public/common')));
 let db;
 let mongoClient; // Store MongoDB client for session store
 let llmService;
+let llmRegistry;
 let authService;
 let authMiddleware;
 let passport;
@@ -72,13 +74,29 @@ let passport;
 async function initializeLLM() {
     try {
         console.log('🤖 Starting LLM service initialization...');
-        llmService = await LLMService.create();
-        // Allow the LLM service to look up the active model/reasoning settings
-        // from the global settings collection on demand.
-        if (typeof llmService.setDbAccessor === 'function') {
-            llmService.setDbAccessor(() => app.locals.db);
+        llmRegistry = new LlmRegistry();
+        app.locals.llmRegistry = llmRegistry;
+
+        const provider = (process.env.LLM_PROVIDER || '').toLowerCase();
+        const canUseGlobalOpenAiKey = provider === 'openai' && !!process.env.OPENAI_API_KEY;
+        const shouldInitGlobalLlm =
+            process.env.BIOCBOT_TEST_LLM_STUB === '1' ||
+            provider === 'ollama' ||
+            provider === 'ubc-llm-sandbox' ||
+            canUseGlobalOpenAiKey;
+
+        if (shouldInitGlobalLlm) {
+            llmService = await LLMService.create();
+            // Allow the LLM service to look up the active model/reasoning settings
+            // from the global settings collection on demand.
+            if (typeof llmService.setDbAccessor === 'function') {
+                llmService.setDbAccessor(() => app.locals.db);
+            }
+            app.locals.llm = llmService;
+        } else {
+            console.log('ℹ️ Global LLM service skipped; scoped per-surface OpenAI keys will be used.');
+            app.locals.llm = null;
         }
-        app.locals.llm = llmService;
     } catch (error) {
         console.error('❌ Failed to initialize LLM service:', error.message);
         throw error;
@@ -243,7 +261,7 @@ app.get('/login', (req, res) => {
 app.get('/test-qdrant', async (req, res) => {
     try {
         const QdrantService = require('./services/qdrantService');
-        const qdrantService = new QdrantService();
+        const qdrantService = new QdrantService({ skipEmbeddings: true });
 
         console.log('🧪 Testing Qdrant connection...');
         await qdrantService.initialize();
@@ -481,7 +499,7 @@ app.get('/api/health', async (req, res) => {
         // Test Qdrant connection
         try {
             const QdrantService = require('./services/qdrantService');
-            const qdrantService = new QdrantService();
+            const qdrantService = new QdrantService({ skipEmbeddings: true });
             await qdrantService.initialize();
             healthStatus.services.qdrant = { status: 'healthy', message: 'Connected' };
         } catch (error) {
@@ -490,13 +508,22 @@ app.get('/api/health', async (req, res) => {
 
         // Test LLM connection
         try {
-            const llmService = require('./services/llm');
-            const isConnected = await llmService.testConnection();
-            healthStatus.services.llm = {
-                status: isConnected ? 'healthy' : 'error',
-                message: isConnected ? 'Connected' : 'Connection failed',
-                provider: llmService.getProviderName()
-            };
+            if (app.locals.llm) {
+                const isConnected = await app.locals.llm.testConnection();
+                healthStatus.services.llm = {
+                    status: isConnected ? 'healthy' : 'error',
+                    message: isConnected ? 'Connected' : 'Connection failed',
+                    provider: app.locals.llm.getProviderName()
+                };
+            } else if (app.locals.llmRegistry) {
+                healthStatus.services.llm = {
+                    status: 'healthy',
+                    message: 'Scoped per-surface LLM registry is initialized',
+                    provider: process.env.LLM_PROVIDER || 'unknown'
+                };
+            } else {
+                healthStatus.services.llm = { status: 'error', message: 'LLM registry is not initialized' };
+            }
         } catch (error) {
             healthStatus.services.llm = { status: 'error', message: error.message };
         }

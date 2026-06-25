@@ -7,6 +7,7 @@ const { test, expect } = require('./fixtures/monocart');
 const { storageStatePath } = require('./helpers/users');
 
 const INSTRUCTOR_ID = 'e2e_onboarding_branch_instructor';
+const VALID_API_KEY = 'sk-test-onboarding-branches';
 
 test.use({ storageState: storageStatePath('instructor_fresh') });
 
@@ -291,6 +292,7 @@ test.describe('instructor onboarding boot/status/course setup branches', () => {
         await openCourseStep(page);
         await page.locator('#course-select').selectOption('custom');
         await page.locator('#custom-course-name').fill('Reusable Branch Biology');
+        await page.locator('#course-api-key').fill(VALID_API_KEY);
         await page.locator('#weeks-count').fill('1');
         await page.locator('#lectures-per-week').fill('1');
         await page.locator('#continue-btn').click();
@@ -307,6 +309,7 @@ test.describe('instructor onboarding boot/status/course setup branches', () => {
         await openCourseStep(page);
         await page.locator('#course-select').selectOption('custom');
         await page.locator('#custom-course-name').fill('Broken Create Biology');
+        await page.locator('#course-api-key').fill(VALID_API_KEY);
         await page.locator('#weeks-count').fill('1');
         await page.locator('#lectures-per-week').fill('1');
         await page.locator('#continue-btn').click();

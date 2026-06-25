@@ -8,7 +8,6 @@ const express = require('express');
 const path = require('path');
 const router = express.Router();
 const LLMService = require('../services/llm');
-const QdrantService = require('../services/qdrantService');
 const prompts = require('../services/prompts');
 const CourseModel = require('../models/Course');
 const DocumentModel = require('../models/Document');
@@ -18,10 +17,7 @@ const TrackerService = require('../services/tracker');
 const User = require('../models/User');
 const MentalHealthFlag = require('../models/MentalHealthFlag');
 const gridfs = require('../services/gridfs');
-
-// Initialize services
-// Initialize services lazily
-let localTrackerService;
+const { resolveCourseAi, sendLlmKeyError } = require('./llmKeyMiddleware');
 
 /**
  * Determine source attribution based on retrieved chunks
@@ -434,15 +430,8 @@ router.post('/', async (req, res) => {
         console.log('🔐 [CHAT_API] Auth check - Cookie present:', !!req.headers.cookie);
         console.log('🔐 [CHAT_API] Auth check - User present:', !!req.user);
 
-        const llmService = req.app.locals.llm;
-
-        // Check if LLM service is initialized
-        if (!llmService) {
-            return res.status(503).json({
-                success: false,
-                message: 'LLM service is not yet initialized. Please try again in a moment.'
-            });
-        }
+        let llmService = null;
+        let qdrant = null;
 
         const { message, conversationId, mode, unitName, courseId, conversationContext } = req.body;
 
@@ -520,6 +509,11 @@ router.post('/', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Course not found' });
         }
 
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
+        llmService = ai.llm;
+        qdrant = ai.qdrant;
+
         const approvedStruggleTopics = CourseModel.normalizeTopicList(course.approvedStruggleTopics || []);
         console.log(`🧭 [CHAT_TOPIC_MAP] Approved topics loaded: ${approvedStruggleTopics.length}`);
 
@@ -528,16 +522,12 @@ router.post('/', async (req, res) => {
         let directiveModeActive = false;
         let identifiedTopic = null;
 
-        // Initialize TrackerService if needed
-        const appLLM = req.app.locals.llm;
-        if (appLLM && !localTrackerService) {
-            localTrackerService = new TrackerService(appLLM);
-            console.log('✅ [CHAT_API_DEBUG] Local TrackerService initialized from app.locals.llm');
-        }
+        const appLLM = llmService;
+        const trackerService = appLLM ? new TrackerService(appLLM) : null;
 
-        console.log(`🕵️ [CHAT_API_DEBUG] User Context: ID=${req.user ? req.user.userId : 'MISSING'}, Tracker=${!!localTrackerService}`);
+        console.log(`🕵️ [CHAT_API_DEBUG] User Context: ID=${req.user ? req.user.userId : 'MISSING'}, Tracker=${!!trackerService}`);
 
-        if (req.user && localTrackerService) {
+        if (req.user && trackerService) {
             try {
                 // Check if this is an explanation request with a known topic
                 // If so, we can skip analysis and directly increment struggle for that topic
@@ -580,7 +570,7 @@ router.post('/', async (req, res) => {
                     console.log('🕵️ [CHAT_API_DEBUG] ------------------------------------------------');
                     console.log(`🕵️ [CHAT_API_DEBUG] Analysis Start for msg: "${message.substring(0, 50)}..."`);
                     
-                    const analysis = await localTrackerService.analyzeMessage(message, courseId, unitName, approvedStruggleTopics);
+                    const analysis = await trackerService.analyzeMessage(message, courseId, unitName, approvedStruggleTopics);
                     console.log('🕵️ [CHAT_API_DEBUG] Raw Analysis Result:', JSON.stringify(analysis, null, 2));
 
                     if (analysis.isStruggling && analysis.isMapped) {
@@ -610,15 +600,15 @@ router.post('/', async (req, res) => {
                 console.error('❌ [CHAT_API_DEBUG] Error in struggle tracking:', trackerError);
             }
         } else {
-            console.warn('⚠️ [CHAT_API_DEBUG] Check skipped. User:', !!req.user, 'Tracker:', !!localTrackerService);
+            console.warn('⚠️ [CHAT_API_DEBUG] Check skipped. User:', !!req.user, 'Tracker:', !!trackerService);
             if (!req.user) console.warn('⚠️ [CHAT_API_DEBUG] req.user is MISSING. Auth middleware might be failing.');
-            if (!localTrackerService) console.warn('⚠️ [CHAT_API_DEBUG] localTrackerService is MISSING. LLM service might not be ready.');
+            if (!trackerService) console.warn('⚠️ [CHAT_API_DEBUG] trackerService is MISSING. LLM service might not be ready.');
         }
 
 
         // Fire-and-forget: parallel mental health detection LLM call
         // Only send trimmed context: most recent bot message + 2 most recent student messages
-        const appLLMForMH = req.app.locals.llm;
+        const appLLMForMH = llmService;
         if (appLLMForMH && req.user) {
             (async () => {
                 try {
@@ -655,30 +645,6 @@ router.post('/', async (req, res) => {
                     console.error('Mental health detection error (non-blocking):', err);
                 }
             })();
-        }
-
-        // Initialize Qdrant
-        let qdrant;
-        try {
-            qdrant = new QdrantService();
-            await qdrant.initialize();
-        } catch (qdrantError) {
-            console.error('❌ Qdrant initialization failed:', qdrantError.message);
-            // Check if it's a connection error
-            if (qdrantError.message.includes('ECONNREFUSED') || qdrantError.message.includes('fetch failed')) {
-                return res.status(503).json({
-                    success: false,
-                    message: 'Qdrant vector database is not available. Please ensure Qdrant is running.',
-                    error: 'QDRANT_CONNECTION_FAILED',
-                    instructions: 'Start Qdrant with: docker run -p 6333:6333 qdrant/qdrant'
-                });
-            }
-            // Other Qdrant errors
-            return res.status(503).json({
-                success: false,
-                message: 'Vector database service error',
-                error: qdrantError.message
-            });
         }
 
         // Course is already loaded above for topic mapping; reuse it here for retrieval config.
@@ -978,7 +944,7 @@ ${conversationHistory}`;
             struggleDebug: {
                 userExists: !!req.user,
                 userId: req.user ? req.user.userId : null,
-                trackerInitialized: !!localTrackerService,
+                trackerInitialized: !!trackerService,
                 directiveModeActive: directiveModeActive,
                 identifiedTopic: identifiedTopic
             }
@@ -989,6 +955,7 @@ ${conversationHistory}`;
         res.json(chatResponse);
 
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('❌ Error in chat endpoint:', error);
 
         // Provide user-friendly error messages
@@ -1022,7 +989,13 @@ ${conversationHistory}`;
  */
 router.get('/status', async (req, res) => {
     try {
-        const llmService = req.app.locals.llm;
+        let llmService = req.app.locals.llm;
+        const courseId = (req.query && req.query.courseId) || (req.body && req.body.courseId);
+        if (!llmService && courseId) {
+            const ai = await resolveCourseAi(req, res, courseId);
+            if (!ai) return;
+            llmService = ai.llm;
+        }
 
         if (!llmService) {
             return res.status(503).json({
@@ -1059,7 +1032,13 @@ router.post('/test', async (req, res) => {
     try {
         console.log('🧪 Testing LLM connection...');
 
-        const llmService = req.app.locals.llm;
+        let llmService = req.app.locals.llm;
+        const courseId = req.body && req.body.courseId;
+        if (!llmService && courseId) {
+            const ai = await resolveCourseAi(req, res, courseId);
+            if (!ai) return;
+            llmService = ai.llm;
+        }
 
         if (!llmService) {
             return res.status(503).json({
@@ -1267,7 +1246,9 @@ router.post('/practice-question', async (req, res) => {
 
         const generationPrompt = prompts.buildPracticeQuestionPrompt(seedText, topic);
 
-        const llmService = req.app.locals.llm;
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
+        const llmService = ai.llm;
 
         const llmResponse = await llmService.sendMessage(generationPrompt, {
             temperature: 0.7,
@@ -1297,6 +1278,7 @@ router.post('/practice-question', async (req, res) => {
         // Store correct answer server-side, keyed by a temp ID
         const practiceId = `pq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         practiceQuestionStore.set(practiceId, {
+            courseId,
             correctAnswer: generated.correctAnswer,
             explanation: generated.explanation || '',
             question: generated.question,
@@ -1317,6 +1299,7 @@ router.post('/practice-question', async (req, res) => {
         res.json({ success: true, data: clientQuestion });
 
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('❌ Error generating practice question:', error);
         res.status(500).json({ success: false, message: 'Failed to generate practice question.' });
     }
@@ -1336,11 +1319,13 @@ router.post('/check-practice-answer', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Practice question not found or expired. Please generate a new one.' });
         }
 
-        const { correctAnswer, explanation, question, questionType } = stored;
+        const { courseId, correctAnswer, explanation, question, questionType } = stored;
 
         if (questionType === 'short-answer') {
             // Use LLM evaluation for short-answer
-            const llmService = req.app.locals.llm;
+            const ai = await resolveCourseAi(req, res, courseId);
+            if (!ai) return;
+            const llmService = ai.llm;
 
             const result = await llmService.evaluateStudentAnswer(
                 question,
@@ -1377,6 +1362,7 @@ router.post('/check-practice-answer', async (req, res) => {
         }
 
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('❌ Error checking practice answer:', error);
         res.status(500).json({ success: false, message: 'Failed to check answer.' });
     }

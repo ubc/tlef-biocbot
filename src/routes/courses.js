@@ -11,6 +11,13 @@ const DocumentModel = require('../models/Document');
 const QdrantService = require('../services/qdrantService');
 const gridfs = require('../services/gridfs');
 const { hasSystemAdminAccess } = require('../services/authorization');
+const {
+    buildKeySubdocument,
+    decryptApiKey,
+    publicKeySummary,
+    validateApiKey
+} = require('../services/llmKeyStore');
+const { resolveCourseAi } = require('./llmKeyMiddleware');
 
 // Middleware to parse JSON bodies
 router.use(express.json());
@@ -40,6 +47,27 @@ async function hasCourseManagementAccess(db, course, user) {
     }
 
     return false;
+}
+
+async function requireCourseKeyAccess(req, res, db, courseId) {
+    const user = req.user;
+    if (!user) {
+        res.status(401).json({ success: false, message: 'Authentication required' });
+        return null;
+    }
+
+    const course = await CourseModel.getCourseById(db, courseId);
+    if (!course) {
+        res.status(404).json({ success: false, message: 'Course not found' });
+        return null;
+    }
+
+    if (hasSystemAdminAccess(user) || hasInstructorAccess(course, user.userId)) {
+        return course;
+    }
+
+    res.status(403).json({ success: false, message: 'Only course instructors or system admins can manage this API key' });
+    return null;
 }
 
 function isInactiveCourse(course = {}) {
@@ -247,6 +275,108 @@ function getStoredDocumentContent(sourceDocument, fileBuffer = null) {
     return typeof sourceDocument.content === 'string' ? sourceDocument.content : '';
 }
 
+router.put('/:courseId/llm-key', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const course = await requireCourseKeyAccess(req, res, db, req.params.courseId);
+        if (!course) return;
+
+        const apiKey = req.body && req.body.apiKey;
+        const validation = await validateApiKey(apiKey);
+        if (!validation.ok) {
+            return res.status(400).json({
+                success: false,
+                code: validation.status === 'quota_exhausted' ? 'LLM_KEY_QUOTA' : 'LLM_KEY_INVALID',
+                message: validation.message || 'API key validation failed',
+                detail: validation.detail
+            });
+        }
+
+        const llmApiKey = buildKeySubdocument(apiKey, req.user.userId);
+        await db.collection('courses').updateOne(
+            { courseId: course.courseId },
+            { $set: { llmApiKey, updatedAt: new Date() } }
+        );
+
+        if (req.app.locals.llmRegistry) {
+            req.app.locals.llmRegistry.evictCourse(course.courseId);
+        }
+
+        res.json({
+            success: true,
+            message: 'Course API key saved',
+            llmKey: publicKeySummary(llmApiKey),
+            aiAvailable: true
+        });
+    } catch (error) {
+        console.error('Error saving course API key:', error);
+        res.status(500).json({ success: false, message: 'Failed to save course API key' });
+    }
+});
+
+router.post('/:courseId/llm-key/test', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const course = await requireCourseKeyAccess(req, res, db, req.params.courseId);
+        if (!course) return;
+
+        if (!course.llmApiKey || !course.llmApiKey.ciphertext) {
+            return res.status(400).json({
+                success: false,
+                code: 'LLM_KEY_MISSING',
+                message: 'No API key is saved for this course.'
+            });
+        }
+
+        const apiKey = decryptApiKey(course.llmApiKey.ciphertext);
+        const validation = await validateApiKey(apiKey);
+        const now = new Date();
+        const status = validation.ok ? 'valid' : validation.status;
+        const set = {
+            'llmApiKey.status': status,
+            'llmApiKey.updatedAt': now
+        };
+        if (validation.ok) {
+            set['llmApiKey.validatedAt'] = now;
+        }
+
+        await db.collection('courses').updateOne(
+            { courseId: course.courseId },
+            { $set: set }
+        );
+
+        if (req.app.locals.llmRegistry) {
+            req.app.locals.llmRegistry.evictCourse(course.courseId);
+        }
+
+        const llmKey = {
+            ...publicKeySummary(course.llmApiKey),
+            status,
+            validatedAt: validation.ok ? now : course.llmApiKey.validatedAt,
+            updatedAt: now
+        };
+
+        res.status(validation.ok ? 200 : 400).json({
+            success: validation.ok,
+            code: validation.ok ? undefined : (status === 'quota_exhausted' ? 'LLM_KEY_QUOTA' : 'LLM_KEY_INVALID'),
+            message: validation.ok ? 'Course API key is valid' : validation.message,
+            llmKey,
+            aiAvailable: validation.ok
+        });
+    } catch (error) {
+        console.error('Error testing course API key:', error);
+        res.status(500).json({ success: false, message: 'Failed to test course API key' });
+    }
+});
+
 async function cloneDocumentForTransfer({
     db,
     sourceDocument,
@@ -359,7 +489,7 @@ router.post('/', async (req, res) => {
             });
         }
         
-        const { course, weeks, lecturesPerWeek, contentTypes } = req.body;
+        const { course, weeks, lecturesPerWeek, contentTypes, apiKey } = req.body;
         
         // Use authenticated user's ID
         const instructorId = user.userId;
@@ -396,6 +526,16 @@ router.post('/', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const validation = await validateApiKey(apiKey);
+        if (!validation.ok) {
+            return res.status(400).json({
+                success: false,
+                code: validation.status === 'quota_exhausted' ? 'LLM_KEY_QUOTA' : 'LLM_KEY_INVALID',
+                message: validation.message || 'A valid OpenAI API key is required to create a course.',
+                detail: validation.detail
+            });
+        }
         
         // Generate course ID
         const courseId = `${course.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}`;
@@ -429,6 +569,16 @@ router.post('/', async (req, res) => {
                 message: 'Failed to create course in database'
             });
         }
+
+        const llmApiKey = buildKeySubdocument(apiKey, user.userId);
+        await db.collection('courses').updateOne(
+            { courseId },
+            { $set: { llmApiKey, updatedAt: new Date() } }
+        );
+
+        if (req.app.locals.llmRegistry) {
+            req.app.locals.llmRegistry.evictCourse(courseId);
+        }
         
         console.log('Course created in database:', { courseId, course, instructorId });
         
@@ -442,6 +592,8 @@ router.post('/', async (req, res) => {
                 lecturesPerWeek: parseInt(lecturesPerWeek),
                 contentTypes: contentTypes || [],
                 instructorId: instructorId,
+                llmKey: publicKeySummary(llmApiKey),
+                aiAvailable: true,
                 createdAt: new Date().toISOString(),
                 status: 'active',
                 structure: generateCourseStructure(weeks, lecturesPerWeek, contentTypes),
@@ -586,6 +738,8 @@ router.get('/', async (req, res) => {
         const transformedCourses = courses.map(course => ({
             id: course.courseId,
             name: course.courseName,
+            llmKey: publicKeySummary(course.llmApiKey),
+            aiAvailable: publicKeySummary(course.llmApiKey).status === 'valid',
             weeks: course.courseStructure?.weeks || 0,
             lecturesPerWeek: course.courseStructure?.lecturesPerWeek || 0,
             instructorId: course.instructorId,
@@ -862,6 +1016,8 @@ router.get('/:courseId', async (req, res) => {
             courseId: course.courseId,
             name: course.courseName,
             courseName: course.courseName,
+            llmKey: publicKeySummary(course.llmApiKey),
+            aiAvailable: publicKeySummary(course.llmApiKey).status === 'valid',
             courseCode: course.courseCode, // Backward compatible student code field
             studentCourseCode: course.courseCode,
             instructorCourseCode: course.instructorCourseCode,
@@ -1172,7 +1328,9 @@ router.post('/:courseId/extract-topics', async (req, res) => {
         }
 
         const topicLimit = Math.min(Math.max(parseInt(maxTopics, 10) || 8, 1), 15);
-        const llm = req.app.locals.llm;
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
+        const llm = ai.llm;
         let suggestedTopics = [];
 
         if (llm && typeof llm.sendMessage === 'function') {
@@ -1265,6 +1423,8 @@ async function getCourseForStudent(req, res, courseId) {
         const transformedCourse = {
             id: course.courseId,
             name: course.courseName,
+            llmKey: publicKeySummary(course.llmApiKey),
+            aiAvailable: publicKeySummary(course.llmApiKey).status === 'valid',
             approvedStruggleTopics: CourseModel.normalizeTopicList(course.approvedStruggleTopics || []),
             approvedStruggleTopicDetails: CourseModel.normalizeTopicObjectList(course.approvedStruggleTopics || []),
             weeks: course.courseStructure?.weeks || 0,
@@ -1462,6 +1622,7 @@ router.post('/:courseId/transfer', async (req, res) => {
             transferSettings = true,
             transferTAs = true,
             deactivateSourceCourse = false,
+            apiKey,
             units = []
         } = req.body;
 
@@ -1510,6 +1671,16 @@ router.post('/:courseId/transfer', async (req, res) => {
             return res.status(403).json({
                 success: false,
                 message: 'You do not have permission to transfer this course'
+            });
+        }
+
+        const validation = await validateApiKey(apiKey);
+        if (!validation.ok) {
+            return res.status(400).json({
+                success: false,
+                code: validation.status === 'quota_exhausted' ? 'LLM_KEY_QUOTA' : 'LLM_KEY_INVALID',
+                message: validation.message || 'A valid OpenAI API key is required for the new course.',
+                detail: validation.detail
             });
         }
 
@@ -1581,6 +1752,7 @@ router.post('/:courseId/transfer', async (req, res) => {
                 },
             isOnboardingComplete: true,
             status: 'active',
+            llmApiKey: buildKeySubdocument(apiKey, user.userId),
             lectures: targetLectures,
             createdAt: now,
             updatedAt: now,
@@ -1617,7 +1789,7 @@ router.post('/:courseId/transfer', async (req, res) => {
 
         await db.collection('courses').insertOne(targetCourse);
 
-        const qdrantService = new QdrantService();
+        const qdrantService = new QdrantService({ skipEmbeddings: true });
         const transferWarnings = [];
         let documentsCopied = 0;
 
@@ -2062,6 +2234,8 @@ router.get('/available/all', async (req, res) => {
                 instructors: course.instructors || [course.instructorId],
                 tas: course.tas || [],
                 status: course.status || 'active',
+                aiAvailable: publicKeySummary(course.llmApiKey).status === 'valid',
+                llmKey: publicKeySummary(course.llmApiKey),
                 createdAt: course.createdAt?.toISOString() || new Date().toISOString(),
                 isEnrolled: isEnrolled,
                 isTAAssigned,
@@ -2123,6 +2297,8 @@ router.get('/available/joinable', async (req, res) => {
             instructors: course.instructors || [course.instructorId],
             tas: course.tas || [],
             status: course.status || 'active',
+            aiAvailable: publicKeySummary(course.llmApiKey).status === 'valid',
+            llmKey: publicKeySummary(course.llmApiKey),
             createdAt: course.createdAt?.toISOString() || new Date().toISOString()
         }));
 
@@ -2639,6 +2815,8 @@ router.get('/ta/:taId', async (req, res) => {
             instructors: course.instructors || [course.instructorId],
             tas: course.tas || [],
             status: course.status || 'active',
+            aiAvailable: publicKeySummary(course.llmApiKey).status === 'valid',
+            llmKey: publicKeySummary(course.llmApiKey),
             createdAt: course.createdAt?.toISOString() || new Date().toISOString(),
             updatedAt: course.updatedAt?.toISOString() || new Date().toISOString(),
             totalUnits: course.courseStructure?.totalUnits || 0
@@ -3303,7 +3481,7 @@ router.delete('/:courseId/units/:unitName', async (req, res) => {
         
         // 1. Delete all documents associated with this unit
         // We reuse the QdrantService and DocumentModel logic here for safety
-        const qdrantService = new QdrantService();
+        const qdrantService = new QdrantService({ skipEmbeddings: true });
         
         let deletedDocsCount = 0;
         if (unit.documents && unit.documents.length > 0) {

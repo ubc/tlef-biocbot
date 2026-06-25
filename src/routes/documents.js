@@ -7,9 +7,9 @@ const path = require('path');
 // Import the Document model and Course model
 const DocumentModel = require('../models/Document');
 const CourseModel = require('../models/Course');
-const QdrantService = require('../services/qdrantService');
 const { hasSystemAdminAccess } = require('../services/authorization');
 const { QUESTION_EXTRACTION_SYSTEM_PROMPT, buildQuestionExtractionPrompt } = require('../services/prompts');
+const { resolveCourseAi, sendLlmKeyError } = require('./llmKeyMiddleware');
 const { encodingForModel } = require('js-tiktoken');
 
 const PPTX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
@@ -169,11 +169,8 @@ const { ConsoleLogger } = require('ubc-genai-toolkit-core');
 // per-document BSON limit; the document only keeps a `fileId` reference).
 const gridfs = require('../services/gridfs');
 
-// Holds the app's shared LLM service so the imageDescriber hook can reach it.
-// Populated from req.app.locals.llm on each upload (always the same singleton).
-let llmServiceRef = null;
-
 function createDocumentParser(options = {}) {
+    const llmService = options.llmService || null;
     return new DocumentParsingModule({
         logger: new ConsoleLogger(),
         debug: true,
@@ -185,32 +182,22 @@ function createDocumentParser(options = {}) {
         // which configured multimodal provider/model actually handles the image.
         imageDescriber: async (image) => {
             try {
-                if (!llmServiceRef || typeof llmServiceRef.isReady !== 'function' || !llmServiceRef.isReady()) {
+                if (!llmService || typeof llmService.isReady !== 'function' || !llmService.isReady()) {
                     return null;
                 }
-                return await llmServiceRef.describeImage(image.data, image.mimeType, {
+                return await llmService.describeImage(image.data, image.mimeType, {
                     slideNumber: image.slideNumber
                 });
             } catch (err) {
+                if (err && err.name === 'LlmKeyError') {
+                    throw err;
+                }
                 console.warn(`⚠️ imageDescriber failed (slide ${image.slideNumber}): ${err.message}`);
                 return null;
             }
         }
     });
 }
-
-// Initialize Qdrant service
-const qdrantService = new QdrantService();
-
-// Initialize Qdrant service when the module loads
-(async () => {
-    try {
-        await qdrantService.initialize();
-        console.log('✅ Qdrant service initialized in documents route');
-    } catch (error) {
-        console.error('❌ Failed to initialize Qdrant service in documents route:', error);
-    }
-})();
 
 // Configure multer for file uploads
 const upload = multer({
@@ -267,14 +254,13 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             });
         }
 
-        // Make the shared LLM service available to the document parser's
-        // imageDescriber hook (used to describe images inside PowerPoint files).
-        if (req.app.locals.llm) {
-            llmServiceRef = req.app.locals.llm;
-        }
-
         const access = await requireCourseDocumentAccess(req, res, db, courseId, { instructorId });
         if (!access) return;
+
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
+        const qdrantService = ai.qdrant;
+
         const storedInstructorId = access.user.role === 'instructor'
             ? access.user.userId
             : (access.course?.instructorId || instructorId);
@@ -352,6 +338,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                     console.log(`🔍 Starting document parsing...`);
                     const PARSE_TIMEOUT_MS = 5 * 60 * 1000;
                     const parser = createDocumentParser({
+                        llmService: ai.llm,
                         onSlide: file.mimetype === PPTX_MIME_TYPE
                             ? async (slide) => {
                                 if (slide && typeof slide.text === 'string' && slide.text.trim()) {
@@ -419,12 +406,6 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         let qdrantResult = null;
         if (textContent) {
             try {
-                // Ensure Qdrant service is initialized
-                if (!qdrantService.embeddings) {
-                    console.log('Initializing Qdrant service before processing document...');
-                    await qdrantService.initialize();
-                }
-                
                 const qdrantDocumentData = {
                     courseId,
                     lectureName,
@@ -476,6 +457,9 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                     console.warn(`⚠️ Qdrant processing failed: ${qdrantResult.error}`);
                 }
             } catch (qdrantError) {
+                if (qdrantError && qdrantError.name === 'LlmKeyError') {
+                    throw qdrantError;
+                }
                 console.warn('Warning: Document uploaded but Qdrant processing failed:', qdrantError.message);
             }
         }
@@ -497,6 +481,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         });
         
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error uploading document:', error);
         res.status(500).json({
             success: false,
@@ -533,6 +518,10 @@ router.post('/text', async (req, res) => {
 
         const access = await requireCourseDocumentAccess(req, res, db, courseId, { instructorId });
         if (!access) return;
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
+        const qdrantService = ai.qdrant;
+
         const storedInstructorId = access.user.role === 'instructor'
             ? access.user.userId
             : (access.course?.instructorId || instructorId);
@@ -578,12 +567,6 @@ router.post('/text', async (req, res) => {
         // Process text document through Qdrant for vector search
         let qdrantResult = null;
         try {
-            // Ensure Qdrant service is initialized
-            if (!qdrantService.embeddings) {
-                console.log('Initializing Qdrant service before processing document...');
-                await qdrantService.initialize();
-            }
-            
             console.log(`Processing text document through Qdrant: ${title}`);
             qdrantResult = await qdrantService.processAndStoreDocument({
                 courseId,
@@ -602,6 +585,9 @@ router.post('/text', async (req, res) => {
                 console.warn(`⚠️ Qdrant processing failed: ${qdrantResult.error}`);
             }
         } catch (qdrantError) {
+            if (qdrantError && qdrantError.name === 'LlmKeyError') {
+                throw qdrantError;
+            }
             console.warn('Warning: Text document uploaded but Qdrant processing failed:', qdrantError.message);
         }
         
@@ -622,6 +608,7 @@ router.post('/text', async (req, res) => {
         });
         
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error submitting text document:', error);
         res.status(500).json({
             success: false,
@@ -921,6 +908,10 @@ router.delete('/:documentId', async (req, res) => {
         
         const access = await requireCourseDocumentAccess(req, res, db, document.courseId, { instructorId });
         if (!access) return;
+
+        const ai = await resolveCourseAi(req, res, document.courseId);
+        if (!ai) return;
+        const qdrantService = ai.qdrant;
         
         // Delete the document from the documents collection
         const result = await DocumentModel.deleteDocument(db, documentId);
@@ -989,6 +980,7 @@ router.delete('/:documentId', async (req, res) => {
         });
         
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error deleting document:', error);
         res.status(500).json({
             success: false,
@@ -1098,13 +1090,9 @@ router.post('/:documentId/extract-questions', async (req, res) => {
     try {
         const { documentId } = req.params;
         const db = req.app.locals.db;
-        const llm = req.app.locals.llm;
 
         if (!db) {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
-        }
-        if (!llm || typeof llm.sendMessage !== 'function') {
-            return res.status(503).json({ success: false, message: 'LLM service not available' });
         }
 
         // Fetch the document
@@ -1112,6 +1100,10 @@ router.post('/:documentId/extract-questions', async (req, res) => {
         if (!document) {
             return res.status(404).json({ success: false, message: 'Document not found' });
         }
+
+        const ai = await resolveCourseAi(req, res, document.courseId);
+        if (!ai) return;
+        const llm = ai.llm;
 
         const TOKEN_LIMIT = 32000;
         const content = typeof document.content === 'string' ? document.content : '';
@@ -1127,11 +1119,7 @@ router.post('/:documentId/extract-questions', async (req, res) => {
             // Content too large — use Qdrant chunks
             console.log(`Document ${documentId} exceeds token limit (${estimatedTokens} est. tokens). Using Qdrant chunks.`);
             try {
-                const qdrantService = new QdrantService();
-                if (!qdrantService.client) {
-                    await qdrantService.initialize();
-                }
-                const chunks = await qdrantService.getDocumentChunks(documentId);
+                const chunks = await ai.qdrant.getDocumentChunks(documentId);
 
                 if (chunks.length === 0) {
                     return res.status(400).json({
@@ -1176,6 +1164,7 @@ router.post('/:documentId/extract-questions', async (req, res) => {
         });
 
     } catch (error) {
+        if (sendLlmKeyError(res, error)) return;
         console.error('Error extracting questions from document:', error);
         res.status(500).json({
             success: false,

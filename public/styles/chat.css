@@ -326,7 +326,8 @@
 
 .message-content .timestamp {
     font-size: 12px;
-    color: #888;
+    /* WCAG AA contrast: #888 on the light message bg was 3.3:1; --text-secondary (#666) passes */
+    color: var(--text-secondary, #666);
     white-space: nowrap;
 }
 
@@ -1123,7 +1124,9 @@
 /* Chat Disclaimer */
 .chat-disclaimer {
     font-size: 12px;
-    color: #888;
+    /* WCAG AA contrast: #888 was 3.36:1; --text-secondary (#666) passes. Also fixes
+       #view-rules-link, which inherits this color. */
+    color: var(--text-secondary, #666);
     line-height: 1.4;
     flex: 1;
     text-align: center;

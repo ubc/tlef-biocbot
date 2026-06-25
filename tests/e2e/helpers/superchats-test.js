@@ -13,6 +13,7 @@
 
 require('dotenv').config();
 const { withDb } = require('./courses-test');
+const { createValidLlmApiKey } = require('./llm-keys');
 
 const SUPERCHATS_COLLECTION = 'superchats';
 
@@ -44,6 +45,7 @@ async function seedSuperchat({
         includeInactiveCourses: false,
         instructorPrompt: 'E2E instructor super prompt',
         studentPrompt: 'E2E student super prompt',
+        llmApiKey: createValidLlmApiKey(superchatId),
         createdBy: null,
         createdAt: now,
         updatedAt: now,

@@ -26,17 +26,22 @@ const { TEST_USERS, storageStatePath } = require('./helpers/users');
 const { withDb, getUserIdByUsername, seedCourse, cleanupCourses } = require('./helpers/courses-test');
 const { seedSuperchat, cleanupSuperchats } = require('./helpers/superchats-test');
 const { resetLlmStub, enqueueLlmResponses, addLlmStubRule } = require('./helpers/llm-stub');
+const { createValidLlmApiKey } = require('./helpers/llm-keys');
 
 const NOTES = '/api/superchat-notes';
 const SETTINGS_ID = 'superCourseChat';
+const NOTES_LLM_SETTINGS_ID = 'notesLlm';
 // Student-visible bucket + enrolled course, used by the "students never see notes" test.
 const NOTES_BUCKET_ID = 'BIOC-E2E-NOTES-BUCKET';
 const NOTES_COURSE_ID = 'BIOC-E2E-NOTES-COURSE';
+const NOTES_INSTRUCTOR_BUCKET_ID = 'BIOC-E2E-NOTES-INSTRUCTOR-BUCKET';
+const NOTES_INSTRUCTOR_COURSE_ID = 'BIOC-E2E-NOTES-INSTRUCTOR-COURSE';
 
 let instructorId;
 let instructorFreshId;
 let studentId;
 let originalSuperCourseSettings = null;
+let originalNotesLlmSettings = null;
 
 async function readSetting(id) {
     return withDb((db) => db.collection('settings').findOne({ _id: id }));
@@ -77,6 +82,39 @@ async function setNotesSettings(overrides = {}) {
     });
 }
 
+async function seedNotesLlmKey() {
+    await withDb(async (db) => {
+        await db.collection('settings').updateOne(
+            { _id: NOTES_LLM_SETTINGS_ID },
+            {
+                $set: {
+                    llmApiKey: createValidLlmApiKey('notes'),
+                    updatedAt: new Date(),
+                    updatedBy: 'e2e',
+                },
+                $setOnInsert: { createdAt: new Date() },
+            },
+            { upsert: true }
+        );
+    });
+}
+
+async function seedInstructorSuperchatContext(overrides = {}) {
+    await seedSuperchat({
+        superchatId: NOTES_INSTRUCTOR_BUCKET_ID,
+        name: 'Notes Instructor Bucket',
+        yearLevel: 2,
+        showToStudents: false,
+        overrides,
+    });
+    await seedCourse({
+        courseId: NOTES_INSTRUCTOR_COURSE_ID,
+        instructorId,
+        courseName: 'BIOC 202 Notes Instructor',
+        overrides: { yearLevel: 2, superchatIds: [NOTES_INSTRUCTOR_BUCKET_ID] },
+    });
+}
+
 // Remove every note authored by the two test instructors from Mongo so list
 // assertions and counts stay deterministic across runs. (Qdrant stub vectors
 // use distinctive per-test tokens, so any residue can't cause false matches.)
@@ -97,17 +135,20 @@ test.beforeAll(async () => {
     instructorFreshId = await getUserIdByUsername(TEST_USERS.instructor_fresh.username);
     studentId = await getUserIdByUsername(TEST_USERS.student.username);
     originalSuperCourseSettings = await readSetting(SETTINGS_ID);
+    originalNotesLlmSettings = await readSetting(NOTES_LLM_SETTINGS_ID);
 });
 
 test.beforeEach(async () => {
     await cleanupTestNotes();
+    await seedNotesLlmKey();
 });
 
 test.afterAll(async () => {
     await cleanupTestNotes();
-    await cleanupCourses([NOTES_COURSE_ID]);
-    await cleanupSuperchats([NOTES_BUCKET_ID]);
+    await cleanupCourses([NOTES_COURSE_ID, NOTES_INSTRUCTOR_COURSE_ID]);
+    await cleanupSuperchats([NOTES_BUCKET_ID, NOTES_INSTRUCTOR_BUCKET_ID]);
     await restoreSettingDoc(SETTINGS_ID, originalSuperCourseSettings);
+    await restoreSettingDoc(NOTES_LLM_SETTINGS_ID, originalNotesLlmSettings);
 });
 
 // ---------------------------------------------------------------------------
@@ -314,6 +355,7 @@ test.describe('Super Chat Notes duplicate detection', () => {
 test.describe('Super Chat retrieval with notes (stubbed LLM)', () => {
     test('instructor chat returns the stubbed answer and cites a matching note', async ({ baseURL }) => {
         await setNotesSettings({ includeNotesInRetrieval: true });
+        await seedInstructorSuperchatContext({ includeNotesInRetrieval: true });
         const api = await ctx(baseURL, 'instructor');
         try {
             // Distinctive nonsense tokens guarantee this note is the only match.
@@ -328,7 +370,11 @@ test.describe('Super Chat retrieval with notes (stubbed LLM)', () => {
             await enqueueLlmResponses(api, ['Stubbed instructor answer about zorblaxine.']);
 
             const res = await api.post('/api/instructor/chat', {
-                data: { message: 'Tell me about zorblaxine zinabolic catalysis', conversationMessages: [] },
+                data: {
+                    superchatId: NOTES_INSTRUCTOR_BUCKET_ID,
+                    message: 'Tell me about zorblaxine zinabolic catalysis',
+                    conversationMessages: [],
+                },
             });
             expect(res.status()).toBe(200);
             const body = await res.json();
@@ -346,6 +392,7 @@ test.describe('Super Chat retrieval with notes (stubbed LLM)', () => {
 
     test('notes are excluded when the admin toggle is off', async ({ baseURL }) => {
         await setNotesSettings({ includeNotesInRetrieval: false });
+        await seedInstructorSuperchatContext({ includeNotesInRetrieval: false });
         const api = await ctx(baseURL, 'instructor');
         try {
             await api.post(NOTES, {
@@ -359,7 +406,11 @@ test.describe('Super Chat retrieval with notes (stubbed LLM)', () => {
             await enqueueLlmResponses(api, ['Answer with notes disabled.']);
 
             const res = await api.post('/api/instructor/chat', {
-                data: { message: 'Explain quibblefax snarfblat transduction', conversationMessages: [] },
+                data: {
+                    superchatId: NOTES_INSTRUCTOR_BUCKET_ID,
+                    message: 'Explain quibblefax snarfblat transduction',
+                    conversationMessages: [],
+                },
             });
             expect(res.status()).toBe(200);
             const body = await res.json();
@@ -378,6 +429,13 @@ test.describe('Super Chat retrieval with notes (stubbed LLM)', () => {
                 deepDive: 'INSTRUCTOR-DEPTH-MARKER-DEEPDIVE',
             },
         });
+        await seedInstructorSuperchatContext({
+            instructorLevelModifiers: {
+                overview: 'INSTRUCTOR-DEPTH-MARKER-OVERVIEW',
+                standard: 'INSTRUCTOR-DEPTH-MARKER-STANDARD',
+                deepDive: 'INSTRUCTOR-DEPTH-MARKER-DEEPDIVE',
+            },
+        });
         const api = await ctx(baseURL, 'instructor');
         try {
             await resetLlmStub(api);
@@ -389,13 +447,23 @@ test.describe('Super Chat retrieval with notes (stubbed LLM)', () => {
             await enqueueLlmResponses(api, ['FALLBACK-REPLY', 'FALLBACK-REPLY']);
 
             const deepResp = await api.post('/api/instructor/chat', {
-                data: { message: 'Explain enzyme kinetics.', level: 'deepDive', conversationMessages: [] },
+                data: {
+                    superchatId: NOTES_INSTRUCTOR_BUCKET_ID,
+                    message: 'Explain enzyme kinetics.',
+                    level: 'deepDive',
+                    conversationMessages: [],
+                },
             });
             expect(deepResp.status()).toBe(200);
             expect((await deepResp.json()).message).toBe('DEEP-DIVE-REPLY');
 
             const overviewResp = await api.post('/api/instructor/chat', {
-                data: { message: 'Explain enzyme kinetics.', level: 'overview', conversationMessages: [] },
+                data: {
+                    superchatId: NOTES_INSTRUCTOR_BUCKET_ID,
+                    message: 'Explain enzyme kinetics.',
+                    level: 'overview',
+                    conversationMessages: [],
+                },
             });
             expect(overviewResp.status()).toBe(200);
             expect((await overviewResp.json()).message).toBe('FALLBACK-REPLY');

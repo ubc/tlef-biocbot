@@ -15,6 +15,14 @@ const Module = require('module');
 const path = require('path');
 const v8 = require('v8');
 
+// This harness exercises the REAL LLMService initialization path against the
+// FakeLLMModule installed via the require override below. Stub mode
+// (BIOCBOT_TEST_LLM_STUB=1, inherited from the test runner's env) makes
+// _performInitialization short-circuit to the llm-stub and never touch
+// FakeLLMModule, so the lifecycle probe's sends go unrecorded. Clear it for
+// this child process so init wires up the fake module as intended.
+delete process.env.BIOCBOT_TEST_LLM_STUB;
+
 const harnessState = {
     provider: 'openai',
     defaultModel: 'gpt-4.1-mini',

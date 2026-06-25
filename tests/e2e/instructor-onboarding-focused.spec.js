@@ -13,6 +13,7 @@ const { storageStatePath } = require('./helpers/users');
 const COURSE_ID = 'ONBOARDING-JS-FOCUSED';
 const INSTRUCTOR_ID = 'e2e_onboarding_focused_instructor';
 const OBJECTIVE = 'Explain how enzymes reduce activation energy.';
+const VALID_API_KEY = 'sk-test-onboarding-focused';
 
 /**
  * @typedef {{
@@ -338,6 +339,7 @@ async function createCustomCourse(page) {
     await page.locator('#step-1 button.btn-primary', { hasText: 'Get Started' }).click();
     await page.locator('#course-select').selectOption('custom');
     await page.locator('#custom-course-name').fill('Focused Biology: Enzymes & ATP!');
+    await page.locator('#course-api-key').fill(VALID_API_KEY);
     await page.locator('#weeks-count').fill('1');
     await page.locator('#lectures-per-week').fill('1');
     await page.locator('#continue-btn').click();

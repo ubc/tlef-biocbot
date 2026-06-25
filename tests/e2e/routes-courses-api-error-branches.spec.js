@@ -62,6 +62,7 @@ const COURSE_ERR_NO_STRUCT = 'BIOC-E2E-API-COURSES-ERR-NO-STRUCT';
 const COURSE_ERR_UNIT_ORPHAN = 'BIOC-E2E-API-COURSES-ERR-UNIT-ORPHAN';
 const COURSE_ERR_CHAT = 'BIOC-E2E-API-COURSES-ERR-CHAT';
 const COURSE_ERR_NOPE = 'BIOC-E2E-API-COURSES-ERR-DOES-NOT-EXIST';
+const VALID_API_KEY = 'sk-test-courses-error-branches';
 
 let instructorId;
 let instructorFreshId;
@@ -129,6 +130,7 @@ test.describe('POST /api/courses/:courseId/transfer (validation)', () => {
         const res = await api.post(`/api/courses/${COURSE_ERR_A}/transfer`, {
             data: {
                 newCourseName: 'BIOC E2E Err Xfer Non-Array Units',
+                apiKey: VALID_API_KEY,
                 units: 'not-an-array', // <-- the key branch
             },
         });
@@ -155,7 +157,10 @@ test.describe('POST /:courseId/transfer (no courseStructure fallback)', () => {
         });
 
         const res = await api.post(`/api/courses/${COURSE_ERR_NO_STRUCT}/transfer`, {
-            data: { newCourseName: 'BIOC E2E Err Xfer No-Struct Target' },
+            data: {
+                newCourseName: 'BIOC E2E Err Xfer No-Struct Target',
+                apiKey: VALID_API_KEY,
+            },
         });
         expect(res.ok()).toBeTruthy();
         const body = await res.json();
@@ -229,6 +234,7 @@ test.describe('POST /:courseId/transfer (file document branches)', () => {
         const res = await api.post(`/api/courses/${COURSE_ERR_FILE_XFER}/transfer`, {
             data: {
                 newCourseName: 'BIOC E2E Err Xfer File Target',
+                apiKey: VALID_API_KEY,
                 units: [
                     { unitName: 'Unit 1', transferDocuments: true, transferLearningObjectives: true, transferAssessmentQuestions: true },
                     { unitName: 'Unit 2', transferDocuments: false, transferLearningObjectives: false, transferAssessmentQuestions: false },
@@ -301,6 +307,7 @@ test.describe('POST /:courseId/transfer (file document branches)', () => {
         const res = await api.post(`/api/courses/${COURSE_ERR_BUF_XFER}/transfer`, {
             data: {
                 newCourseName: 'BIOC E2E Err Xfer Base64 Target',
+                apiKey: VALID_API_KEY,
                 units: [
                     { unitName: 'Unit 1', transferDocuments: true, transferLearningObjectives: true, transferAssessmentQuestions: true },
                 ],

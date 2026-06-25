@@ -1,0 +1,89 @@
+name: Accessibility
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  a11y:
+    name: Accessibility (axe)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        env:
+          MONGO_INITDB_ROOT_USERNAME: mongoadmin
+          MONGO_INITDB_ROOT_PASSWORD: secret
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' --username mongoadmin --password secret --authenticationDatabase admin || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+
+    env:
+      CI: true
+      NODE_ENV: development
+      TLEF_BIOCBOT_PORT: 8085
+      MONGO_URI: mongodb://mongoadmin:secret@127.0.0.1:27017/biocbot-ci?authSource=admin
+      QDRANT_URL: http://127.0.0.1:6333
+      QDRANT_API_KEY: super-secret-dev-key
+      # BIOCBOT_TEST_LLM_STUB is set on the webServer command in playwright.config.js
+      # (inherited by playwright.a11y.config.js), so the app uses LLM/embedding stubs.
+      EMBEDDING_PROVIDER: ubc-genai-toolkit-llm
+      LLM_PROVIDER: openai
+      LLM_API_KEY: stub-key-not-used
+      OPENAI_API_KEY: stub-key-not-used
+      OPENAI_MODEL: gpt-4.1-mini
+      LLM_EMBEDDING_MODEL: text-embedding-3-small
+      SESSION_SECRET: ci-session-secret
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Wait for Qdrant
+        run: |
+          for i in {1..30}; do
+            if curl -sf http://127.0.0.1:6333/readyz > /dev/null; then
+              echo "Qdrant is ready"
+              exit 0
+            fi
+            echo "Waiting for Qdrant... ($i)"
+            sleep 2
+          done
+          echo "Qdrant did not become ready in time" >&2
+          exit 1
+
+      - name: Run accessibility scans
+        run: npm run test:a11y
+
+      - name: Upload a11y HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a11y-report
+          path: playwright-report-a11y/
+          retention-days: 14
