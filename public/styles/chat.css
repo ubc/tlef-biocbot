@@ -830,7 +830,7 @@
 
 .chat-history-item .preview {
     font-size: 14px;
-    color: #777;
+    color: #5f666d;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -838,7 +838,7 @@
 
 .chat-history-item .date {
     font-size: 12px;
-    color: #999;
+    color: #5f666d;
     margin-top: 6px;
 }
 
@@ -1624,7 +1624,7 @@ input:checked+.toggle-slider:before {
 
 .chat-history-item .preview {
     font-size: 14px;
-    color: #777;
+    color: #5f666d;
     line-height: 1.4;
     margin-bottom: 8px;
     display: -webkit-box;
@@ -1636,7 +1636,7 @@ input:checked+.toggle-slider:before {
 
 .chat-history-item .date {
     font-size: 12px;
-    color: #999;
+    color: #5f666d;
     margin-bottom: 4px;
 }
 
@@ -1656,7 +1656,7 @@ input:checked+.toggle-slider:before {
 }
 
 .chat-history-item .duration {
-    color: #888;
+    color: #5f666d;
 }
 
 /* No History Message */

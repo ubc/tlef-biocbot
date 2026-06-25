@@ -219,6 +219,13 @@
     margin: 0 0 16px;
 }
 
+/* Links inside a text block must be distinguishable without relying on color
+   alone (WCAG 1.4.1). Underline them so they read as links for users who can't
+   perceive the color difference. */
+.section-description a {
+    text-decoration: underline;
+}
+
 .setting-item {
     display: flex;
     justify-content: space-between;
