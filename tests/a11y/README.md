@@ -36,7 +36,7 @@ Use `storageStatePath('student')`.
 - [x] ~~/student/history~~ - `scanned-failing`, scan in `student-remaining.a11y.spec.js`
 - [x] ~~/student/flagged~~ - `scanned-failing`, scan in `student-remaining.a11y.spec.js`
 - [x] ~~/student/quiz~~ - `scanned-pass`, scan in `student-pages.a11y.spec.js`
-- [x] ~~/student/super-course~~ - `scanned-failing`, scan in `student-pages.a11y.spec.js`
+- [x] ~~/student/super-course~~ - `scanned-failing`, scan in `student-pages.a11y.spec.js`; seeds one visible Super Course bucket plus an enrolled source course and clears stale Super Course localStorage before scanning
 - [x] ~~/student/dashboard.html~~ - `scanned-failing`, scan in `student-remaining.a11y.spec.js`
 
 ### Instructor Pages
@@ -94,7 +94,7 @@ These are blocking issues from the latest Phase 1 run. Update or remove each
 item after the fix pass and rerun.
 
 - [ ] `/student` - `select-name` critical on `#course-select`; select has no accessible name.
-- [ ] `/student/super-course` - axe analysis is interrupted by navigation; snapshot lands on the student chat/course-selection UI. Re-run after stabilizing the page state.
+- [ ] `/student/super-course` - `color-contrast` serious on `#super-course-scope` and `label[for="answer-level"]`; captured ratios include fg `#888888`, bg `#f5f7fa`, ratio `3.3`, and fg `#888888`, bg `#ffffff`, ratio `3.54`, expected `4.5`.
 - [ ] `/student/history` - `color-contrast` serious on `.no-history-content > p` and `.no-selection-content > p`; fg `#777777`, bg `#ffffff`, ratio `4.47`, expected `4.5`.
 - [ ] `/student/flagged` - `color-contrast` serious on `.flagged-subtitle > p` and `#refresh-flags`; one captured ratio is fg `#ffffff`, bg `#3b82f6`, ratio `3.67`, expected `4.5`.
 - [ ] `/student/dashboard.html` - `color-contrast` serious on `#directive-mode-status` and `#reset-all-btn`; one captured ratio is fg `#ffffff`, bg `#e74c3c`, ratio `3.82`, expected `4.5`.
