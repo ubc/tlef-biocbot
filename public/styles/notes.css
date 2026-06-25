@@ -146,7 +146,7 @@
     font-size: 0.8rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #888;
+    color: #5f666d;
     margin: 1.2rem 0 0.6rem 0;
 }
 .note-card {
@@ -159,11 +159,11 @@
 .note-card.mine { border-left: 4px solid var(--primary-color, #002145); }
 .note-card-header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 0.4rem; }
 .note-card h3 { margin: 0; font-size: 1.05rem; color: var(--primary-color, #002145); }
-.note-meta { font-size: 0.8rem; color: #888; white-space: nowrap; }
+.note-meta { font-size: 0.8rem; color: #5f666d; white-space: nowrap; }
 .note-excerpt { color: var(--text-primary, #444); font-size: 0.92rem; line-height: 1.5; margin: 0.4rem 0 0.6rem 0; white-space: pre-wrap; }
 .note-card-footer { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
 .note-tags { display: flex; gap: 0.35rem; flex-wrap: wrap; }
-.note-usage { font-size: 0.78rem; color: #7a8a9a; }
+.note-usage { font-size: 0.78rem; color: #5f666d; }
 .note-actions { display: flex; gap: 0.4rem; align-items: center; }
 
 /* Empty state */

@@ -310,7 +310,7 @@ function updatePublishedSummary() {
     
     // Update the text
     if (publishedCount === 0) {
-        summaryContainer.innerHTML = `<strong style="color: #d9534f; font-size: 1.1em;">No units are currently published! Students cannot see any content. Please publish units to make them visible.</strong>`;
+        summaryContainer.innerHTML = `<strong style="color: #c0392b; font-size: 1.1em;">No units are currently published! Students cannot see any content. Please publish units to make them visible.</strong>`;
     } else {
         summaryContainer.textContent = `Currently, ${publishedCount} of the ${totalUnits} Units are Published.`;
     }

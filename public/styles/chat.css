@@ -797,7 +797,7 @@
 .current-course .superchat-picker + .course-name {
     margin-left: 10px;
     font-weight: 500;
-    color: var(--text-muted, #888);
+    color: var(--text-muted, #5f666d);
 }
 
 .user-role {
@@ -1164,7 +1164,7 @@
 .answer-level-selector label {
     white-space: nowrap;
     font-weight: 500;
-    color: #888;
+    color: #5f666d;
     user-select: none;
 }
 
@@ -1687,7 +1687,7 @@ input:checked+.toggle-slider:before {
 
 .no-history-content p {
     margin: 0 0 20px 0;
-    color: #777;
+    color: #5f666d;
     line-height: 1.5;
 }
 
@@ -1719,7 +1719,7 @@ input:checked+.toggle-slider:before {
 
 .no-selection-content p {
     margin: 0;
-    color: #777;
+    color: #5f666d;
     line-height: 1.5;
 }
 

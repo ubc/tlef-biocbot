@@ -15,6 +15,20 @@ const BLOCKING_IMPACTS = new Set(['critical', 'serious']);
  * @param {{ disableRules?: string[] }} [options]
  */
 async function expectNoA11yViolations(page, { disableRules = [] } = {}) {
+    // Freeze CSS entrance animations/transitions before scanning. Pages like
+    // /ta/onboarding fade their content in (opacity 0 -> 1 over 0.5s); if axe
+    // samples mid-animation it reads washed-out colors and reports false
+    // color-contrast failures. Jumping animations to their final state makes the
+    // scan deterministic without changing the page's real (settled) appearance.
+    await page.addStyleTag({
+        content: `*, *::before, *::after {
+            animation-duration: 0s !important;
+            animation-delay: 0s !important;
+            transition-duration: 0s !important;
+            transition-delay: 0s !important;
+        }`,
+    });
+
     let builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']);
     if (disableRules.length) {
         builder = builder.disableRules(disableRules);
