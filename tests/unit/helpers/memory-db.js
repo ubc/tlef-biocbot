@@ -9,7 +9,8 @@
  * Supported query operators: $or, $and, $ne, $in, $nin, $exists, $size,
  * $gt/$gte/$lt/$lte, dotted field paths, and Mongo's "scalar matches an array by
  * membership" rule. Supported update operators: $set, $setOnInsert (on upsert),
- * $addToSet (with $each), $pull (scalar or sub-document match), $push (with $each).
+ * $inc, $addToSet (with $each), $pull (scalar or sub-document match), $push (with $each).
+ * Also supports findOneAndUpdate(), countDocuments(), and distinct(field).
  * Just enough for the model/service helpers under test — not a full Mongo.
  */
 
@@ -66,6 +67,14 @@ function matchesOperators(docValue, cond) {
             case '$gte': return docValue >= val;
             case '$lt': return docValue < val;
             case '$lte': return docValue <= val;
+            case '$regex': {
+                const pattern = val instanceof RegExp
+                    ? val
+                    : new RegExp(val, cond.$options || '');
+                return typeof docValue === 'string' && pattern.test(docValue);
+            }
+            case '$options':
+                return true;
             default:
                 return false;
         }
@@ -101,6 +110,11 @@ function applyUpdate(doc, update, { isInsert = false } = {}) {
     const sets = { ...(update.$set || {}), ...(isInsert ? update.$setOnInsert || {} : {}) };
     for (const [key, value] of Object.entries(sets)) {
         setPath(doc, key, value);
+        modified = true;
+    }
+    for (const [key, value] of Object.entries(update.$inc || {})) {
+        const current = getPath(doc, key);
+        setPath(doc, key, (typeof current === 'number' ? current : 0) + value);
         modified = true;
     }
     for (const [key, value] of Object.entries(update.$addToSet || {})) {
@@ -158,6 +172,166 @@ function sortRows(rows, spec = {}) {
     });
 }
 
+// --- Minimal aggregation support (for the *Stats model helpers) ---
+// Covers the pipeline shapes these models actually use: $match, $group, $project,
+// $sort, $limit, $skip. Group accumulators: $sum, $avg, $push, $addToSet, $first, $last,
+// $min, $max. Expressions: field refs ('$field'), literals, projection objects,
+// and the operators $cond, $eq, $ne, $ifNull, $toLower, $size, $isoWeek,
+// $isoWeekYear, $dateFromParts. Anything else throws — extend it (and re-run
+// the whole suite) rather than guessing.
+
+function aggIsFalsy(v) {
+    // MongoDB boolean context: false, null, undefined, 0, NaN are false.
+    return v === false || v === null || v === undefined || v === 0
+        || (typeof v === 'number' && Number.isNaN(v));
+}
+
+function isoWeekParts(dateValue) {
+    const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
+    if (Number.isNaN(date.getTime())) {
+        throw new Error('memory-db aggregate: ISO week expression requires a valid Date');
+    }
+    const utc = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    const day = utc.getUTCDay() || 7;
+    utc.setUTCDate(utc.getUTCDate() + 4 - day);
+    const isoWeekYear = utc.getUTCFullYear();
+    const yearStart = new Date(Date.UTC(isoWeekYear, 0, 1));
+    const isoWeek = Math.ceil((((utc - yearStart) / 86400000) + 1) / 7);
+    return { isoWeekYear, isoWeek };
+}
+
+function dateFromIsoParts(parts) {
+    const isoWeekYear = Number(parts.isoWeekYear);
+    const isoWeek = Number(parts.isoWeek);
+    const isoDayOfWeek = Number(parts.isoDayOfWeek ?? 1);
+    if (![isoWeekYear, isoWeek, isoDayOfWeek].every(Number.isFinite)) {
+        throw new Error('memory-db aggregate: $dateFromParts requires ISO week fields');
+    }
+    const jan4 = new Date(Date.UTC(isoWeekYear, 0, 4));
+    const jan4Day = jan4.getUTCDay() || 7;
+    const weekOneMonday = new Date(jan4);
+    weekOneMonday.setUTCDate(jan4.getUTCDate() - jan4Day + 1);
+    const result = new Date(weekOneMonday);
+    result.setUTCDate(weekOneMonday.getUTCDate() + ((isoWeek - 1) * 7) + (isoDayOfWeek - 1));
+    result.setUTCHours(0, 0, 0, 0);
+    return result;
+}
+
+function evalAggExpr(doc, expr) {
+    if (typeof expr === 'string') {
+        return expr.startsWith('$') ? getPath(doc, expr.slice(1)) : expr;
+    }
+    if (expr instanceof Date) return new Date(expr.getTime());
+    if (expr === null || typeof expr !== 'object') return expr;
+    if (Array.isArray(expr)) return expr.map((e) => evalAggExpr(doc, e));
+
+    const opKey = Object.keys(expr).find((k) => k.startsWith('$'));
+    if (opKey) {
+        const arg = expr[opKey];
+        switch (opKey) {
+            case '$cond': {
+                const c = Array.isArray(arg) ? { if: arg[0], then: arg[1], else: arg[2] } : arg;
+                return aggIsFalsy(evalAggExpr(doc, c.if)) ? evalAggExpr(doc, c.else) : evalAggExpr(doc, c.then);
+            }
+            case '$eq': return evalAggExpr(doc, arg[0]) === evalAggExpr(doc, arg[1]);
+            case '$ne': return evalAggExpr(doc, arg[0]) !== evalAggExpr(doc, arg[1]);
+            case '$ifNull': {
+                const v = evalAggExpr(doc, arg[0]);
+                return v === null || v === undefined ? evalAggExpr(doc, arg[1]) : v;
+            }
+            case '$toLower': {
+                const v = evalAggExpr(doc, arg);
+                return v == null ? '' : String(v).toLowerCase();
+            }
+            case '$size': {
+                const arr = evalAggExpr(doc, arg);
+                if (!Array.isArray(arr)) {
+                    throw new Error('memory-db aggregate: $size requires an array expression');
+                }
+                return arr.length;
+            }
+            case '$isoWeekYear': return isoWeekParts(evalAggExpr(doc, arg)).isoWeekYear;
+            case '$isoWeek': return isoWeekParts(evalAggExpr(doc, arg)).isoWeek;
+            case '$dateFromParts': {
+                return dateFromIsoParts({
+                    isoWeekYear: evalAggExpr(doc, arg.isoWeekYear),
+                    isoWeek: evalAggExpr(doc, arg.isoWeek),
+                    isoDayOfWeek: evalAggExpr(doc, arg.isoDayOfWeek ?? 1),
+                });
+            }
+            default:
+                throw new Error(`memory-db aggregate: unsupported expression operator ${opKey}`);
+        }
+    }
+    const out = {};
+    for (const [k, v] of Object.entries(expr)) out[k] = evalAggExpr(doc, v);
+    return out;
+}
+
+function aggAccumulate(docs, acc) {
+    const [op, expr] = Object.entries(acc)[0];
+    switch (op) {
+        case '$sum':
+            if (typeof expr === 'number') return docs.length * expr;
+            return docs.reduce((s, d) => s + (Number(evalAggExpr(d, expr)) || 0), 0);
+        case '$avg': {
+            const nums = docs.map((d) => Number(evalAggExpr(d, expr))).filter((n) => !Number.isNaN(n));
+            return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+        }
+        case '$push': return docs.map((d) => evalAggExpr(d, expr));
+        case '$addToSet': {
+            const set = [];
+            for (const d of docs) {
+                const v = evalAggExpr(d, expr);
+                if (!set.some((x) => JSON.stringify(x) === JSON.stringify(v))) set.push(v);
+            }
+            return set;
+        }
+        case '$first': return docs.length ? evalAggExpr(docs[0], expr) : null;
+        case '$last': return docs.length ? evalAggExpr(docs[docs.length - 1], expr) : null;
+        case '$min': return docs.reduce((m, d) => { const v = evalAggExpr(d, expr); return m === undefined || v < m ? v : m; }, undefined) ?? null;
+        case '$max': return docs.reduce((m, d) => { const v = evalAggExpr(d, expr); return m === undefined || v > m ? v : m; }, undefined) ?? null;
+        default:
+            throw new Error(`memory-db aggregate: unsupported group accumulator ${op}`);
+    }
+}
+
+function aggGroup(rows, spec) {
+    const { _id: idExpr, ...accumulators } = spec;
+    const groups = new Map();
+    const order = [];
+    for (const doc of rows) {
+        const idVal = idExpr === null || idExpr === undefined ? null : evalAggExpr(doc, idExpr);
+        const key = JSON.stringify(idVal ?? null);
+        if (!groups.has(key)) { groups.set(key, { _id: idVal ?? null, docs: [] }); order.push(key); }
+        groups.get(key).docs.push(doc);
+    }
+    return order.map((key) => {
+        const { _id, docs } = groups.get(key);
+        const result = { _id };
+        for (const [field, acc] of Object.entries(accumulators)) {
+            result[field] = aggAccumulate(docs, acc);
+        }
+        return result;
+    });
+}
+
+function aggProject(rows, spec) {
+    return rows.map((doc) => {
+        const out = {};
+        for (const [field, expr] of Object.entries(spec)) {
+            if (expr === 0) continue;
+            if (expr === 1) {
+                const value = getPath(doc, field);
+                if (value !== undefined) setPath(out, field, clone(value));
+                continue;
+            }
+            setPath(out, field, evalAggExpr(doc, expr));
+        }
+        return out;
+    });
+}
+
 class MemoryCollection {
     constructor(docs = []) {
         this.docs = docs.map(clone);
@@ -208,6 +382,42 @@ class MemoryCollection {
         return { matchedCount: 0, modifiedCount: 0, upsertedCount: 0 };
     }
 
+    async findOneAndUpdate(query, update, options = {}) {
+        const index = this.docs.findIndex((doc) => matchesQuery(doc, query || {}));
+        const wantsAfter = options.returnDocument === 'after' || options.returnOriginal === false;
+        if (index !== -1) {
+            const before = clone(this.docs[index]);
+            applyUpdate(this.docs[index], update);
+            const value = wantsAfter ? clone(this.docs[index]) : before;
+            if (options.includeResultMetadata) {
+                return { value, lastErrorObject: { updatedExisting: true }, ok: 1 };
+            }
+            return value;
+        }
+
+        if (options.upsert) {
+            const fresh = {};
+            seedFromQuery(fresh, query);
+            applyUpdate(fresh, update, { isInsert: true });
+            if (fresh._id === undefined) fresh._id = `mem-upsert-${this.docs.length + 1}`;
+            this.docs.push(fresh);
+            const value = wantsAfter ? clone(fresh) : null;
+            if (options.includeResultMetadata) {
+                return {
+                    value,
+                    lastErrorObject: { updatedExisting: false, upserted: fresh._id },
+                    ok: 1,
+                };
+            }
+            return value;
+        }
+
+        if (options.includeResultMetadata) {
+            return { value: null, lastErrorObject: { updatedExisting: false }, ok: 1 };
+        }
+        return null;
+    }
+
     async updateMany(query, update) {
         const targets = this.docs.filter((doc) => matchesQuery(doc, query || {}));
         let modifiedCount = 0;
@@ -232,6 +442,35 @@ class MemoryCollection {
 
     async countDocuments(query = {}) {
         return this.docs.filter((doc) => matchesQuery(doc, query)).length;
+    }
+
+    async distinct(field, query = {}) {
+        const values = [];
+        for (const doc of this.docs.filter((row) => matchesQuery(row, query))) {
+            const value = getPath(doc, field);
+            const candidates = Array.isArray(value) ? value : [value];
+            for (const candidate of candidates) {
+                if (candidate === undefined) continue;
+                if (!values.some((existing) => JSON.stringify(existing) === JSON.stringify(candidate))) {
+                    values.push(clone(candidate));
+                }
+            }
+        }
+        return values;
+    }
+
+    aggregate(pipeline = []) {
+        let rows = this.docs.map(clone);
+        for (const stage of pipeline) {
+            if (stage.$match) rows = rows.filter((doc) => matchesQuery(doc, stage.$match));
+            else if (stage.$group) rows = aggGroup(rows, stage.$group);
+            else if (stage.$project) rows = aggProject(rows, stage.$project);
+            else if (stage.$sort) rows = sortRows(rows, stage.$sort);
+            else if (typeof stage.$limit === 'number') rows = rows.slice(0, stage.$limit);
+            else if (typeof stage.$skip === 'number') rows = rows.slice(stage.$skip);
+            else throw new Error(`memory-db aggregate: unsupported stage ${Object.keys(stage)[0]}`);
+        }
+        return { toArray: async () => rows.map(clone) };
     }
 
     async createIndex() {

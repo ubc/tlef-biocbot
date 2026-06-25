@@ -9,7 +9,7 @@ where the last one stopped. Background lives in project memory
 
 ## 0. Current status (2026-06-25)
 
-- **142 unit tests passing** across 8 suites via `npm run test:unit` (131 new + 11 baseline).
+- **367 unit tests passing** across 21 suites via `npm run test:unit` (356 new + 11 baseline).
 - Branch: `api_key_flow`. All work so far is **ADD-ONLY** (only new files under `tests/unit/`).
 - Shared in-memory Mongo double already built: `tests/unit/helpers/memory-db.js`.
 
@@ -24,6 +24,19 @@ where the last one stopped. Background lives in project memory
 | `src/services/tracker.js` | `tests/unit/services/tracker.test.js` | 100% |
 | `src/services/llmRegistry.js` | `tests/unit/services/llmRegistry.test.js` | 94% (only `onProviderKeyFailure` callback uncovered) |
 | `src/models/Superchat.js` | `tests/unit/models/Superchat.test.js` | 100% stmts |
+| `src/models/Course.js` (pure) | `tests/unit/models/Course.pure.test.js` | exported normalizers/resolvers only (internal helpers reached indirectly) |
+| `src/models/Course.js` (db) | `tests/unit/models/Course.db.test.js` | 45% stmts overall; high-value subset (see tracker). Positional `lectures.$.x` writes NOT applied by memory-db → assert return contracts/read paths |
+| `src/models/SuperChatNote.js` | `tests/unit/models/SuperChatNote.test.js` | pure + CRUD + soft-delete + `incrementUsage` (added `$inc` to memory-db) |
+| `src/models/QuizAttempt.js` | `tests/unit/models/QuizAttempt.test.js` | 100%; `getAttemptStats` (added `aggregate()` to memory-db) |
+| `src/models/UserAgreement.js` | `tests/unit/models/UserAgreement.test.js` | 100%; upsert + `getAgreementStats` aggregate |
+| `src/models/Document.js` | `tests/unit/models/Document.test.js` | mapper + CRUD/status/delete + aggregate stats |
+| `src/models/Question.js` | `tests/unit/models/Question.test.js` | CRUD/soft-delete + tag lookup + aggregate stats + bulk create |
+| `src/models/FlaggedQuestion.js` | `tests/unit/models/FlaggedQuestion.test.js` | create/read/update/delete + `getFlagStatistics` aggregate |
+| `src/models/MentalHealthFlag.js` | `tests/unit/models/MentalHealthFlag.test.js` | create/list/status transitions + aggregate stats |
+| `src/models/StruggleActivity.js` | `tests/unit/models/StruggleActivity.test.js` | create/read helpers + Super Chat scoping + weekly aggregate |
+| `src/models/Onboarding.js` | `tests/unit/models/Onboarding.test.js` | upsert/get/update/unit files/delete + stats |
+| `src/models/PersistenceTopic.js` | `tests/unit/models/PersistenceTopic.test.js` | unique student counts, topic lookup/sort, fallback branches |
+| `src/models/User.js` | `tests/unit/models/User.test.js` | create/auth/SAML/access state/preferences/roles/struggle-state |
 
 ---
 
@@ -51,7 +64,8 @@ where the last one stopped. Background lives in project memory
 > "Remaining" list = highest priority). For each: read the source, write the test in
 > `tests/unit/<area>/<module>.test.js`, run `npm run test:unit`, keep it green, then
 > tick the tracker box and append any findings. Reuse `tests/unit/helpers/memory-db.js`
-> for DB-backed code. Start with: **`src/models/Course.js`** (pure normalizers first).
+> for DB-backed code. Model files now all have direct unit tests. Next up:
+> **`src/services/systemAdmin.js`** (small DB-backed service).
 
 ---
 
@@ -115,17 +129,16 @@ const { memoryDb, MemoryCollection } = require('../helpers/memory-db');
 const db = memoryDb({ courses: [{ courseId: 'C1' }], superchats: [/* ... */] });
 db.collection('courses').findOne({ courseId: 'C1' });
 ```
-- **Query ops supported:** `$or`, `$and`, `$ne`, `$in`, `$nin`, `$exists`, `$size`,
+- **Query ops supported:** `$or`, `$and`, `$ne`, `$in`, `$nin`, `$exists`, `$size`, `$regex`,
   `$gt/$gte/$lt/$lte`, dotted paths (`studentEnrollment.S1.enrolled`), and Mongo's
   scalar-matches-array rule.
-- **Update ops supported:** `$set`, `$setOnInsert` (on upsert), `$addToSet` (+`$each`),
-  `$pull` (scalar or sub-doc match), `$push` (+`$each`); `{ upsert: true }`.
+- **Update ops supported:** `$set`, `$setOnInsert` (on upsert), `$inc`, `$addToSet` (+`$each`),
+  `$pull` (scalar or sub-doc match), `$push` (+`$each`); `{ upsert: true }`, `findOneAndUpdate()`.
 - **`find()` cursor:** `.project()/.projection()` (no-op), `.sort(spec)` (real,
   multi-key, nulls last), `.limit()/.skip()`, `.toArray()`.
-- **⚠️ NO `.aggregate()` yet.** Several model stats helpers use `.aggregate(pipeline)`
-  (see tracker notes). To test those, either **(a)** add a minimal `aggregate` to
-  `MemoryCollection` for the specific pipeline shape, or **(b)** inject a hand-rolled
-  fake collection. Keep any aggregate addition generic-but-small; do not over-engineer.
+- **`aggregate()`** has minimal support for the stats/activity helpers already covered (`$match`,
+  `$group`, `$project`, `$sort`, `$limit`, `$skip` plus common accumulators, common expressions,
+  and ISO-week expressions). Extend it only for new pipeline shapes you actually need.
 - **⚠️ Clone gotcha:** the helper uses a realm-local deep clone, NOT `structuredClone`
   — under `jest-environment-node`, `structuredClone` returns host-realm `Date`s that
   fail `toBeInstanceOf(Date)`. Keep it that way.
@@ -169,39 +182,44 @@ mocking or aggregate support · **P3** = heavy external integration / prefer e2e
 - [x] `src/services/tracker.js`
 - [x] `src/services/llmRegistry.js`
 - [x] `src/models/Superchat.js`
+- [x] `src/models/Course.js` — split into `Course.pure.test.js` (35 tests: `normalizeYearLevel`,
+  `parseYearLevelFromName`, `normalizeTopicList`, `normalizeTopicObjectList`, `normalizeRagTopK`,
+  `resolveRagSettings`, `getAllowInSuperCourse`, `normalizeSuperchatIds`, `getCourseSuperchatIds`,
+  constants) + `Course.db.test.js` (35 tests: publish status, get/update/deleteAssessmentQuestions,
+  enrollment, TA perms, `userHasCourseAccess`, `checkTAPermission`, `updateCourseSuperchats`,
+  `createCourseFromOnboarding`). **45% stmts** — the other db helpers (objectives, pass threshold,
+  units, documents, join, quiz settings, anonymize, struggle topics, migrations) remain uncovered
+  and are fair game for a follow-up. Internal-only helpers (`normalizeTopicLabel`, `normalizeCode`,
+  `generateCourseCode/Distinct`, `compareCoursesWithInactiveLast`, `isInactiveCourse`) are **not
+  exported**, so they're exercised indirectly rather than directly (didn't add them to exports).
+
+- [x] `src/models/SuperChatNote.js` — pure (`generateNoteId`, `autoGenerateTitle`, `normalizeTags`)
+  + CRUD + `softDeleteNote` + `incrementUsage`. Required adding **`$inc`** to `memory-db`.
+- [x] `src/models/QuizAttempt.js` — `saveAttempt`, `getAttemptsByStudent`, `getAttemptStats` (100%).
+  Required adding **`aggregate()`** ($match/$group/$sort + accumulators) to `memory-db`.
+- [x] `src/models/UserAgreement.js` — `getUserAgreement`, `createOrUpdateUserAgreement` (upsert),
+  `hasUserAgreed`, `getAgreementStats` (100%). Uses the new `aggregate()`.
+- [x] `src/models/Document.js` — `mapContentTypeToDocumentType`, `uploadDocument`,
+  lecture/doc lookups, content/status updates, delete, and `getDocumentStats`.
+- [x] `src/models/Question.js` — `createQuestion`, lecture/doc lookups, update,
+  soft-delete, `getQuestionsByTags`, `getQuestionStats`, and `bulkCreateQuestions`.
+- [x] `src/models/FlaggedQuestion.js` — `createFlaggedQuestion`, course/status/student/id lookups,
+  instructor response/status updates, `getFlagStatistics`, and hard delete.
+- [x] `src/models/MentalHealthFlag.js` — `createMentalHealthFlag`,
+  `getMentalHealthFlagsForCourse`, `updateFlagStatus`, and `getMentalHealthFlagStats`.
+- [x] `src/models/StruggleActivity.js` — `createActivityEntry`, `getActivityByCourse`,
+  `getSuperCourseActivity`, `getActivityByStudent`, and `getWeeklyActiveTopics`.
+  Required extending `memory-db` aggregate support for `$project` and ISO-week expressions.
+- [x] `src/models/Onboarding.js` — `upsertOnboarding`, course/instructor getters,
+  `updateOnboardingFields`, `updateUnitFiles`, `deleteOnboarding`, and `getOnboardingStats`.
+- [x] `src/models/PersistenceTopic.js` — `incrementStudentCount`, `getPersistenceTopics`, duplicate
+  student handling, failure branches, and regex metacharacter behavior.
+- [x] `src/models/User.js` — `createUser`, `authenticateUser`, `getUserById`, `getUserByPuid`,
+  `updateUserPreferences`, SAML create/update/TA-preservation, role lookup, deactivation,
+  `updateUserStruggleState`, and `resetUserStruggleState`.
 
 ### ⬜ Remaining — Models (use `memory-db`)
-- [ ] **P1 `src/models/Course.js`** — biggest win. Many PURE normalizers: `normalizeYearLevel`,
-  `parseYearLevelFromName`, `normalizeTopicLabel/List/Object/ObjectList`, `normalizeRagTopK`,
-  `resolveRagSettings`, `normalizeSuperchatIds`, `getCourseSuperchatIds`,
-  `compareCoursesWithInactiveLast`, `generateCourseCode/Distinct`, `normalizeCode`,
-  `getAllowInSuperCourse`. Plus db helpers: `getPublishedLectures`, `getLecturePublishStatus`,
-  `updateLecturePublishStatus`, `get/updateAssessmentQuestions`, `deleteAssessmentQuestion`,
-  `getStudentEnrollment`/`updateStudentEnrollment`, `userHasCourseAccess`, `checkTAPermission`,
-  `getTAPermissions`, `updateCourseSuperchats`, `createCourseFromOnboarding`. **Suggest 2 files:**
-  `Course.pure.test.js` + `Course.db.test.js`. ~2200 lines — read in pages. Note: some `$set`
-  use positional `lectures.$.x` which `memory-db` does NOT apply — test via the
-  `find-lecture-by-name` read paths or extend the helper minimally if needed (don't fix source).
-- [ ] **P1 `src/models/SuperChatNote.js`** — mirrors Superchat. Pure: `generateNoteId`,
-  `autoGenerateTitle`, `normalizeTags`. CRUD + `softDeleteNote` + `incrementUsage`. Easy.
-- [ ] **P1 `src/models/QuizAttempt.js`** — `saveAttempt`, `getAttemptsByStudent`,
-  `getAttemptStats`. **`getAttemptStats` uses `.aggregate()`** → needs aggregate support (§4a).
-- [ ] **P1 `src/models/UserAgreement.js`** — `getUserAgreement` (defaults), `createOrUpdate`,
-  `hasUserAgreed`, `getAgreementStats` (**aggregate**). Small.
-- [ ] **P2 `src/models/User.js`** — `createOrGetSAMLUser` (rich branching), `getUserByPuid`,
-  `updateUserPreferences`, `deactivateUser`, `updateUserStruggleState`/`resetUserStruggleState`,
-  `getUsersByRole`. `createUser`/`authenticateUser` use **bcrypt** (real dep works, just slower —
-  or focus on the non-bcrypt helpers).
-- [ ] **P2 `src/models/Question.js`** — CRUD + `getQuestionStats` (**aggregate**) + `getQuestionsByTags`.
-- [ ] **P2 `src/models/FlaggedQuestion.js`** — CRUD + `getFlagStatistics` (**aggregate**).
-- [ ] **P2 `src/models/MentalHealthFlag.js`** — CRUD + `getMentalHealthFlagStats` (**aggregate**).
-- [ ] **P2 `src/models/StruggleActivity.js`** — `createActivityEntry`, `getActivityByCourse`,
-  `getSuperCourseActivity`, `getWeeklyActiveTopics` (likely **aggregate**/grouping).
-- [ ] **P2 `src/models/Document.js`** — pure `mapContentTypeToDocumentType` + CRUD +
-  `getDocumentStats` (**aggregate**).
-- [ ] **P2 `src/models/Onboarding.js`** — `upsertOnboarding`, getters, `updateOnboardingFields`,
-  `updateUnitFiles`, `getOnboardingStats`.
-- [ ] **P3 `src/models/PersistenceTopic.js`** — small; `incrementStudentCount`, `getPersistenceTopics`.
+All current `src/models/*.js` files have direct unit-test files.
 
 ### ⬜ Remaining — Services
 - [ ] **P1 `src/services/systemAdmin.js`** — `listSystemAdmins`, `grant/revokeSystemAdminByEmail`
@@ -244,15 +262,48 @@ pass, NOT to be fixed while writing tests.
   stores a ciphertext that cannot be decrypted. Characterized in
   `tests/unit/services/llmKeyStore.test.js`; not fixed.
 
+- **`Course.normalizeYearLevel` coerces via `Number()` (lenient).** `'4'` → 4 and, more
+  surprisingly, `true` → 1 (since `Number(true) === 1` is an in-range integer). Likely
+  intended leniency, but worth knowing callers can pass booleans. Characterized in
+  `Course.pure.test.js`; not fixed.
+
+- **`Course.parseYearLevelFromName` treats a bare single digit as its own "first digit".**
+  With no 3–4 digit course number it falls back to `(\d+)`, so `'Level 7'` → `min(7,5)` = 5,
+  while `'Course 0'` → null (leading digit 0 is rejected). Edge behavior, almost certainly
+  fine for real course names; characterized in `Course.pure.test.js`, not fixed.
+
+- **`FlaggedQuestion.createFlaggedQuestion` lets `flagData.flagId` override the stored ID.**
+  It generates a new `flagId` and returns that generated value, but spreads `flagData` after it
+  in the inserted document, so a caller-provided `flagId` is what actually gets stored. The
+  generated return ID then cannot retrieve the inserted flag. Characterized in
+  `FlaggedQuestion.test.js`; not fixed.
+
+- **`Onboarding.upsertOnboarding` overwrites `createdAt` during updates when omitted.**
+  The comment says `createdAt` is only set for new documents, but the implementation always places
+  `createdAt` in `$set` (`now` when the caller does not provide one). Updating an existing document
+  without `createdAt` therefore replaces the original creation timestamp. Characterized in
+  `Onboarding.test.js`; not fixed.
+
+- **`PersistenceTopic.incrementStudentCount` builds a `RegExp` from unescaped topic text.**
+  A topic containing regex metacharacters can match a different stored topic, e.g. input
+  `'ATP.se'` matches stored topic `'atpase'` and increments that document instead of creating
+  a literal `atp.se` topic. Characterized in `PersistenceTopic.test.js`; not fixed.
+
+- **`User.authenticateUser` accepts a basic-auth user with `passwordHash: null`.**
+  The password check runs only when `authProvider === 'basic' && user.passwordHash`; if a basic
+  active user has no hash, any password is accepted and `lastLogin` is updated. Characterized in
+  `User.test.js`; not fixed.
+
 *(append new findings below as you go)*
 
 ---
 
 ## 7. Known helper limitations to extend as needed
 
-- **`aggregate()`** is not implemented in `memory-db.js`. Needed by most `*Stats`/activity
-  helpers. Add a minimal, pipeline-shape-specific implementation (or inject a fake) when you
-  reach those — keep it small and obviously correct.
+- **`aggregate()`** has minimal support in `memory-db.js` for the stats/activity helpers already
+  covered (`$match`, `$group`, `$project`, `$sort`, `$limit`, `$skip` plus common accumulators,
+  common expressions, and ISO-week expressions). Extend it only for new pipeline shapes you
+  actually need, and re-run the full unit suite afterward.
 - **Positional `$` update operator** (`lectures.$.field`) is not applied by `memory-db`.
   Course unit-update helpers use it; test their read side, or extend the helper minimally.
 - **bcrypt**-backed functions (`User.createUser/authenticateUser`, `authService` login/register)
