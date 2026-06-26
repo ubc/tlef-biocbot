@@ -19,14 +19,17 @@
 const express = require('express');
 const request = require('supertest');
 
-function makeRouteApp(router, { db = null, user = null, locals = {}, mountPath = '/' } = {}) {
+function makeRouteApp(router, { db = null, user = null, session = null, locals = {}, mountPath = '/' } = {}) {
     const app = express();
     app.use(express.json());
     app.locals.db = db;
     Object.assign(app.locals, locals);
     // Fake auth: stand in for Passport by attaching the provided user (if any).
+    // Some routers (e.g. auth.js) also read req.session directly for the legacy
+    // session-based path; inject it when the caller supplies one.
     app.use((req, res, next) => {
         if (user) req.user = user;
+        if (session) req.session = session;
         next();
     });
     app.use(mountPath, router);
