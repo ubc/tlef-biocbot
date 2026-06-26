@@ -356,6 +356,79 @@ async function canCreateFeedbackForCourse(db, user, courseId) {
     return !!(enrollment.success && enrollment.enrolled);
 }
 
+const SUMMARY_MAX_MESSAGES = 80;
+const SUMMARY_MAX_MESSAGE_CHARS = 2000;
+const SUMMARY_MAX_TOTAL_CHARS = 20000;
+
+function normalizeSummaryContent(content) {
+    return String(content || '')
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeSummaryMessages(messages = []) {
+    if (!Array.isArray(messages)) return [];
+
+    const normalized = messages
+        .filter((message) => {
+            if (!message || typeof message !== 'object') return false;
+            if (message.isSummarySeed === true) return false;
+            if (message.messageType && message.messageType !== 'regular-chat') return false;
+            const type = message.type || message.role;
+            return type === 'user' || type === 'student' || type === 'bot' || type === 'assistant';
+        })
+        .map((message) => {
+            const type = message.type || message.role;
+            const role = type === 'bot' || type === 'assistant' ? 'bot' : 'student';
+            const content = normalizeSummaryContent(message.content || message.message || message.text);
+            return {
+                role,
+                content: content.slice(0, SUMMARY_MAX_MESSAGE_CHARS)
+            };
+        })
+        .filter((message) => message.content);
+
+    const recentMessages = normalized.slice(-SUMMARY_MAX_MESSAGES);
+    const bounded = [];
+    let totalChars = 0;
+
+    for (let index = recentMessages.length - 1; index >= 0; index -= 1) {
+        const message = recentMessages[index];
+        if (totalChars + message.content.length > SUMMARY_MAX_TOTAL_CHARS && bounded.length > 0) {
+            break;
+        }
+        bounded.unshift(message);
+        totalChars += message.content.length;
+    }
+
+    return bounded;
+}
+
+function buildChatSummaryPrompt({ messages, unitName, mode }) {
+    const transcript = messages
+        .map((message) => `${message.role === 'student' ? 'Student' : 'BiocBot'}: ${message.content}`)
+        .join('\n\n');
+
+    return `Summarize the prior BiocBot tutoring conversation below so it can become the first student message in a new chat session.
+
+Context:
+- Unit: ${unitName}
+- Bot mode to preserve: ${mode === 'protege' ? 'protege' : 'tutor'}
+
+Requirements:
+1. Write in first person as the student.
+2. Include the main topics discussed, important explanations BiocBot gave, conclusions reached, and any remaining confusion or follow-up needs.
+3. Do not include greetings, sign-offs, assessment setup, UI text, source-button text, or metadata.
+4. Do not invent facts that are not in the transcript.
+5. Keep it concise: 120-250 words.
+
+Transcript:
+${transcript}`;
+}
+
 /**
  * POST /api/chat/feedback
  * Upsert or clear thumbs-up / thumbs-down feedback for an assistant message.
@@ -437,6 +510,93 @@ router.post('/feedback', async (req, res) => {
     } catch (error) {
         console.error('Error saving chat message feedback:', error);
         return res.status(500).json({ success: false, message: 'Internal server error while saving feedback' });
+    }
+});
+
+/**
+ * POST /api/chat/summary
+ * Summarize an existing student/BiocBot chat so it can seed a fresh session.
+ */
+router.post('/summary', async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+        if (user.role !== 'student') {
+            return res.status(403).json({ success: false, message: 'Only students can summarize chat sessions' });
+        }
+
+        const { courseId, unitName, mode, messages } = req.body;
+        if (!courseId || !unitName) {
+            return res.status(400).json({ success: false, message: 'courseId and unitName are required' });
+        }
+
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const course = await db.collection('courses').findOne({ courseId });
+        if (!course) {
+            return res.status(404).json({ success: false, message: 'Course not found' });
+        }
+
+        const canSummarize = await canCreateFeedbackForCourse(db, user, courseId);
+        if (!canSummarize) {
+            return res.status(403).json({ success: false, message: 'No access to summarize chats for this course' });
+        }
+
+        const publishedUnits = (course.lectures || []).filter(unit => unit.isPublished).map(unit => unit.name);
+        if (!publishedUnits.includes(unitName)) {
+            return res.status(400).json({ success: false, message: 'Selected unit is not published or does not exist' });
+        }
+
+        const summaryMessages = normalizeSummaryMessages(messages);
+        const hasStudentMessage = summaryMessages.some(message => message.role === 'student');
+        const hasBotMessage = summaryMessages.some(message => message.role === 'bot');
+        if (!hasStudentMessage || !hasBotMessage) {
+            return res.status(400).json({
+                success: false,
+                message: 'At least one student message and one BiocBot message are required to summarize a chat'
+            });
+        }
+
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
+
+        const summaryPrompt = buildChatSummaryPrompt({
+            messages: summaryMessages,
+            unitName,
+            mode
+        });
+
+        const response = await ai.llm.sendMessage(summaryPrompt, {
+            temperature: 0.2,
+            maxTokens: 700,
+            systemPrompt: 'You summarize tutoring conversations for continuity. Return only the student-voice summary.'
+        });
+
+        const summary = normalizeSummaryContent(response && response.content);
+        if (!summary) {
+            return res.status(502).json({ success: false, message: 'Failed to generate a chat summary' });
+        }
+
+        return res.json({
+            success: true,
+            summary,
+            message: summary,
+            mode: mode === 'protege' ? 'protege' : 'tutor',
+            unitName,
+            sourceMessageCount: summaryMessages.length,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Error summarizing chat session:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error while summarizing chat session'
+        });
     }
 });
 

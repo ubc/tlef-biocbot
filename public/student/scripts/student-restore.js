@@ -135,7 +135,7 @@ function loadChatData(chatData) {
 
 
                 if (messageData.type === 'user') {
-                    addMessage(messageData.content, 'user', false, true, null, messageData.isHtml); // Skip auto-save
+                    addMessage(messageData.content, 'user', false, true, null, messageData.isHtml, null, null, null, null, { isSummarySeed: messageData.isSummarySeed === true }); // Skip auto-save
                 } else if (messageData.type === 'bot') {
                     // Check if this is a special message type that needs special handling
                     if (messageData.messageType === 'assessment-start') {

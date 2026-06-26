@@ -1180,6 +1180,42 @@
     text-align: center;
 }
 
+.chat-summary-button {
+    flex: 0 0 auto;
+    min-width: 132px;
+    min-height: 34px;
+    padding: 0 14px;
+    border: 1px solid #b9c7da;
+    border-radius: 6px;
+    background: #fff;
+    color: #2f3a4a;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.chat-summary-button:hover:not(:disabled) {
+    background: #f1f5fb;
+    border-color: var(--primary-color, #4a90e2);
+    color: var(--primary-color, #4a90e2);
+}
+
+.chat-summary-button:disabled {
+    color: #8a94a3;
+    border-color: #d8dee8;
+    background: #f4f6f8;
+    cursor: not-allowed;
+    opacity: 0.72;
+}
+
+.chat-summary-button.is-loading {
+    color: #2f3a4a;
+    border-color: #b9c7da;
+    background: #eef3f9;
+    cursor: wait;
+}
+
 /* Super Course "above your level" reassurance notice.
    Sits as a sibling above #chat-messages, so margins align it with the
    conversation area (which has 20px padding). */
@@ -1426,6 +1462,12 @@ input:checked+.toggle-slider:before {
 
     .answer-level-selector {
         align-self: center;
+    }
+
+    .chat-summary-button {
+        align-self: center;
+        width: 100%;
+        max-width: 240px;
     }
 
     /* Mode Toggle Mobile */
