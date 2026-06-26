@@ -25,7 +25,7 @@
 }
 
 .flagged-subtitle p {
-    color: #64748b;
+    color: #475569;
     font-size: 1rem;
     margin: 0;
 }
@@ -71,7 +71,7 @@
 
 .refresh-btn {
     padding: 0.5rem 1rem;
-    background: #3b82f6;
+    background: #2563eb;
     color: white;
     border: none;
     border-radius: 6px;
@@ -82,7 +82,7 @@
 }
 
 .refresh-btn:hover {
-    background: #2563eb;
+    background: #1d4ed8;
 }
 
 /* Statistics Cards */

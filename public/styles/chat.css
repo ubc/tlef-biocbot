@@ -354,6 +354,54 @@
     color: #666;
 }
 
+.message-feedback-container {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 26px;
+}
+
+.message-feedback-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: #666;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.message-feedback-btn:hover {
+    background-color: rgba(0, 0, 0, 0.08);
+}
+
+.message-feedback-btn.active {
+    border-color: var(--primary-color, #0055b7);
+    background-color: rgba(0, 85, 183, 0.08);
+}
+
+.message-feedback-btn:disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
+.message-feedback-status {
+    max-width: 92px;
+    color: var(--text-secondary, #666);
+    font-size: 11px;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Helper Action Buttons (Explain, Simplify) */
 .message-action-btn {
     background: none;
@@ -797,7 +845,7 @@
 .current-course .superchat-picker + .course-name {
     margin-left: 10px;
     font-weight: 500;
-    color: var(--text-muted, #888);
+    color: var(--text-muted, #5f666d);
 }
 
 .user-role {
@@ -830,7 +878,7 @@
 
 .chat-history-item .preview {
     font-size: 14px;
-    color: #777;
+    color: #5f666d;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -838,7 +886,7 @@
 
 .chat-history-item .date {
     font-size: 12px;
-    color: #999;
+    color: #5f666d;
     margin-top: 6px;
 }
 
@@ -1164,7 +1212,7 @@
 .answer-level-selector label {
     white-space: nowrap;
     font-weight: 500;
-    color: #888;
+    color: #5f666d;
     user-select: none;
 }
 
@@ -1624,7 +1672,7 @@ input:checked+.toggle-slider:before {
 
 .chat-history-item .preview {
     font-size: 14px;
-    color: #777;
+    color: #5f666d;
     line-height: 1.4;
     margin-bottom: 8px;
     display: -webkit-box;
@@ -1636,7 +1684,7 @@ input:checked+.toggle-slider:before {
 
 .chat-history-item .date {
     font-size: 12px;
-    color: #999;
+    color: #5f666d;
     margin-bottom: 4px;
 }
 
@@ -1656,7 +1704,7 @@ input:checked+.toggle-slider:before {
 }
 
 .chat-history-item .duration {
-    color: #888;
+    color: #5f666d;
 }
 
 /* No History Message */
@@ -1687,7 +1735,7 @@ input:checked+.toggle-slider:before {
 
 .no-history-content p {
     margin: 0 0 20px 0;
-    color: #777;
+    color: #5f666d;
     line-height: 1.5;
 }
 
@@ -1719,7 +1767,7 @@ input:checked+.toggle-slider:before {
 
 .no-selection-content p {
     margin: 0;
-    color: #777;
+    color: #5f666d;
     line-height: 1.5;
 }
 

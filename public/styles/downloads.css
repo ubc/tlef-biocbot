@@ -33,7 +33,7 @@
 
 .course-selector select:focus {
     outline: none;
-    border-color: #3498db;
+    border-color: #2476a8;
     box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
 }
 
@@ -42,7 +42,7 @@
 }
 
 .course-subtitle p {
-    color: #7f8c8d;
+    color: #5f666d;
     font-size: 1.1rem;
     margin: 0;
 }
@@ -69,7 +69,7 @@
 }
 
 .loading-container p {
-    color: #7f8c8d;
+    color: #5f666d;
     font-size: 1.1rem;
 }
 
@@ -148,13 +148,13 @@
 }
 
 .students-stats {
-    color: #7f8c8d;
+    color: #5f666d;
     font-size: 1rem;
 }
 
 .students-stats span {
     font-weight: 600;
-    color: #3498db;
+    color: #2476a8;
 }
 
 /* Students List */
@@ -189,7 +189,7 @@
     width: 50px;
     height: 50px;
     border-radius: 50%;
-    background-color: #3498db;
+    background-color: #2476a8;
     color: white;
     display: flex;
     align-items: center;
@@ -208,13 +208,13 @@
 
 .student-details p {
     margin: 0;
-    color: #7f8c8d;
+    color: #5f666d;
     font-size: 0.9rem;
 }
 
 .student-stats {
     font-weight: 500;
-    color: #3498db;
+    color: #2476a8;
 }
 
 .student-actions {
@@ -266,7 +266,7 @@
     background: none;
     border: none;
     font-size: 1.5rem;
-    color: #7f8c8d;
+    color: #5f666d;
     cursor: pointer;
     padding: 0.5rem;
     border-radius: 4px;
@@ -307,7 +307,7 @@
 
 .student-details p {
     margin: 0;
-    color: #7f8c8d;
+    color: #5f666d;
     font-size: 1rem;
 }
 
@@ -348,7 +348,7 @@
 
 .session-details {
     margin: 0 0 0.25rem 0;
-    color: #7f8c8d;
+    color: #5f666d;
     font-size: 0.9rem;
 }
 
@@ -364,7 +364,7 @@
 
 .no-sessions {
     text-align: center;
-    color: #7f8c8d;
+    color: #5f666d;
     font-style: italic;
     padding: 2rem;
 }
@@ -401,14 +401,14 @@
 
 .progress-fill {
     height: 100%;
-    background-color: #3498db;
+    background-color: #2476a8;
     border-radius: 4px;
     transition: width 0.3s ease;
     width: 0%;
 }
 
 #download-status {
-    color: #7f8c8d;
+    color: #5f666d;
     font-size: 0.9rem;
     margin: 0;
 }
@@ -428,7 +428,7 @@
 }
 
 .btn-primary {
-    background-color: #3498db;
+    background-color: #2476a8;
     color: white;
 }
 
@@ -449,7 +449,7 @@
 }
 
 .btn-secondary:hover {
-    background-color: #7f8c8d;
+    background-color: #5f666d;
     transform: translateY(-1px);
 }
 
@@ -527,11 +527,11 @@
     cursor: pointer;
     transition: all 0.2s ease;
     background: transparent;
-    color: #3498db;
+    color: #2476a8;
 }
 
 .btn-outline:hover {
-    background-color: #3498db;
+    background-color: #2476a8;
     color: white;
     transform: translateY(-1px);
 }
@@ -557,7 +557,7 @@
 
 .chat-preview-loading {
     text-align: center;
-    color: #7f8c8d;
+    color: #5f666d;
     padding: 1rem;
     font-style: italic;
 }
@@ -565,7 +565,7 @@
 .chat-preview-empty,
 .chat-preview-error {
     text-align: center;
-    color: #7f8c8d;
+    color: #5f666d;
     padding: 1rem;
     font-style: italic;
     margin: 0;
@@ -619,7 +619,7 @@
 
 .chat-preview-more {
     text-align: center;
-    color: #7f8c8d;
+    color: #5f666d;
     font-size: 0.85rem;
     font-style: italic;
     margin: 0.5rem 0 0 0;

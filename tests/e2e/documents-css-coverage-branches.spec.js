@@ -422,7 +422,9 @@ test.describe('documents.css branch harness coverage', () => {
         await page.locator('#add-week-btn').hover();
         await expect(page.locator('#add-week-btn')).toHaveCSS('color', 'rgb(255, 255, 255)');
         await page.locator('#empty-primary').hover();
-        await expect(page.locator('#empty-primary')).toHaveCSS('background-color', 'rgb(69, 160, 73)');
+        // #1b5e20 — the WCAG-AA accessible hover green for .empty-course-state .btn-primary
+        // (7.87:1 on white). The old #45a049 (rgb 69,160,73) failed AA and was darkened.
+        await expect(page.locator('#empty-primary')).toHaveCSS('background-color', 'rgb(27, 94, 32)');
     });
 
     test('styles branch-only modal and question editor states', async ({ page }) => {

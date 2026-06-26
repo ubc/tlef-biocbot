@@ -43,7 +43,7 @@
 }
 
 .welcome-subtitle {
-    color: #718096;
+    color: #5b6675;
     font-size: 1.25rem;
     margin: 0 auto;
     max-width: 600px;
@@ -89,7 +89,7 @@
 }
 
 .feature-card p {
-    color: #718096;
+    color: #5b6675;
     font-size: 1rem;
     line-height: 1.5;
     margin: 0;

@@ -260,7 +260,7 @@ function showCourseSelection(courses) {
         <div class="course-selection-container" style="margin: 20px 0; padding: 15px; background-color: #f8f9fa; border-radius: 8px; border-left: 4px solid var(--primary-color);">
             <h3 style="margin: 0 0 10px 0; color: #333;">Select Your Course</h3>
             <p style="margin: 0 0 15px 0; color: #666;">Choose the course you want to access:</p>
-            <select id="course-select" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+            <select id="course-select" aria-label="Select your course" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
                 <option value="">Choose a course...</option>
                 ${courses.map(course => `<option value="${course.courseId}" data-enrolled="${course.isEnrolled}">${course.courseName}</option>`).join('')}
             </select>

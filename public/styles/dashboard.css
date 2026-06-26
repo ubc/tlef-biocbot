@@ -57,11 +57,11 @@
 }
 
 .summary-status.active {
-  color: #e74c3c;
+  color: #c0392b;
 }
 
 .summary-status.inactive {
-  color: #27ae60;
+  color: #1e8449;
 }
 
 /* Topics List */
@@ -154,7 +154,7 @@
 }
 
 .danger-button {
-  background: #e74c3c;
+  background: #c0392b;
   color: white;
   border: none;
   padding: 10px 20px;
@@ -164,7 +164,7 @@
 }
 
 .danger-button:hover {
-  background: #c0392b;
+  background: #a82824;
 }
 
 .secondary-button {

@@ -140,7 +140,7 @@ function loadChatData(chatData) {
                     // Check if this is a special message type that needs special handling
                     if (messageData.messageType === 'assessment-start') {
                         // This is the assessment start message - add it as a regular bot message
-                        addMessage(messageData.content, 'bot', messageData.hasFlagButton, true, messageData.sourceAttribution, true); // Skip auto-save, force HTML for assessment start
+                        addMessage(messageData.content, 'bot', messageData.hasFlagButton, true, messageData.sourceAttribution, true, null, null, messageData.messageId, messageData.feedbackRating); // Skip auto-save, force HTML for assessment start
                     } else if (messageData.messageType === 'practice-test-question') {
                         // This is a practice test question - restore its UI
                         renderRestoredPracticeQuestion(messageData); // Skip auto-save implicit
@@ -162,7 +162,7 @@ function loadChatData(chatData) {
                              }
                         }
                         
-                        addMessage(messageData.content, 'bot', messageData.hasFlagButton, true, messageData.sourceAttribution, messageData.isHtml, activeTopic); // Skip auto-save, force HTML for result
+                        addMessage(messageData.content, 'bot', messageData.hasFlagButton, true, messageData.sourceAttribution, messageData.isHtml, activeTopic, null, messageData.messageId, messageData.feedbackRating); // Skip auto-save, force HTML for result
                     }
                 }
             });

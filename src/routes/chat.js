@@ -5,12 +5,14 @@
  */
 
 const express = require('express');
+const crypto = require('crypto');
 const path = require('path');
 const router = express.Router();
 const LLMService = require('../services/llm');
 const prompts = require('../services/prompts');
 const CourseModel = require('../models/Course');
 const DocumentModel = require('../models/Document');
+const MessageFeedback = require('../models/MessageFeedback');
 const BadWordsFilter = require('bad-words');
 const profanityFilter = new BadWordsFilter();
 const TrackerService = require('../services/tracker');
@@ -18,6 +20,13 @@ const User = require('../models/User');
 const MentalHealthFlag = require('../models/MentalHealthFlag');
 const gridfs = require('../services/gridfs');
 const { resolveCourseAi, sendLlmKeyError } = require('./llmKeyMiddleware');
+
+function generateChatMessageId() {
+    if (typeof crypto.randomUUID === 'function') {
+        return `msg_${crypto.randomUUID()}`;
+    }
+    return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+}
 
 /**
  * Determine source attribution based on retrieved chunks
@@ -318,6 +327,199 @@ async function checkLearningObjectivesMatch(searchResults, courseId, unitName, d
 // Middleware to parse JSON bodies
 router.use(express.json());
 
+function parseBooleanQuery(value) {
+    return value === true || value === 'true' || value === '1';
+}
+
+async function canReadCourseFeedback(db, user, courseId) {
+    if (!user || (user.role !== 'instructor' && user.role !== 'ta')) {
+        return false;
+    }
+
+    const hasCourseAccess = await CourseModel.userHasCourseAccess(db, courseId, user.userId, user.role);
+    if (!hasCourseAccess) return false;
+
+    if (user.role === 'ta') {
+        return CourseModel.checkTAPermission(db, courseId, user.userId, 'flags');
+    }
+
+    return true;
+}
+
+async function canCreateFeedbackForCourse(db, user, courseId) {
+    if (!user || user.role !== 'student') {
+        return false;
+    }
+
+    const enrollment = await CourseModel.getStudentEnrollment(db, courseId, user.userId);
+    return !!(enrollment.success && enrollment.enrolled);
+}
+
+/**
+ * POST /api/chat/feedback
+ * Upsert or clear thumbs-up / thumbs-down feedback for an assistant message.
+ */
+router.post('/feedback', async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+        if (user.role !== 'student') {
+            return res.status(403).json({ success: false, message: 'Only students can submit chat feedback' });
+        }
+
+        const {
+            courseId,
+            unitName,
+            conversationId,
+            messageId,
+            rating,
+            botMode,
+            messageContent,
+            sourceAttribution
+        } = req.body;
+
+        if (!Object.prototype.hasOwnProperty.call(req.body, 'rating')) {
+            return res.status(400).json({ success: false, message: 'rating is required' });
+        }
+
+        const normalizedRating = MessageFeedback.normalizeRating(rating);
+        if (normalizedRating === undefined) {
+            return res.status(400).json({ success: false, message: 'rating must be "up", "down", or null' });
+        }
+
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!courseId || !conversationId || !messageId) {
+            return res.status(400).json({
+                success: false,
+                message: 'courseId, conversationId, and messageId are required'
+            });
+        }
+
+        const course = await CourseModel.getCourseById(db, courseId);
+        if (!course) {
+            return res.status(404).json({ success: false, message: 'Course not found' });
+        }
+
+        const hasAccess = await canCreateFeedbackForCourse(db, user, courseId);
+        if (!hasAccess) {
+            return res.status(403).json({ success: false, message: 'No access to submit feedback for this course' });
+        }
+
+        const result = await MessageFeedback.upsertMessageFeedback(db, {
+            courseId,
+            unitName,
+            conversationId,
+            messageId,
+            rating,
+            studentId: user.userId,
+            studentName: user.displayName || user.username || user.userId,
+            botMode,
+            messageContent,
+            sourceAttribution
+        });
+
+        if (!result.success) {
+            return res.status(400).json({ success: false, message: result.error || 'Failed to save feedback' });
+        }
+
+        return res.json({
+            success: true,
+            message: result.feedback.isActive ? 'Feedback saved' : 'Feedback cleared',
+            data: { feedback: result.feedback }
+        });
+    } catch (error) {
+        console.error('Error saving chat message feedback:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error while saving feedback' });
+    }
+});
+
+/**
+ * GET /api/chat/feedback/course/:courseId
+ * List message feedback for instructor/TA review.
+ */
+router.get('/feedback/course/:courseId', async (req, res) => {
+    try {
+        const { courseId } = req.params;
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const hasAccess = await canReadCourseFeedback(db, req.user, courseId);
+        if (!hasAccess) {
+            return res.status(403).json({ success: false, message: 'No access to feedback for this course' });
+        }
+
+        const options = {
+            includeCleared: parseBooleanQuery(req.query.includeCleared),
+            rating: req.query.rating,
+            studentId: req.query.studentId,
+            conversationId: req.query.conversationId,
+            limit: Number.parseInt(req.query.limit, 10)
+        };
+
+        const [feedback, stats] = await Promise.all([
+            MessageFeedback.listFeedbackForCourse(db, courseId, options),
+            MessageFeedback.getFeedbackStatsForCourse(db, courseId)
+        ]);
+
+        return res.json({
+            success: true,
+            data: {
+                courseId,
+                feedback,
+                count: feedback.length,
+                stats
+            }
+        });
+    } catch (error) {
+        console.error('Error listing chat message feedback:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error while retrieving feedback' });
+    }
+});
+
+/**
+ * GET /api/chat/feedback/course/:courseId/export
+ * Export message feedback as CSV for instructor/TA review.
+ */
+router.get('/feedback/course/:courseId/export', async (req, res) => {
+    try {
+        const { courseId } = req.params;
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const hasAccess = await canReadCourseFeedback(db, req.user, courseId);
+        if (!hasAccess) {
+            return res.status(403).json({ success: false, message: 'No access to feedback for this course' });
+        }
+
+        const feedback = await MessageFeedback.listFeedbackForCourse(db, courseId, {
+            includeCleared: true,
+            rating: req.query.rating,
+            studentId: req.query.studentId,
+            conversationId: req.query.conversationId,
+            limit: Number.parseInt(req.query.limit, 10) || 1000
+        });
+
+        const csv = MessageFeedback.feedbackToCsv(feedback);
+        const safeCourseId = String(courseId).replace(/[^A-Za-z0-9_-]/g, '_');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="message-feedback-${safeCourseId}.csv"`);
+        return res.send(csv);
+    } catch (error) {
+        console.error('Error exporting chat message feedback:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error while exporting feedback' });
+    }
+});
+
 /**
  * GET /api/chat/source-documents/:documentId/download
  * Download a source-attributed document when enabled for the course
@@ -472,6 +674,7 @@ router.post('/', async (req, res) => {
             console.log('⚠️ [CHAT_API] Profanity detected. Returning warning without querying LLM.');
             return res.json({
                 success: true,
+                messageId: generateChatMessageId(),
                 message: warningText,
                 model: 'system',
                 usage: { tokens: 0 },
@@ -923,6 +1126,7 @@ ${conversationHistory}`;
         // Format response for frontend
         const chatResponse = {
             success: true,
+            messageId: generateChatMessageId(),
             message: fullContent,
             model: response.model,
             usage: response.usage,

@@ -178,7 +178,7 @@ function renderStudents(courseId) {
                 <div class="student-header">
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <h3 class="student-name">${escapeHTML(s.displayName || s.username || s.userId)}</h3>
-                        ${isTA ? '<span class="badge badge-info" style="background: #17a2b8; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.8em;">TA</span>' : ''}
+                        ${isTA ? '<span class="badge badge-info" style="background: #117a8b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.8em;">TA</span>' : ''}
                     </div>
                 </div>
                 <div class="student-info">

@@ -279,12 +279,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             // Check if we're continuing a chat and need to include conversation context
             const conversationContext = getConversationContext();
+            let conversationId = null;
+            try {
+                const chatData = typeof getCurrentChatData === 'function' ? getCurrentChatData() : null;
+                if (chatData && typeof getCurrentSessionId === 'function') {
+                    conversationId = getCurrentSessionId(chatData);
+                }
+            } catch (error) {
+                console.warn('Could not resolve conversation id for chat request:', error);
+            }
 
             // conversationContext retrieved or new conversation started
 
 
             const requestBody = {
                 message: message,
+                conversationId: conversationId,
                 mode: currentMode,
                 courseId: courseId,
                 unitName: unitName,
@@ -870,7 +880,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // Only show "I understand X now" button when directive mode is active for this response
                 const showStruggleReset = response.struggleDebug?.directiveModeActive ? lastActiveStruggleTopic : null;
-                addMessage(response.message, 'bot', true, false, response.sourceAttribution, false, showStruggleReset, detectedTopic);
+                addMessage(response.message, 'bot', true, false, response.sourceAttribution, false, showStruggleReset, detectedTopic, response.messageId);
 
                 // Disable chat input if session is now capped
                 if (willHitCap) {

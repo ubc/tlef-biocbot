@@ -38,13 +38,13 @@
 }
 
 .step-indicator.active {
-  background-color: #4caf50;
+  background-color: #2e7d32;
   color: white;
   font-weight: 600;
 }
 
 .step-indicator.completed {
-  background-color: #45a049;
+  background-color: #1b5e20;
   color: white;
 }
 
