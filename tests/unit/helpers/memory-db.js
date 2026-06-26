@@ -9,7 +9,7 @@
  * Supported query operators: $or, $and, $ne, $in, $nin, $exists, $size,
  * $gt/$gte/$lt/$lte, dotted field paths, and Mongo's "scalar matches an array by
  * membership" rule. Supported update operators: $set, $setOnInsert (on upsert),
- * $inc, $addToSet (with $each), $pull (scalar or sub-document match), $push (with $each).
+ * $inc, $unset, $addToSet (with $each), $pull (scalar or sub-document match), $push (with $each).
  * Also supports findOneAndUpdate(), countDocuments(), and distinct(field).
  * Just enough for the model/service helpers under test — not a full Mongo.
  */
@@ -46,6 +46,18 @@ function setPath(obj, path, value) {
         cursor = cursor[key];
     }
     cursor[last] = value;
+}
+
+function unsetPath(obj, path) {
+    if (path.indexOf('.') === -1) { delete obj[path]; return; }
+    const keys = path.split('.');
+    const last = keys.pop();
+    let cursor = obj;
+    for (const key of keys) {
+        if (cursor[key] == null || typeof cursor[key] !== 'object') return; // nothing to unset
+        cursor = cursor[key];
+    }
+    delete cursor[last];
 }
 
 function matchesOperators(docValue, cond) {
@@ -115,6 +127,10 @@ function applyUpdate(doc, update, { isInsert = false } = {}) {
     for (const [key, value] of Object.entries(update.$inc || {})) {
         const current = getPath(doc, key);
         setPath(doc, key, (typeof current === 'number' ? current : 0) + value);
+        modified = true;
+    }
+    for (const key of Object.keys(update.$unset || {})) {
+        unsetPath(doc, key);
         modified = true;
     }
     for (const [key, value] of Object.entries(update.$addToSet || {})) {

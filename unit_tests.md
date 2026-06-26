@@ -9,7 +9,7 @@ where the last one stopped. Background lives in project memory
 
 ## 0. Current status (2026-06-25)
 
-- **367 unit tests passing** across 21 suites via `npm run test:unit` (356 new + 11 baseline).
+- **431 unit tests passing** across 25 suites via `npm run test:unit` (420 new + 11 baseline).
 - Branch: `api_key_flow`. All work so far is **ADD-ONLY** (only new files under `tests/unit/`).
 - Shared in-memory Mongo double already built: `tests/unit/helpers/memory-db.js`.
 
@@ -37,6 +37,10 @@ where the last one stopped. Background lives in project memory
 | `src/models/Onboarding.js` | `tests/unit/models/Onboarding.test.js` | upsert/get/update/unit files/delete + stats |
 | `src/models/PersistenceTopic.js` | `tests/unit/models/PersistenceTopic.test.js` | unique student counts, topic lookup/sort, fallback branches |
 | `src/models/User.js` | `tests/unit/models/User.test.js` | create/auth/SAML/access state/preferences/roles/struggle-state |
+| `src/services/systemAdmin.js` | `tests/unit/services/systemAdmin.test.js` | list/grant/revoke + last-admin guard (added `$unset` to memory-db) |
+| `src/services/config.js` | `tests/unit/services/config.test.js` | env-driven config + provider validation; singleton `isValidated` reset per test |
+| `src/services/authService.js` | `tests/unit/services/authService.test.js` | PURE role/session helpers (db+bcrypt methods left to e2e) |
+| `src/middleware/auth.js` | `tests/unit/middleware/auth.test.js` | all guards via fake req/res/next (next vs status().json() vs redirect()) |
 
 ---
 
@@ -217,18 +221,23 @@ mocking or aggregate support · **P3** = heavy external integration / prefer e2e
 - [x] `src/models/User.js` — `createUser`, `authenticateUser`, `getUserById`, `getUserByPuid`,
   `updateUserPreferences`, SAML create/update/TA-preservation, role lookup, deactivation,
   `updateUserStruggleState`, and `resetUserStruggleState`.
+- [x] `src/services/systemAdmin.js` — `listSystemAdmins` (filter/sort/shape), `grant/revoke` with
+  email normalization, last-admin guard, and `$unset` demotion read-back. Required adding **`$unset`**
+  to `memory-db`.
+- [x] `src/services/config.js` — env-driven `getLLMConfig`/`getServerConfig`/`getDatabaseConfig`/
+  `getVectorDBConfig` + `validateConfig` provider rules + env helpers. Resets the singleton's
+  `isValidated` flag and snapshots `process.env` per test.
+- [x] `src/services/authService.js` — PURE helpers only: `isValidEmail`, `hasRole`,
+  `isInstructor/isStudent/isSystemAdmin`, `getCurrentCourseId`, `createSessionUser` (session-safe
+  shaping + admin elevation). db+bcrypt methods (`loginUser`/`registerUser`/`getUserById`/SAML) left to e2e.
+- [x] `src/middleware/auth.js` — `requireAuth`, `requireRole`, `requireInstructorOrTA`,
+  `requireSystemAdmin`, `redirectIfAuthenticated`, `requireCourseContext`, `requireTAPermission`
+  via fake req/res/next (next() vs status().json() vs redirect()).
 
 ### ⬜ Remaining — Models (use `memory-db`)
 All current `src/models/*.js` files have direct unit-test files.
 
 ### ⬜ Remaining — Services
-- [ ] **P1 `src/services/systemAdmin.js`** — `listSystemAdmins`, `grant/revokeSystemAdminByEmail`
-  (db-backed, normalizes email). Small, clean.
-- [ ] **P2 `src/services/config.js`** — `getLLMConfig`/`getServerConfig`/etc. Env-driven; set
-  `process.env` per test; throws on unsupported provider. Exported as a singleton instance.
-- [ ] **P2 `src/services/authService.js`** — class. PURE session/role helpers
-  (`createSessionUser`, `hasRole`, `isStudent/Instructor/SystemAdmin`, `getCurrentCourseId`).
-  `loginUser`/`registerUser`/`getUserById` are db+bcrypt (partial).
 - [ ] **P2 `src/services/superChatNotesService.js`** — `checkSimilar` (`DUP_THRESHOLD` logic),
   CRUD wrappers. Check what it loads at require-time (may need qdrant/embeddings mocks).
 - [ ] **P3 `src/services/llm.js`** — heavy (1070 lines). Only small pure bits worth it
@@ -239,10 +248,7 @@ All current `src/models/*.js` files have direct unit-test files.
   side effects). `llmStub.js`/`embeddingsStub.js` are test doubles — skip.
 
 ### ⬜ Remaining — Middleware
-- [ ] **P2 `src/middleware/auth.js`** — `requireAuth`, `requireRole`, `requireInstructorOrTA`,
-  `requireSystemAdmin`, `redirectIfAuthenticated`, `requireCourseContext`, `requireTAPermission`.
-  Unit-test with fake `req`/`res`/`next` (assert `next()` vs `res.status().json()`). The e2e
-  harness exercises these too, but unit coverage is cheap. (`createAuthMiddleware(db)` factory.)
+- _All middleware covered_ — `src/middleware/auth.js` is done (see ✅ Done).
 
 ### ⬜ Routes
 - [ ] **P3 — generally prefer e2e.** Express routers are integration-level and already covered by
