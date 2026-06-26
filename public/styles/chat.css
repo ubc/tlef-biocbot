@@ -354,6 +354,54 @@
     color: #666;
 }
 
+.message-feedback-container {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 26px;
+}
+
+.message-feedback-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: #666;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.message-feedback-btn:hover {
+    background-color: rgba(0, 0, 0, 0.08);
+}
+
+.message-feedback-btn.active {
+    border-color: var(--primary-color, #0055b7);
+    background-color: rgba(0, 85, 183, 0.08);
+}
+
+.message-feedback-btn:disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
+.message-feedback-status {
+    max-width: 92px;
+    color: var(--text-secondary, #666);
+    font-size: 11px;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Helper Action Buttons (Explain, Simplify) */
 .message-action-btn {
     background: none;

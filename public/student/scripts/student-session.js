@@ -101,7 +101,7 @@ async function initializeAutoSave() {
  * @param {boolean} withSource - Whether the message has source citation
  * @param {Object} sourceAttribution - Source attribution information
  */
-function autoSaveMessage(content, sender, withSource = false, sourceAttribution = null, isHtml = false, activeStruggleTopic = null) {
+function autoSaveMessage(content, sender, withSource = false, sourceAttribution = null, isHtml = false, activeStruggleTopic = null, messageId = null, feedbackRating = null) {
     try {
 
 
@@ -181,7 +181,9 @@ function autoSaveMessage(content, sender, withSource = false, sourceAttribution 
             messageType: 'regular-chat',
             sourceAttribution: sourceAttribution || null,  // Save source attribution for restoration
             isHtml: isHtml, // Save whether message was rendered as HTML
-            activeStruggleTopic: activeStruggleTopic || null // Save active struggle topic
+            activeStruggleTopic: activeStruggleTopic || null, // Save active struggle topic
+            messageId: messageId || null,
+            feedbackRating: feedbackRating || null
         };
 
         // Add message to messages array
@@ -1011,6 +1013,13 @@ function extractMessageData(messageElement, index) {
             isModeToggleResult: messageElement.classList.contains('mode-toggle-result'),
             isAssessmentStart: isAssessmentStart
         };
+
+        if (messageElement.dataset.messageId) {
+            messageData.messageId = messageElement.dataset.messageId;
+        }
+        if (messageElement.dataset.feedbackRating) {
+            messageData.feedbackRating = messageElement.dataset.feedbackRating;
+        }
 
         // Extract additional data for specific message types
         if (isCalibrationQuestion) {

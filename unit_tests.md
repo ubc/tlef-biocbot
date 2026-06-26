@@ -9,7 +9,10 @@ where the last one stopped. Background lives in project memory
 
 ## 0. Current status (2026-06-25)
 
-- **431 unit tests passing** across 25 suites via `npm run test:unit` (420 new + 11 baseline).
+- **520 unit tests passing** across 29 suites via `npm run test:unit` (509 new + 11 baseline).
+- **Overall `src/**` statement coverage ≈ 22%** (models 83%, services 29%, routes 7%, middleware 42%).
+  Routes dominate the codebase (6,052 of 9,407 statements) and were 0% until this batch — now being
+  unit-tested in-process with supertest (see Routes below).
 - Branch: `api_key_flow`. All work so far is **ADD-ONLY** (only new files under `tests/unit/`).
 - Shared in-memory Mongo double already built: `tests/unit/helpers/memory-db.js`.
 
@@ -136,12 +139,12 @@ db.collection('courses').findOne({ courseId: 'C1' });
 - **Query ops supported:** `$or`, `$and`, `$ne`, `$in`, `$nin`, `$exists`, `$size`, `$regex`,
   `$gt/$gte/$lt/$lte`, dotted paths (`studentEnrollment.S1.enrolled`), and Mongo's
   scalar-matches-array rule.
-- **Update ops supported:** `$set`, `$setOnInsert` (on upsert), `$inc`, `$addToSet` (+`$each`),
+- **Update ops supported:** `$set`, `$setOnInsert` (on upsert), `$inc`, `$unset`, `$addToSet` (+`$each`),
   `$pull` (scalar or sub-doc match), `$push` (+`$each`); `{ upsert: true }`, `findOneAndUpdate()`.
 - **`find()` cursor:** `.project()/.projection()` (no-op), `.sort(spec)` (real,
   multi-key, nulls last), `.limit()/.skip()`, `.toArray()`.
 - **`aggregate()`** has minimal support for the stats/activity helpers already covered (`$match`,
-  `$group`, `$project`, `$sort`, `$limit`, `$skip` plus common accumulators, common expressions,
+  `$unwind`, `$group`, `$project`, `$sort`, `$limit`, `$skip` plus common accumulators, common expressions,
   and ISO-week expressions). Extend it only for new pipeline shapes you actually need.
 - **⚠️ Clone gotcha:** the helper uses a realm-local deep clone, NOT `structuredClone`
   — under `jest-environment-node`, `structuredClone` returns host-realm `Date`s that
@@ -170,6 +173,13 @@ jest.mock('../../../src/models/SuperChatNote', () => ({ incrementUsage: jest.fn(
 - Silence noisy modules: `jest.spyOn(console, 'log'/'warn'/'error').mockImplementation(() => {})`
   in `beforeAll`, `jest.restoreAllMocks()` in `afterAll` (tracker.js and migrations log a lot).
 - Stubs exist if useful: `src/services/llmStub.js`, `src/services/embeddingsStub.js`.
+
+### 4c. In-process route harness — `tests/unit/helpers/route-app.js`
+`makeRouteApp(router, { db, user, locals, mountPath })` mounts a router on a bare Express app
+(`express.json()` + injected `app.locals.db` + a middleware that sets `req.user`), returned ready for
+`request(app)` (supertest is re-exported). Declare `jest.mock()` for the router's heavy load-time
+requires (qdrant/gridfs/llmKeyStore/superCourseService) BEFORE requiring the router; keep the models
+real over `memory-db`. See `tests/unit/routes/*.test.js`.
 
 ---
 
@@ -250,10 +260,20 @@ All current `src/models/*.js` files have direct unit-test files.
 ### ⬜ Remaining — Middleware
 - _All middleware covered_ — `src/middleware/auth.js` is done (see ✅ Done).
 
-### ⬜ Routes
-- [ ] **P3 — generally prefer e2e.** Express routers are integration-level and already covered by
-  Playwright + `tests/e2e/helpers/src-route-model-harness.js`. Only pull out *small pure helpers*
-  if a route has them (e.g. `src/routes/llmKeyMiddleware.js`, 78 lines). Don't unit-test whole routers.
+### Routes — in-process supertest tests (strategy added 2026-06-26)
+Routers read `db` from `req.app.locals.db` and the user from `req.user`, so they unit-test cleanly
+with **supertest** + the shared harness `tests/unit/helpers/route-app.js` (`makeRouteApp(router,
+{ db, user, locals })`). Mock only the heavy modules a router pulls at load (qdrant/gridfs/llmKeyStore);
+the models run real over `memory-db`. Each test covers a cross-section of endpoints (auth gates +
+happy path + the key error branches), not every handler. Seed docs with explicit `_id` when a handler
+updates by `_id` (e.g. systemAdmin revoke).
+- [x] `src/routes/superchats.js` — `tests/unit/routes/superchats.test.js` (auth gate, CRUD, LLM-key branches)
+- [x] `src/routes/students.js` — `tests/unit/routes/students.test.js` (admin gate, student-grouping/duration, rename/delete-own)
+- [x] `src/routes/settings.js` — `tests/unit/routes/settings.test.js` (can-delete-all, system-admins, ai-settings get/put/reset)
+- [x] `src/routes/courses.js` — `tests/unit/routes/courses.test.js` (list/get/TA-add cross-section; ~3 of ~40 endpoints)
+- [ ] More endpoints within the 4 above (esp. `courses.js` — only a slice covered), then `quiz.js`,
+  `flags.js`, `questions.js`, `documents.js`. **Skip/e2e:** `chat.js`, `qdrant.js`, `studentSuperCourse.js`
+  (AI/vector heavy — low unit fidelity).
 
 ---
 

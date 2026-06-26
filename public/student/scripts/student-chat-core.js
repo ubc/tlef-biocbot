@@ -157,7 +157,7 @@ async function handleExplainAction(text, topic = null) {
         removeTypingIndicator();
         
         // Add bot response
-        addMessage(response.message, 'bot', true, false, response.sourceAttribution);
+        addMessage(response.message, 'bot', true, false, response.sourceAttribution, false, null, null, response.messageId);
         
     } catch (error) {
         removeTypingIndicator();
@@ -211,6 +211,154 @@ function renderSourceAttribution(sourceDiv, sourceAttribution) {
     });
 }
 
+function getCurrentFeedbackConversationId() {
+    try {
+        const chatData = typeof getCurrentChatData === 'function' ? getCurrentChatData() : null;
+        if (chatData && typeof getCurrentSessionId === 'function') {
+            return getCurrentSessionId(chatData);
+        }
+
+        const studentId = typeof getCurrentStudentId === 'function' ? getCurrentStudentId() : null;
+        const courseId = localStorage.getItem('selectedCourseId');
+        const unitName = localStorage.getItem('selectedUnitName') || (typeof getCurrentUnitName === 'function' ? getCurrentUnitName() : 'this unit');
+        if (!studentId || !courseId || !unitName) return null;
+        return localStorage.getItem(`biocbot_session_${studentId}_${courseId}_${unitName}`);
+    } catch (error) {
+        console.warn('Could not resolve feedback conversation id:', error);
+        return null;
+    }
+}
+
+function getMessageTextForFeedback(messageElement) {
+    const contentElement = messageElement.querySelector('.message-content');
+    if (!contentElement) return '';
+    const paragraph = contentElement.querySelector('p') || contentElement.querySelector(':scope > div');
+    return paragraph ? (paragraph.textContent || paragraph.innerText || '') : '';
+}
+
+function setFeedbackButtonsState(container, rating) {
+    const normalizedRating = rating || '';
+    const status = container.querySelector('.message-feedback-status');
+    container.querySelectorAll('.message-feedback-btn').forEach(button => {
+        const isActive = normalizedRating && button.dataset.rating === normalizedRating;
+        button.classList.toggle('active', !!isActive);
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+    if (status) {
+        status.textContent = '';
+    }
+}
+
+function updateSavedMessageFeedback(messageId, rating) {
+    try {
+        if (!messageId || typeof getCurrentChatData !== 'function') return;
+        const chatData = getCurrentChatData();
+        if (!chatData || !Array.isArray(chatData.messages)) return;
+
+        const message = chatData.messages.find(item => item && item.messageId === messageId);
+        if (!message) return;
+
+        message.feedbackRating = rating || null;
+        chatData.lastActivityTimestamp = new Date().toISOString();
+
+        const studentId = typeof getCurrentStudentId === 'function' ? getCurrentStudentId() : chatData.metadata?.studentId;
+        if (studentId) {
+            localStorage.setItem(`biocbot_current_chat_${studentId}`, JSON.stringify(chatData));
+        }
+    } catch (error) {
+        console.warn('Could not update saved message feedback state:', error);
+    }
+}
+
+async function handleMessageFeedback(button, rating) {
+    const messageElement = button.closest('.message');
+    const container = button.closest('.message-feedback-container');
+    if (!messageElement || !container) return;
+
+    const messageId = messageElement.dataset.messageId;
+    const courseId = localStorage.getItem('selectedCourseId');
+    const conversationId = getCurrentFeedbackConversationId();
+    const nextRating = messageElement.dataset.feedbackRating === rating ? null : rating;
+    const status = container.querySelector('.message-feedback-status');
+
+    if (!messageId || !courseId || !conversationId) {
+        if (status) status.textContent = 'Feedback unavailable';
+        return;
+    }
+
+    container.querySelectorAll('.message-feedback-btn').forEach(btn => { btn.disabled = true; });
+    if (status) status.textContent = 'Saving...';
+
+    try {
+        const response = await fetch('/api/chat/feedback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+                courseId,
+                unitName: localStorage.getItem('selectedUnitName') || (typeof getCurrentUnitName === 'function' ? getCurrentUnitName() : null),
+                conversationId,
+                messageId,
+                rating: nextRating,
+                botMode: localStorage.getItem('studentMode') || 'tutor',
+                messageContent: getMessageTextForFeedback(messageElement),
+                sourceAttribution: messageElement._sourceAttribution || null
+            })
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || `Feedback request failed: ${response.status}`);
+        }
+
+        const savedFeedback = result.data && result.data.feedback ? result.data.feedback : null;
+        const savedRating = savedFeedback && savedFeedback.isActive ? savedFeedback.rating : null;
+        messageElement.dataset.feedbackRating = savedRating || '';
+        setFeedbackButtonsState(container, savedRating);
+        updateSavedMessageFeedback(messageId, savedRating);
+    } catch (error) {
+        console.error('Error saving message feedback:', error);
+        if (status) status.textContent = 'Could not save';
+    } finally {
+        container.querySelectorAll('.message-feedback-btn').forEach(btn => { btn.disabled = false; });
+    }
+}
+
+function createMessageFeedbackControls(initialRating = null) {
+    const container = document.createElement('div');
+    container.classList.add('message-feedback-container');
+    container.setAttribute('aria-label', 'Rate this response');
+
+    const upButton = document.createElement('button');
+    upButton.type = 'button';
+    upButton.classList.add('message-feedback-btn');
+    upButton.dataset.rating = 'up';
+    upButton.textContent = '👍';
+    upButton.title = 'This response was helpful';
+    upButton.setAttribute('aria-label', 'Mark response as helpful');
+    upButton.onclick = () => handleMessageFeedback(upButton, 'up');
+
+    const downButton = document.createElement('button');
+    downButton.type = 'button';
+    downButton.classList.add('message-feedback-btn');
+    downButton.dataset.rating = 'down';
+    downButton.textContent = '👎';
+    downButton.title = 'This response was not helpful';
+    downButton.setAttribute('aria-label', 'Mark response as not helpful');
+    downButton.onclick = () => handleMessageFeedback(downButton, 'down');
+
+    const status = document.createElement('span');
+    status.classList.add('message-feedback-status');
+    status.setAttribute('aria-live', 'polite');
+
+    container.appendChild(upButton);
+    container.appendChild(downButton);
+    container.appendChild(status);
+    setFeedbackButtonsState(container, initialRating);
+
+    return container;
+}
+
 /**
  * Global function to add a message to the chat
  * @param {string} content - The message content
@@ -221,6 +369,8 @@ function renderSourceAttribution(sourceDiv, sourceAttribution) {
  * @param {boolean} isHtml - Whether content is HTML
  * @param {string} activeStruggleTopic - The currently active struggle topic (for Reset button)
  * @param {string} detectedTopic - The topic detected in this message (for Explain button)
+ * @param {string|null} messageId - Server-generated assistant message id
+ * @param {string|null} feedbackRating - Existing thumbs feedback rating
  */
 function applyCurrentLLMTagClasses(element) {
     if (typeof window.applyLLMTagClassesToElement === 'function') {
@@ -228,7 +378,7 @@ function applyCurrentLLMTagClasses(element) {
     }
 }
 
-function addMessage(content, sender, withSource = false, skipAutoSave = false, sourceAttribution = null, isHtml = false, activeStruggleTopic = null, detectedTopic = null) {
+function addMessage(content, sender, withSource = false, skipAutoSave = false, sourceAttribution = null, isHtml = false, activeStruggleTopic = null, detectedTopic = null, messageId = null, feedbackRating = null) {
 
 
     const chatMessages = document.getElementById('chat-messages');
@@ -239,6 +389,15 @@ function addMessage(content, sender, withSource = false, skipAutoSave = false, s
 
     const messageDiv = document.createElement('div');
     messageDiv.classList.add('message', sender + '-message');
+    if (messageId) {
+        messageDiv.dataset.messageId = messageId;
+    }
+    if (feedbackRating) {
+        messageDiv.dataset.feedbackRating = feedbackRating;
+    }
+    if (sourceAttribution) {
+        messageDiv._sourceAttribution = sourceAttribution;
+    }
 
     const avatarDiv = document.createElement('div');
     avatarDiv.classList.add('message-avatar');
@@ -349,6 +508,10 @@ function addMessage(content, sender, withSource = false, skipAutoSave = false, s
             }
         }
 
+        if (messageId && content && !content.includes('<div class="dots">') && !isPracticeQuestion) {
+            rightContainer.appendChild(createMessageFeedbackControls(feedbackRating));
+        }
+
         const flagButton = document.createElement('button');
         flagButton.classList.add('flag-button');
         flagButton.innerHTML = '⚑';
@@ -407,7 +570,7 @@ function addMessage(content, sender, withSource = false, skipAutoSave = false, s
     // Auto-save the message
     // Only auto-save if not explicitly skipped
     if (!skipAutoSave) {
-        autoSaveMessage(content, sender, withSource, sourceAttribution, isHtml, activeStruggleTopic);
+        autoSaveMessage(content, sender, withSource, sourceAttribution, isHtml, activeStruggleTopic, messageId, feedbackRating);
     }
 }
 
