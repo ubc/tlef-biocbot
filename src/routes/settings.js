@@ -598,6 +598,7 @@ router.get('/prompts', async (req, res) => {
             explain: coursePrompts.explain || prompts.DEFAULT_PROMPTS.explain,
             directive: coursePrompts.directive || prompts.DEFAULT_PROMPTS.directive,
             quizHelp: coursePrompts.quizHelp || prompts.DEFAULT_PROMPTS.quizHelp,
+            chatSummary: coursePrompts.chatSummary || prompts.DEFAULT_PROMPTS.chatSummary,
             // Course-level additive retrieval setting
             additiveRetrieval: course ? !!course.isAdditiveRetrieval : false,
             // Course-level secondary search for additional materials (off by default)
@@ -632,7 +633,7 @@ router.post('/prompts', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        const { base, protege, tutor, explain, directive, quizHelp, additiveRetrieval, additionalMaterialSecondarySearch, studentIdleTimeout, courseId } = req.body;
+        const { base, protege, tutor, explain, directive, quizHelp, chatSummary, additiveRetrieval, additionalMaterialSecondarySearch, studentIdleTimeout, courseId } = req.body;
 
         if (!courseId) {
             return res.status(400).json({ success: false, message: 'courseId is required to save settings' });
@@ -643,7 +644,14 @@ router.post('/prompts', async (req, res) => {
         }
 
         // Validation - ensure they are strings (prompts) and boolean (additiveRetrieval)
-        if (typeof base !== 'string' || typeof protege !== 'string' || typeof tutor !== 'string' || typeof explain !== 'string' || typeof directive !== 'string') {
+        if (
+            typeof base !== 'string' ||
+            typeof protege !== 'string' ||
+            typeof tutor !== 'string' ||
+            typeof explain !== 'string' ||
+            typeof directive !== 'string' ||
+            (chatSummary !== undefined && typeof chatSummary !== 'string')
+        ) {
             return res.status(400).json({ success: false, message: 'Invalid prompt format' });
         }
 
@@ -667,6 +675,7 @@ router.post('/prompts', async (req, res) => {
                     'prompts.explain': explain,
                     'prompts.directive': directive,
                     'prompts.quizHelp': quizHelp || prompts.DEFAULT_PROMPTS.quizHelp,
+                    'prompts.chatSummary': chatSummary && chatSummary.trim() ? chatSummary : prompts.DEFAULT_PROMPTS.chatSummary,
                     'prompts.studentIdleTimeout': timeoutVal,
                     isAdditiveRetrieval: !!additiveRetrieval,
                     additionalMaterialSecondarySearch: !!additionalMaterialSecondarySearch,
@@ -1205,6 +1214,93 @@ router.post('/quiz', async (req, res) => {
     } catch (error) {
         console.error('Error saving quiz settings:', error);
         res.status(500).json({ success: false, message: 'Failed to save quiz settings' });
+    }
+});
+
+/**
+ * GET /api/settings/chat-survey
+ * Get chat usefulness survey settings for a course
+ */
+router.get('/chat-survey', async (req, res) => {
+    try {
+        const { courseId } = req.query;
+        if (!courseId) {
+            return res.status(400).json({ success: false, message: 'Missing courseId parameter' });
+        }
+
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!await requireCourseSettingsAccess(db, req, res, courseId)) {
+            return;
+        }
+
+        const result = await CourseModel.getChatSurveySettings(db, courseId);
+        if (!result.success) {
+            return res.status(400).json({ success: false, message: result.error || 'Failed to fetch chat survey settings' });
+        }
+
+        return res.json({
+            success: true,
+            settings: result.settings,
+            defaults: result.defaults
+        });
+    } catch (error) {
+        console.error('Error fetching chat survey settings:', error);
+        return res.status(500).json({ success: false, message: 'Failed to fetch chat survey settings' });
+    }
+});
+
+/**
+ * POST /api/settings/chat-survey
+ * Save chat usefulness survey settings for a course
+ */
+router.post('/chat-survey', async (req, res) => {
+    try {
+        const {
+            courseId,
+            enabled,
+            triggerMessageCount,
+            promptText,
+            ratingPrompt,
+            allowFreeText
+        } = req.body;
+
+        if (!courseId) {
+            return res.status(400).json({ success: false, message: 'Missing courseId' });
+        }
+
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        if (!await requireCourseSettingsAccess(db, req, res, courseId)) {
+            return;
+        }
+
+        const result = await CourseModel.updateChatSurveySettings(db, courseId, {
+            enabled,
+            triggerMessageCount,
+            promptText,
+            ratingPrompt,
+            allowFreeText
+        }, req.user ? req.user.userId : null);
+
+        if (!result.success) {
+            return res.status(400).json({ success: false, message: result.error || 'Failed to save chat survey settings' });
+        }
+
+        return res.json({
+            success: true,
+            message: 'Chat survey settings saved successfully',
+            settings: result.settings
+        });
+    } catch (error) {
+        console.error('Error saving chat survey settings:', error);
+        return res.status(500).json({ success: false, message: 'Failed to save chat survey settings' });
     }
 });
 

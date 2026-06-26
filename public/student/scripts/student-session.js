@@ -101,7 +101,7 @@ async function initializeAutoSave() {
  * @param {boolean} withSource - Whether the message has source citation
  * @param {Object} sourceAttribution - Source attribution information
  */
-function autoSaveMessage(content, sender, withSource = false, sourceAttribution = null, isHtml = false, activeStruggleTopic = null, messageId = null, feedbackRating = null) {
+function autoSaveMessage(content, sender, withSource = false, sourceAttribution = null, isHtml = false, activeStruggleTopic = null, messageId = null, feedbackRating = null, messageOptions = null) {
     try {
 
 
@@ -185,6 +185,9 @@ function autoSaveMessage(content, sender, withSource = false, sourceAttribution 
             messageId: messageId || null,
             feedbackRating: feedbackRating || null
         };
+        if (messageOptions && messageOptions.isSummarySeed === true) {
+            newMessage.isSummarySeed = true;
+        }
 
         // Add message to messages array
         currentChatData.messages.push(newMessage);
@@ -727,6 +730,9 @@ function clearCurrentChatData() {
             const autoSaveKey = `biocbot_current_chat_${studentId}`;
             localStorage.removeItem(autoSaveKey);
         }
+        if (typeof window.updateChatSummaryButtonState === 'function') {
+            window.updateChatSummaryButtonState();
+        }
     } catch (error) {
         console.error('Error clearing chat data:', error);
     }
@@ -1019,6 +1025,9 @@ function extractMessageData(messageElement, index) {
         }
         if (messageElement.dataset.feedbackRating) {
             messageData.feedbackRating = messageElement.dataset.feedbackRating;
+        }
+        if (messageElement.dataset.summarySeed === 'true') {
+            messageData.isSummarySeed = true;
         }
 
         // Extract additional data for specific message types

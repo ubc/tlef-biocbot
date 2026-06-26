@@ -302,6 +302,57 @@
                                             </label>
                                         </div>
                                     </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="chat-survey-enabled-label">Enable chat usefulness survey</h4>
+                                            <p id="chat-survey-enabled-desc">When enabled, students see a closable survey after the configured number of regular messages in a chat session.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" id="chat-survey-enabled-toggle" aria-labelledby="chat-survey-enabled-label" aria-describedby="chat-survey-enabled-desc">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="chat-survey-trigger-label">Survey trigger message count</h4>
+                                            <p id="chat-survey-trigger-desc">Show the survey after this many regular student + BiocBot messages in the same chat session. Default is 10; allowed range is 2-30 because chats are capped at 40 messages. New sessions start their own count, while restored history continues that session's count.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <input type="number" id="chat-survey-trigger-input" class="number-input" min="2" max="30" step="1" value="10" aria-labelledby="chat-survey-trigger-label" aria-describedby="chat-survey-trigger-desc">
+                                        </div>
+                                    </div>
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="chat-survey-prompt-label">Survey popup text</h4>
+                                            <p id="chat-survey-prompt-desc">Main text shown at the top of the student survey popup.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="chat-survey-prompt-input" rows="3" aria-labelledby="chat-survey-prompt-label" aria-describedby="chat-survey-prompt-desc">Was this chat helpful?</textarea>
+                                        </div>
+                                    </div>
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="chat-survey-rating-label">Star rating text</h4>
+                                            <p id="chat-survey-rating-desc">Text shown next to the 1-5 star rating control.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="chat-survey-rating-input" rows="2" aria-labelledby="chat-survey-rating-label" aria-describedby="chat-survey-rating-desc">How useful was this conversation?</textarea>
+                                        </div>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="chat-survey-free-text-label">Allow written comments</h4>
+                                            <p id="chat-survey-free-text-desc">When enabled, students can optionally add a short written comment with their star rating.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" id="chat-survey-free-text-toggle" aria-labelledby="chat-survey-free-text-label" aria-describedby="chat-survey-free-text-desc">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div class="settings-section-actions">
                                     <span class="settings-dirty-note" hidden>Unsaved changes</span>
@@ -314,9 +365,9 @@
                         <!-- AI prompts -->
                         <div class="settings-panel" id="settings-panel-prompts" data-panel="prompts" hidden>
                             <h2 class="settings-panel-title" tabindex="-1">AI prompts</h2>
-                            <p class="settings-panel-desc">The system prompts that define how BiocBot behaves in each chat mode for this course.</p>
+                            <p class="settings-panel-desc">The system and workflow prompts that define how BiocBot behaves for this course.</p>
                             <section class="settings-section" id="ai-persona-section">
-                                <h3>AI persona prompts</h3>
+                                <h3>Course prompts</h3>
                                 <div class="settings-content">
                                     <div class="setting-item vertical">
                                         <div class="setting-info">
@@ -375,6 +426,16 @@
                                         </div>
                                         <div class="setting-controls full-width-control">
                                             <textarea id="quiz-help-prompt" rows="10" placeholder="Enter quiz help chat prompt..." aria-labelledby="quiz-help-prompt-label" aria-describedby="quiz-help-prompt-desc"></textarea>
+                                        </div>
+                                    </div>
+
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="chat-summary-prompt-label">Summarize &amp; start new chat prompt</h4>
+                                            <p id="chat-summary-prompt-desc">Instructions used when a student summarizes the current chat into a new same-unit session. BiocBot automatically adds the unit, mode, and transcript.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="chat-summary-prompt" rows="10" placeholder="Enter chat summary prompt..." aria-labelledby="chat-summary-prompt-label" aria-describedby="chat-summary-prompt-desc"></textarea>
                                         </div>
                                     </div>
                                 </div>

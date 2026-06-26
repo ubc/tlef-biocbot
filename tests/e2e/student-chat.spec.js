@@ -13,9 +13,10 @@
 const { test, expect } = require('./fixtures/monocart');
 const { TEST_USERS, loadCredentials, storageStatePath } = require('./helpers/users');
 const { withDb, getUserIdByUsername } = require('./helpers/quiz');
-const { resetLlmStub, enqueueLlmResponses } = require('./helpers/llm-stub');
+const { resetLlmStub, enqueueLlmResponses, addLlmStubRule, getLlmStubState } = require('./helpers/llm-stub');
 const {
     STU_COURSE_ID,
+    STU_COURSE_NAME,
     STU_INACTIVE_COURSE_ID,
     STU_OTHER_COURSE_ID,
     STU_DELETED_COURSE_ID,
@@ -326,6 +327,123 @@ test.describe('POST /api/chat — basics', () => {
             debug: { profanityFiltered: true },
         });
         expect(body.message).toContain('language');
+    });
+});
+
+test.describe('POST /api/chat/summary', () => {
+    test.use({ storageState: storageStatePath('student') });
+
+    test.beforeEach(async ({ request: api }) => {
+        await resetStudentChatData({ instructorId });
+        await resetLlmStub(api);
+    });
+
+    test('summarizes regular student and bot messages for the selected published unit', async ({ request: api }) => {
+        await enqueueLlmResponses(api, [
+            'I asked about glycolysis and BiocBot explained how ATP payoff follows the investment phase. I still want to connect that to regulation.',
+        ]);
+
+        const res = await api.post('/api/chat/summary', {
+            data: {
+                courseId: STU_COURSE_ID,
+                unitName: 'Unit 1',
+                mode: 'protege',
+                messages: [
+                    {
+                        type: 'user',
+                        messageType: 'regular-chat',
+                        content: 'Earlier generated summary that should not be summarized again.',
+                        isSummarySeed: true,
+                    },
+                    {
+                        type: 'bot',
+                        messageType: 'assessment-start',
+                        content: 'Starting Assessment for Unit 1',
+                    },
+                    {
+                        type: 'user',
+                        messageType: 'regular-chat',
+                        content: 'How does glycolysis pay back ATP?',
+                    },
+                    {
+                        type: 'bot',
+                        messageType: 'regular-chat',
+                        content: 'BiocBot explained the investment and payoff phases.',
+                    },
+                ],
+            },
+        });
+
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body).toMatchObject({
+            success: true,
+            mode: 'protege',
+            unitName: 'Unit 1',
+            sourceMessageCount: 2,
+        });
+        expect(body.summary).toContain('glycolysis');
+
+        const stubState = await getLlmStubState(api);
+        expect(stubState.callCount).toBe(1);
+    });
+
+    test('uses the course-specific chat summary prompt when configured', async ({ request: api }) => {
+        await withDb((db) =>
+            db.collection('courses').updateOne(
+                { courseId: STU_COURSE_ID },
+                { $set: { 'prompts.chatSummary': 'COURSE CUSTOM SUMMARY INSTRUCTIONS: mention glycolysis regulation.' } }
+            )
+        );
+        await addLlmStubRule(api, {
+            matchMessage: 'COURSE CUSTOM SUMMARY INSTRUCTIONS',
+            content: 'I used the custom course summary prompt for glycolysis regulation.',
+        });
+
+        const res = await api.post('/api/chat/summary', {
+            data: {
+                courseId: STU_COURSE_ID,
+                unitName: 'Unit 1',
+                mode: 'tutor',
+                messages: [
+                    {
+                        type: 'user',
+                        messageType: 'regular-chat',
+                        content: 'How is glycolysis regulated?',
+                    },
+                    {
+                        type: 'bot',
+                        messageType: 'regular-chat',
+                        content: 'BiocBot discussed phosphofructokinase and ATP inhibition.',
+                    },
+                ],
+            },
+        });
+
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.summary).toBe('I used the custom course summary prompt for glycolysis regulation.');
+    });
+
+    test('requires at least one regular student message and one regular bot message', async ({ request: api }) => {
+        const res = await api.post('/api/chat/summary', {
+            data: {
+                courseId: STU_COURSE_ID,
+                unitName: 'Unit 1',
+                mode: 'tutor',
+                messages: [
+                    {
+                        type: 'user',
+                        messageType: 'regular-chat',
+                        content: 'I asked one thing.',
+                    },
+                ],
+            },
+        });
+
+        expect(res.status()).toBe(400);
+        const body = await res.json();
+        expect(body.message).toContain('student message and one BiocBot message');
     });
 });
 
@@ -1187,6 +1305,181 @@ test.describe('Student chat page — UI controls', () => {
         }, STU_COURSE_ID);
         await page.goto('/student');
         await expect(page.locator('#new-session-btn')).toBeVisible({ timeout: 15_000 });
+    });
+
+    test('summary button seeds a fresh same-unit same-mode chat without assessment context', async ({ page }) => {
+        const summaryText = 'I previously asked about enzyme kinetics and still need help connecting Km to substrate affinity.';
+        let summaryRequestBody = null;
+        let chatRequestBody = null;
+
+        await loginAsStudent(page);
+
+        await page.route('**/api/chat/summary', async (route) => {
+            summaryRequestBody = route.request().postDataJSON();
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    success: true,
+                    summary: summaryText,
+                    message: summaryText,
+                    mode: 'protege',
+                    unitName: 'Unit 1',
+                    sourceMessageCount: 2,
+                }),
+            });
+        });
+
+        await page.route('**/api/chat', async (route) => {
+            chatRequestBody = route.request().postDataJSON();
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    success: true,
+                    messageId: 'msg_summary_e2e',
+                    message: 'Let us continue from your enzyme kinetics summary.',
+                    model: 'test',
+                    usage: { tokens: 1 },
+                    timestamp: new Date().toISOString(),
+                    mode: 'protege',
+                    citations: [],
+                    sourceAttribution: {
+                        source: 'GPT',
+                        description: 'Generated by AI',
+                        unitName: null,
+                        documentType: null,
+                        downloadsEnabled: false,
+                        documents: [],
+                    },
+                    retrieval: {
+                        mode: 'single',
+                        lectureNames: ['Unit 1'],
+                    },
+                }),
+            });
+        });
+
+        await page.addInitScript(({ courseId, courseName, studentId }) => {
+            try {
+                const now = new Date().toISOString();
+                const sessionId = `seeded_${Date.now()}`;
+                const unitName = 'Unit 1';
+                localStorage.setItem('selectedCourseId', courseId);
+                localStorage.setItem('selectedCourseName', courseName);
+                localStorage.setItem('selectedUnitName', unitName);
+                localStorage.setItem('studentMode', 'protege');
+                localStorage.setItem(`biocbot_session_${studentId}_${courseId}_${unitName}`, sessionId);
+                localStorage.setItem(`biocbot_current_chat_${studentId}`, JSON.stringify({
+                    metadata: {
+                        exportDate: now,
+                        courseId,
+                        courseName,
+                        studentId,
+                        studentName: 'E2E Student',
+                        unitName,
+                        currentMode: 'protege',
+                        totalMessages: 2,
+                        version: '1.0',
+                    },
+                    messages: [
+                        {
+                            type: 'user',
+                            content: 'Can you explain Km?',
+                            timestamp: now,
+                            messageType: 'regular-chat',
+                        },
+                        {
+                            type: 'bot',
+                            content: 'BiocBot explained that Km is the substrate concentration at half Vmax.',
+                            timestamp: now,
+                            messageType: 'regular-chat',
+                        },
+                    ],
+                    practiceTests: {
+                        questions: [
+                            {
+                                questionId: 'old-assessment-q',
+                                question: 'Old assessment question',
+                            },
+                        ],
+                        passThreshold: 1,
+                    },
+                    studentAnswers: {
+                        answers: [{ questionIndex: 0, answer: 0 }],
+                    },
+                    sessionInfo: {
+                        sessionId,
+                        startTime: now,
+                        endTime: now,
+                        duration: '1 minute',
+                    },
+                    lastActivityTimestamp: now,
+                }));
+            } catch (_) {}
+        }, {
+            courseId: STU_COURSE_ID,
+            courseName: STU_COURSE_NAME,
+            studentId,
+        });
+
+        await page.goto('/student');
+
+        const summaryButton = page.locator('#chat-summary-btn');
+        await expect(summaryButton).toBeEnabled({ timeout: 15_000 });
+        await expect(summaryButton).toHaveText('Summarize & Start New Chat');
+        page.once('dialog', async (dialog) => {
+            expect(dialog.message()).toContain('start a new chat in the same unit and mode');
+            expect(dialog.message()).toContain('assessment questions will not carry over');
+            await dialog.accept();
+        });
+        await summaryButton.click();
+
+        await expect(page.locator('.user-message')).toHaveCount(1, { timeout: 10_000 });
+        await expect(page.locator('.user-message').first()).toContainText(summaryText);
+        await expect(page.locator('.bot-message').last()).toContainText('Let us continue from your enzyme kinetics summary.');
+        await expect(page.locator('.calibration-question')).toHaveCount(0);
+        await expect(summaryButton).toBeDisabled();
+
+        if (!summaryRequestBody) throw new Error('Expected /api/chat/summary to be called');
+        if (!chatRequestBody) throw new Error('Expected /api/chat to be called');
+
+        const summaryBody = /** @type {any} */ (summaryRequestBody);
+        const chatBody = /** @type {any} */ (chatRequestBody);
+
+        expect(summaryBody).toMatchObject({
+            courseId: STU_COURSE_ID,
+            unitName: 'Unit 1',
+            mode: 'protege',
+        });
+        expect(summaryBody.messages).toHaveLength(2);
+
+        expect(chatBody).toMatchObject({
+            courseId: STU_COURSE_ID,
+            unitName: 'Unit 1',
+            mode: 'protege',
+            message: summaryText,
+        });
+        expect(chatBody.conversationContext).toBeNull();
+
+        const saved = await page.evaluate((id) => {
+            const raw = localStorage.getItem(`biocbot_current_chat_${id}`);
+            return raw ? JSON.parse(raw) : null;
+        }, studentId);
+
+        expect(saved.metadata).toMatchObject({
+            courseId: STU_COURSE_ID,
+            unitName: 'Unit 1',
+            currentMode: 'protege',
+        });
+        expect(saved.messages[0]).toMatchObject({
+            type: 'user',
+            content: summaryText,
+            messageType: 'regular-chat',
+            isSummarySeed: true,
+        });
+        expect(saved.practiceTests).toBeNull();
+        expect(saved.studentAnswers.answers).toEqual([]);
     });
 });
 

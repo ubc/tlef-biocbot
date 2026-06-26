@@ -316,6 +316,15 @@ function compareCoursesWithInactiveLast(a = {}, b = {}) {
 const DEFAULT_STUDENT_RAG_TOP_K = 3;
 const MIN_RAG_TOP_K = 1;
 const MAX_RAG_TOP_K = 20;
+const MIN_CHAT_SURVEY_TRIGGER_MESSAGES = 2;
+const MAX_CHAT_SURVEY_TRIGGER_MESSAGES = 30;
+const DEFAULT_CHAT_SURVEY_SETTINGS = Object.freeze({
+    enabled: false,
+    triggerMessageCount: 10,
+    promptText: 'Was this chat helpful?',
+    ratingPrompt: 'How useful was this conversation?',
+    allowFreeText: false
+});
 
 function normalizeRagTopK(value, fallback = DEFAULT_STUDENT_RAG_TOP_K) {
     const parsed = Number(value);
@@ -335,6 +344,112 @@ function resolveRagSettings(courseDoc = {}) {
         student: {
             topK: normalizeRagTopK(studentSettings.topK)
         }
+    };
+}
+
+function normalizeChatSurveyTriggerMessageCount(value, fallback = DEFAULT_CHAT_SURVEY_SETTINGS.triggerMessageCount) {
+    const parsed = Number(value);
+    if (
+        !Number.isInteger(parsed)
+        || parsed < MIN_CHAT_SURVEY_TRIGGER_MESSAGES
+        || parsed > MAX_CHAT_SURVEY_TRIGGER_MESSAGES
+    ) {
+        return fallback;
+    }
+
+    return parsed;
+}
+
+function normalizeChatSurveyPrompt(value, fallback) {
+    if (typeof value !== 'string') return fallback;
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    return normalized || fallback;
+}
+
+function resolveChatSurveySettings(courseDoc = {}) {
+    const settings = courseDoc && courseDoc.chatSurveySettings && typeof courseDoc.chatSurveySettings === 'object'
+        ? courseDoc.chatSurveySettings
+        : {};
+
+    return {
+        enabled: settings.enabled === true,
+        triggerMessageCount: normalizeChatSurveyTriggerMessageCount(settings.triggerMessageCount),
+        promptText: normalizeChatSurveyPrompt(settings.promptText, DEFAULT_CHAT_SURVEY_SETTINGS.promptText),
+        ratingPrompt: normalizeChatSurveyPrompt(settings.ratingPrompt, DEFAULT_CHAT_SURVEY_SETTINGS.ratingPrompt),
+        allowFreeText: settings.allowFreeText !== undefined
+            ? settings.allowFreeText === true
+            : DEFAULT_CHAT_SURVEY_SETTINGS.allowFreeText
+    };
+}
+
+async function getChatSurveySettings(db, courseId) {
+    const collection = getCoursesCollection(db);
+    const course = await collection.findOne(
+        { courseId, status: { $ne: 'deleted' } },
+        { projection: { chatSurveySettings: 1, courseId: 1 } }
+    );
+
+    if (!course) {
+        return { success: false, error: 'Course not found' };
+    }
+
+    return {
+        success: true,
+        settings: resolveChatSurveySettings(course),
+        defaults: {
+            ...DEFAULT_CHAT_SURVEY_SETTINGS,
+            minTriggerMessageCount: MIN_CHAT_SURVEY_TRIGGER_MESSAGES,
+            maxTriggerMessageCount: MAX_CHAT_SURVEY_TRIGGER_MESSAGES
+        }
+    };
+}
+
+async function updateChatSurveySettings(db, courseId, settings = {}, updatedById = null) {
+    const hasTriggerMessageCount = settings.triggerMessageCount !== undefined
+        && settings.triggerMessageCount !== null
+        && settings.triggerMessageCount !== '';
+    const triggerMessageCount = hasTriggerMessageCount
+        ? normalizeChatSurveyTriggerMessageCount(settings.triggerMessageCount, null)
+        : DEFAULT_CHAT_SURVEY_SETTINGS.triggerMessageCount;
+    if (triggerMessageCount === null) {
+        return {
+            success: false,
+            error: `Survey trigger must be an integer from ${MIN_CHAT_SURVEY_TRIGGER_MESSAGES} to ${MAX_CHAT_SURVEY_TRIGGER_MESSAGES}`
+        };
+    }
+
+    const now = new Date();
+    const chatSurveySettings = {
+        enabled: settings.enabled === true,
+        triggerMessageCount,
+        promptText: normalizeChatSurveyPrompt(settings.promptText, DEFAULT_CHAT_SURVEY_SETTINGS.promptText),
+        ratingPrompt: normalizeChatSurveyPrompt(settings.ratingPrompt, DEFAULT_CHAT_SURVEY_SETTINGS.ratingPrompt),
+        allowFreeText: settings.allowFreeText !== undefined
+            ? settings.allowFreeText === true
+            : DEFAULT_CHAT_SURVEY_SETTINGS.allowFreeText,
+        updatedAt: now
+    };
+
+    if (updatedById) {
+        chatSurveySettings.updatedById = updatedById;
+    }
+
+    const collection = getCoursesCollection(db);
+    const result = await collection.updateOne(
+        { courseId, status: { $ne: 'deleted' } },
+        {
+            $set: {
+                chatSurveySettings,
+                updatedAt: now,
+                lastUpdatedById: updatedById
+            }
+        }
+    );
+
+    return {
+        success: result.matchedCount > 0,
+        settings: chatSurveySettings,
+        error: result.matchedCount > 0 ? null : 'Course not found'
     };
 }
 
@@ -2192,8 +2307,15 @@ module.exports = {
     DEFAULT_STUDENT_RAG_TOP_K,
     MIN_RAG_TOP_K,
     MAX_RAG_TOP_K,
+    DEFAULT_CHAT_SURVEY_SETTINGS,
+    MIN_CHAT_SURVEY_TRIGGER_MESSAGES,
+    MAX_CHAT_SURVEY_TRIGGER_MESSAGES,
     normalizeRagTopK,
     resolveRagSettings,
+    normalizeChatSurveyTriggerMessageCount,
+    resolveChatSurveySettings,
+    getChatSurveySettings,
+    updateChatSurveySettings,
     getRagSettings,
     updateRagSettings,
     getAllowInSuperCourse,

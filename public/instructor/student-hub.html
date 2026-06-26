@@ -62,6 +62,49 @@
 
                 <div id="students-container" class="students-grid"></div>
             </div>
+
+            <div class="dashboard-section survey-responses-section">
+                <div class="survey-section-header">
+                    <div>
+                        <h2>Chat Survey Responses</h2>
+                        <div class="section-description">
+                            <p>Review student ratings from the chat usefulness survey for this course.</p>
+                        </div>
+                    </div>
+                    <div class="survey-section-actions">
+                        <label for="survey-status-filter">Status</label>
+                        <select id="survey-status-filter">
+                            <option value="all">All responses</option>
+                            <option value="submitted">Submitted</option>
+                            <option value="dismissed">Dismissed</option>
+                        </select>
+                        <button id="refresh-survey-responses" class="btn-small btn-secondary" type="button">Refresh</button>
+                        <button id="download-survey-responses" class="btn-small btn-primary" type="button">Download CSV</button>
+                    </div>
+                </div>
+
+                <div class="survey-stats-grid" id="survey-stats-grid">
+                    <div class="survey-stat">
+                        <span class="survey-stat-label">Shown</span>
+                        <strong id="survey-stat-shown">0</strong>
+                    </div>
+                    <div class="survey-stat">
+                        <span class="survey-stat-label">Submitted</span>
+                        <strong id="survey-stat-submitted">0</strong>
+                    </div>
+                    <div class="survey-stat">
+                        <span class="survey-stat-label">Dismissed</span>
+                        <strong id="survey-stat-dismissed">0</strong>
+                    </div>
+                    <div class="survey-stat">
+                        <span class="survey-stat-label">Average rating</span>
+                        <strong id="survey-stat-average">--</strong>
+                    </div>
+                </div>
+
+                <div id="survey-responses-status" class="survey-responses-status">Loading survey responses...</div>
+                <div id="survey-responses-container" class="survey-responses-list"></div>
+            </div>
         </main>
     </div>
 

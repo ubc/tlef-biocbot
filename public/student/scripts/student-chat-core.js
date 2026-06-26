@@ -158,6 +158,9 @@ async function handleExplainAction(text, topic = null) {
         
         // Add bot response
         addMessage(response.message, 'bot', true, false, response.sourceAttribution, false, null, null, response.messageId);
+        if (typeof maybeShowChatSurvey === 'function') {
+            maybeShowChatSurvey();
+        }
         
     } catch (error) {
         removeTypingIndicator();
@@ -378,7 +381,7 @@ function applyCurrentLLMTagClasses(element) {
     }
 }
 
-function addMessage(content, sender, withSource = false, skipAutoSave = false, sourceAttribution = null, isHtml = false, activeStruggleTopic = null, detectedTopic = null, messageId = null, feedbackRating = null) {
+function addMessage(content, sender, withSource = false, skipAutoSave = false, sourceAttribution = null, isHtml = false, activeStruggleTopic = null, detectedTopic = null, messageId = null, feedbackRating = null, messageOptions = null) {
 
 
     const chatMessages = document.getElementById('chat-messages');
@@ -389,6 +392,11 @@ function addMessage(content, sender, withSource = false, skipAutoSave = false, s
 
     const messageDiv = document.createElement('div');
     messageDiv.classList.add('message', sender + '-message');
+    const consumeSummarySeedFlag = sender === 'user' && window.summarySeedForNextUserMessage === true;
+    const isSummarySeed = consumeSummarySeedFlag || !!(messageOptions && messageOptions.isSummarySeed === true);
+    if (isSummarySeed) {
+        messageDiv.dataset.summarySeed = 'true';
+    }
     if (messageId) {
         messageDiv.dataset.messageId = messageId;
     }
@@ -570,7 +578,15 @@ function addMessage(content, sender, withSource = false, skipAutoSave = false, s
     // Auto-save the message
     // Only auto-save if not explicitly skipped
     if (!skipAutoSave) {
-        autoSaveMessage(content, sender, withSource, sourceAttribution, isHtml, activeStruggleTopic, messageId, feedbackRating);
+        autoSaveMessage(content, sender, withSource, sourceAttribution, isHtml, activeStruggleTopic, messageId, feedbackRating, { isSummarySeed });
+    }
+
+    if (consumeSummarySeedFlag) {
+        window.summarySeedForNextUserMessage = false;
+    }
+
+    if (typeof window.updateChatSummaryButtonState === 'function') {
+        window.updateChatSummaryButtonState();
     }
 }
 

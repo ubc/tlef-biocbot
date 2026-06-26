@@ -66,6 +66,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const initializeAutoSaveWhenReady = async () => {
 
         await initializeAutoSave();
+        if (typeof window.updateChatSummaryButtonState === 'function') {
+            window.updateChatSummaryButtonState();
+        }
 
         // Check for auto-continue after authentication is ready
         // Add a small delay to ensure auto-save data is fully loaded
@@ -264,7 +267,7 @@ document.addEventListener('DOMContentLoaded', async () => {
      * @param {AbortSignal} signal - Optional abort signal
      * @returns {Promise<Object>} Response from LLM service
      */
-    async function sendMessageToLLM(message, checkSummaryAttempt = false, signal = null, isExplanationRequest = false) {
+    async function sendMessageToLLM(message, checkSummaryAttempt = false, signal = null, isExplanationRequest = false, options = {}) {
         try {
             // Get current student mode for context
             const currentMode = localStorage.getItem('studentMode') || 'tutor';
@@ -277,8 +280,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             const unitName = localStorage.getItem('selectedUnitName') || getCurrentUnitName();
 
-            // Check if we're continuing a chat and need to include conversation context
-            const conversationContext = getConversationContext();
+            // Check if we're continuing a chat and need to include conversation context.
+            // Summary-seeded sessions intentionally send their first message without
+            // prior context because the summary itself is the full context.
+            const skipConversationContext = !!(options.skipConversationContext || window.skipConversationContextForNextMessage);
+            if (window.skipConversationContextForNextMessage) {
+                window.skipConversationContextForNextMessage = false;
+            }
+            const conversationContext = skipConversationContext ? null : getConversationContext();
             let conversationId = null;
             try {
                 const chatData = typeof getCurrentChatData === 'function' ? getCurrentChatData() : null;
@@ -349,6 +358,200 @@ document.addEventListener('DOMContentLoaded', async () => {
             throw error;
         }
     }
+
+    let isSummaryInProgress = false;
+    const summaryButtonDefaultText = 'Summarize & Start New Chat';
+    const summaryConfirmationMessage = 'This will summarize the current chat, end this session, and start a new chat in the same unit and mode. The summary will be sent as your first message, and assessment questions will not carry over. Continue?';
+
+    function isSummarizableChatMessage(message) {
+        if (!message || typeof message !== 'object') return false;
+        if (message.isSummarySeed === true) return false;
+        if (message.messageType !== 'regular-chat') return false;
+        if (message.type !== 'user' && message.type !== 'bot') return false;
+        if (!message.content || typeof message.content !== 'string' || !message.content.trim()) return false;
+        if (message.sourceAttribution && String(message.sourceAttribution.source || '').toLowerCase() === 'system') {
+            return false;
+        }
+        return true;
+    }
+
+    function getSummarizableChatMessages() {
+        try {
+            const chatData = typeof getCurrentChatData === 'function' ? getCurrentChatData() : null;
+            const messages = chatData && Array.isArray(chatData.messages) ? chatData.messages : [];
+            return messages.filter(isSummarizableChatMessage);
+        } catch (error) {
+            console.warn('Could not read chat messages for summary:', error);
+            return [];
+        }
+    }
+
+    function setSummaryButtonLoading(isLoading) {
+        const summaryButton = document.getElementById('chat-summary-btn');
+        if (!summaryButton) return;
+
+        isSummaryInProgress = isLoading;
+        summaryButton.classList.toggle('is-loading', isLoading);
+        summaryButton.disabled = true;
+        summaryButton.textContent = isLoading ? 'Starting new chat...' : summaryButtonDefaultText;
+    }
+
+    function updateChatSummaryButtonState() {
+        const summaryButton = document.getElementById('chat-summary-btn');
+        if (!summaryButton || isSummaryInProgress) return;
+
+        const messages = getSummarizableChatMessages();
+        const hasStudentMessage = messages.some(message => message.type === 'user');
+        const hasBotMessage = messages.some(message => message.type === 'bot');
+        const responseInProgress = !!currentController || !!document.getElementById('typing-indicator');
+        const canSummarize = hasStudentMessage && hasBotMessage && !window.noPublishedUnits && !responseInProgress;
+
+        summaryButton.disabled = !canSummarize;
+        summaryButton.textContent = summaryButtonDefaultText;
+        summaryButton.title = canSummarize
+            ? 'Summarize this chat, end this session, and start a new same-unit chat'
+            : 'Send and receive at least one chat message before starting a new chat from a summary';
+    }
+
+    window.updateChatSummaryButtonState = updateChatSummaryButtonState;
+
+    function resetAssessmentStateForSummarySession() {
+        currentCalibrationQuestions = [];
+        window.currentCalibrationQuestions = currentCalibrationQuestions;
+        currentQuestionIndex = 0;
+        currentPassThreshold = 0;
+        window.currentPassThreshold = currentPassThreshold;
+        studentAnswers = [];
+        window.studentAnswers = studentAnswers;
+        window.studentEvaluations = [];
+    }
+
+    function createFreshSummarySession(courseId, unitName) {
+        const studentId = getCurrentStudentId();
+        if (!studentId || !courseId || !unitName) return null;
+
+        const sessionKey = `biocbot_session_${studentId}_${courseId}_${unitName}`;
+        const sessionId = `autosave_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        localStorage.setItem(sessionKey, sessionId);
+        return sessionId;
+    }
+
+    async function requestChatSummary(messages, courseId, unitName, mode) {
+        const response = await fetch('/api/chat/summary', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                courseId,
+                unitName,
+                mode,
+                messages
+            })
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || `Summary request failed with status ${response.status}`);
+        }
+
+        const summary = String(data.summary || data.message || '').trim();
+        if (!summary) {
+            throw new Error('Summary response was empty');
+        }
+
+        return summary;
+    }
+
+    async function handleChatSummaryContinue() {
+        if (isSummaryInProgress) return;
+        if (currentController || document.getElementById('typing-indicator')) {
+            updateChatSummaryButtonState();
+            return;
+        }
+
+        const courseId = localStorage.getItem('selectedCourseId');
+        const unitName = localStorage.getItem('selectedUnitName') || getCurrentUnitName();
+        const mode = localStorage.getItem('studentMode') || 'tutor';
+        const messages = getSummarizableChatMessages();
+        const hasStudentMessage = messages.some(message => message.type === 'user');
+        const hasBotMessage = messages.some(message => message.type === 'bot');
+
+        if (!courseId || !unitName || !hasStudentMessage || !hasBotMessage) {
+            updateChatSummaryButtonState();
+            return;
+        }
+
+        if (!window.confirm(summaryConfirmationMessage)) {
+            updateChatSummaryButtonState();
+            return;
+        }
+
+        setSummaryButtonLoading(true);
+
+        try {
+            const summary = await requestChatSummary(messages, courseId, unitName, mode);
+            const courseName = localStorage.getItem('selectedCourseName');
+
+            clearCurrentChatData();
+            resetAssessmentStateForSummarySession();
+            sessionStorage.removeItem('isContinuingChat');
+            sessionStorage.removeItem('loadedChatData');
+            sessionStorage.removeItem('loadChatData');
+
+            localStorage.setItem('selectedCourseId', courseId);
+            localStorage.setItem('selectedUnitName', unitName);
+            localStorage.setItem('studentMode', mode);
+            if (courseName) {
+                localStorage.setItem('selectedCourseName', courseName);
+            }
+
+            createFreshSummarySession(courseId, unitName);
+            window.autoContinued = false;
+            window.loadingFromHistory = false;
+            window.noPublishedUnits = false;
+
+            const chatMessagesElement = document.getElementById('chat-messages');
+            if (chatMessagesElement) {
+                chatMessagesElement.innerHTML = '';
+            }
+
+            enableChatInput();
+            const modeToggleContainer = document.querySelector('.mode-toggle-container');
+            if (modeToggleContainer) {
+                modeToggleContainer.style.display = 'flex';
+            }
+            updateModeToggleUI(mode);
+
+            setSummaryButtonLoading(false);
+            updateChatSummaryButtonState();
+
+            window.skipConversationContextForNextMessage = true;
+            window.summarySeedForNextUserMessage = true;
+            chatInput.value = summary;
+            chatForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        } catch (error) {
+            console.error('Error summarizing chat:', error);
+            setSummaryButtonLoading(false);
+            updateChatSummaryButtonState();
+            addMessage('Sorry, I could not summarize this chat. Please try again.', 'bot', false, true, null);
+        }
+    }
+
+    function initializeChatSummaryButton() {
+        const summaryButton = document.getElementById('chat-summary-btn');
+        if (!summaryButton) return;
+
+        summaryButton.addEventListener('click', handleChatSummaryContinue);
+        document.addEventListener('auth:ready', () => setTimeout(updateChatSummaryButtonState, 0));
+        updateChatSummaryButtonState();
+        setTimeout(updateChatSummaryButtonState, 500);
+        setTimeout(updateChatSummaryButtonState, 1500);
+        setTimeout(updateChatSummaryButtonState, 3000);
+    }
+
+    // Initialize chat summary continuation button after its state is defined.
+    initializeChatSummaryButton();
 
     // Maximum number of regular-chat messages (user + bot combined) before session is capped
     const MAX_MESSAGES = 40;
@@ -881,6 +1084,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // Only show "I understand X now" button when directive mode is active for this response
                 const showStruggleReset = response.struggleDebug?.directiveModeActive ? lastActiveStruggleTopic : null;
                 addMessage(response.message, 'bot', true, false, response.sourceAttribution, false, showStruggleReset, detectedTopic, response.messageId);
+                if (typeof maybeShowChatSurvey === 'function') {
+                    maybeShowChatSurvey();
+                }
 
                 // Disable chat input if session is now capped
                 if (willHitCap) {

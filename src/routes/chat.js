@@ -13,6 +13,7 @@ const prompts = require('../services/prompts');
 const CourseModel = require('../models/Course');
 const DocumentModel = require('../models/Document');
 const MessageFeedback = require('../models/MessageFeedback');
+const ChatSurveyResponse = require('../models/ChatSurveyResponse');
 const BadWordsFilter = require('bad-words');
 const profanityFilter = new BadWordsFilter();
 const TrackerService = require('../services/tracker');
@@ -355,6 +356,84 @@ async function canCreateFeedbackForCourse(db, user, courseId) {
     return !!(enrollment.success && enrollment.enrolled);
 }
 
+const SUMMARY_MAX_MESSAGES = 80;
+const SUMMARY_MAX_MESSAGE_CHARS = 2000;
+const SUMMARY_MAX_TOTAL_CHARS = 20000;
+const SUMMARY_MAX_PROMPT_CHARS = 8000;
+
+function normalizeSummaryContent(content) {
+    return String(content || '')
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeSummaryMessages(messages = []) {
+    if (!Array.isArray(messages)) return [];
+
+    const normalized = messages
+        .filter((message) => {
+            if (!message || typeof message !== 'object') return false;
+            if (message.isSummarySeed === true) return false;
+            if (message.messageType && message.messageType !== 'regular-chat') return false;
+            const type = message.type || message.role;
+            return type === 'user' || type === 'student' || type === 'bot' || type === 'assistant';
+        })
+        .map((message) => {
+            const type = message.type || message.role;
+            const role = type === 'bot' || type === 'assistant' ? 'bot' : 'student';
+            const content = normalizeSummaryContent(message.content || message.message || message.text);
+            return {
+                role,
+                content: content.slice(0, SUMMARY_MAX_MESSAGE_CHARS)
+            };
+        })
+        .filter((message) => message.content);
+
+    const recentMessages = normalized.slice(-SUMMARY_MAX_MESSAGES);
+    const bounded = [];
+    let totalChars = 0;
+
+    for (let index = recentMessages.length - 1; index >= 0; index -= 1) {
+        const message = recentMessages[index];
+        if (totalChars + message.content.length > SUMMARY_MAX_TOTAL_CHARS && bounded.length > 0) {
+            break;
+        }
+        bounded.unshift(message);
+        totalChars += message.content.length;
+    }
+
+    return bounded;
+}
+
+function resolveChatSummaryInstructions(course) {
+    const coursePrompt = course
+        && course.prompts
+        && typeof course.prompts.chatSummary === 'string'
+        ? course.prompts.chatSummary.trim()
+        : '';
+    return (coursePrompt || prompts.DEFAULT_PROMPTS.chatSummary).slice(0, SUMMARY_MAX_PROMPT_CHARS);
+}
+
+function buildChatSummaryPrompt({ messages, unitName, mode, instructions }) {
+    const transcript = messages
+        .map((message) => `${message.role === 'student' ? 'Student' : 'BiocBot'}: ${message.content}`)
+        .join('\n\n');
+    const promptInstructions = String(instructions || prompts.DEFAULT_PROMPTS.chatSummary).trim()
+        || prompts.DEFAULT_PROMPTS.chatSummary;
+
+    return `${promptInstructions}
+
+Context:
+- Unit: ${unitName}
+- Bot mode to preserve: ${mode === 'protege' ? 'protege' : 'tutor'}
+
+Transcript:
+${transcript}`;
+}
+
 /**
  * POST /api/chat/feedback
  * Upsert or clear thumbs-up / thumbs-down feedback for an assistant message.
@@ -440,6 +519,246 @@ router.post('/feedback', async (req, res) => {
 });
 
 /**
+ * POST /api/chat/summary
+ * Summarize an existing student/BiocBot chat so it can seed a fresh session.
+ */
+router.post('/summary', async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+        if (user.role !== 'student') {
+            return res.status(403).json({ success: false, message: 'Only students can summarize chat sessions' });
+        }
+
+        const { courseId, unitName, mode, messages } = req.body;
+        if (!courseId || !unitName) {
+            return res.status(400).json({ success: false, message: 'courseId and unitName are required' });
+        }
+
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const course = await db.collection('courses').findOne({ courseId });
+        if (!course) {
+            return res.status(404).json({ success: false, message: 'Course not found' });
+        }
+
+        const canSummarize = await canCreateFeedbackForCourse(db, user, courseId);
+        if (!canSummarize) {
+            return res.status(403).json({ success: false, message: 'No access to summarize chats for this course' });
+        }
+
+        const publishedUnits = (course.lectures || []).filter(unit => unit.isPublished).map(unit => unit.name);
+        if (!publishedUnits.includes(unitName)) {
+            return res.status(400).json({ success: false, message: 'Selected unit is not published or does not exist' });
+        }
+
+        const summaryMessages = normalizeSummaryMessages(messages);
+        const hasStudentMessage = summaryMessages.some(message => message.role === 'student');
+        const hasBotMessage = summaryMessages.some(message => message.role === 'bot');
+        if (!hasStudentMessage || !hasBotMessage) {
+            return res.status(400).json({
+                success: false,
+                message: 'At least one student message and one BiocBot message are required to summarize a chat'
+            });
+        }
+
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
+
+        const summaryPrompt = buildChatSummaryPrompt({
+            messages: summaryMessages,
+            unitName,
+            mode,
+            instructions: resolveChatSummaryInstructions(course)
+        });
+
+        const response = await ai.llm.sendMessage(summaryPrompt, {
+            temperature: 0.2,
+            maxTokens: 700,
+            systemPrompt: 'You summarize tutoring conversations for continuity. Return only the student-voice summary.'
+        });
+
+        const summary = normalizeSummaryContent(response && response.content);
+        if (!summary) {
+            return res.status(502).json({ success: false, message: 'Failed to generate a chat summary' });
+        }
+
+        return res.json({
+            success: true,
+            summary,
+            message: summary,
+            mode: mode === 'protege' ? 'protege' : 'tutor',
+            unitName,
+            sourceMessageCount: summaryMessages.length,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Error summarizing chat session:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error while summarizing chat session'
+        });
+    }
+});
+
+/**
+ * GET /api/chat/survey-settings
+ * Return the student-facing chat survey settings for an enrolled student.
+ */
+router.get('/survey-settings', async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+        if (user.role !== 'student') {
+            return res.status(403).json({ success: false, message: 'Only students can access chat survey settings' });
+        }
+
+        const { courseId, conversationId } = req.query;
+        if (!courseId) {
+            return res.status(400).json({ success: false, message: 'courseId is required' });
+        }
+
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const settingsResult = await CourseModel.getChatSurveySettings(db, courseId);
+        if (!settingsResult.success) {
+            return res.status(404).json({ success: false, message: settingsResult.error || 'Course not found' });
+        }
+
+        const hasAccess = await canCreateFeedbackForCourse(db, user, courseId);
+        if (!hasAccess) {
+            return res.status(403).json({ success: false, message: 'No access to this course survey' });
+        }
+
+        const settingsFingerprint = ChatSurveyResponse.buildSettingsFingerprint(settingsResult.settings);
+        let response = null;
+        if (conversationId) {
+            response = await ChatSurveyResponse.getSurveyResponseForSession(db, {
+                courseId,
+                studentId: user.userId,
+                conversationId,
+                settingsFingerprint
+            });
+        }
+
+        return res.json({
+            success: true,
+            data: {
+                courseId,
+                settings: settingsResult.settings,
+                defaults: settingsResult.defaults,
+                settingsFingerprint,
+                response
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching student chat survey settings:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error while retrieving survey settings' });
+    }
+});
+
+/**
+ * POST /api/chat/survey
+ * Record that a student saw, dismissed, or submitted the session survey.
+ */
+router.post('/survey', async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+        if (user.role !== 'student') {
+            return res.status(403).json({ success: false, message: 'Only students can submit chat surveys' });
+        }
+
+        const {
+            courseId,
+            unitName,
+            conversationId,
+            eventType,
+            rating,
+            comment,
+            messageCountAtPrompt,
+            botMode,
+            settingsFingerprint: suppliedSettingsFingerprint
+        } = req.body;
+
+        if (!courseId || !conversationId || !eventType) {
+            return res.status(400).json({
+                success: false,
+                message: 'courseId, conversationId, and eventType are required'
+            });
+        }
+
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const settingsResult = await CourseModel.getChatSurveySettings(db, courseId);
+        if (!settingsResult.success) {
+            return res.status(404).json({ success: false, message: settingsResult.error || 'Course not found' });
+        }
+
+        const hasAccess = await canCreateFeedbackForCourse(db, user, courseId);
+        if (!hasAccess) {
+            return res.status(403).json({ success: false, message: 'No access to submit surveys for this course' });
+        }
+
+        const settings = settingsResult.settings;
+        if (!settings.enabled) {
+            return res.status(400).json({ success: false, message: 'Chat survey is not enabled for this course' });
+        }
+
+        const settingsFingerprint = ChatSurveyResponse.buildSettingsFingerprint(settings);
+        if (suppliedSettingsFingerprint && suppliedSettingsFingerprint !== settingsFingerprint) {
+            return res.status(409).json({
+                success: false,
+                message: 'Chat survey settings changed. Please refresh and try again.'
+            });
+        }
+
+        const result = await ChatSurveyResponse.upsertChatSurveyEvent(db, {
+            courseId,
+            unitName,
+            conversationId,
+            eventType,
+            rating,
+            comment,
+            messageCountAtPrompt,
+            botMode,
+            settings,
+            settingsFingerprint,
+            studentId: user.userId,
+            studentName: user.displayName || user.username || user.userId
+        });
+
+        if (!result.success) {
+            return res.status(400).json({ success: false, message: result.error || 'Failed to save survey response' });
+        }
+
+        return res.json({
+            success: true,
+            message: 'Survey response saved',
+            data: { response: result.response }
+        });
+    } catch (error) {
+        console.error('Error saving chat survey response:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error while saving survey response' });
+    }
+});
+
+/**
  * GET /api/chat/feedback/course/:courseId
  * List message feedback for instructor/TA review.
  */
@@ -517,6 +836,85 @@ router.get('/feedback/course/:courseId/export', async (req, res) => {
     } catch (error) {
         console.error('Error exporting chat message feedback:', error);
         return res.status(500).json({ success: false, message: 'Internal server error while exporting feedback' });
+    }
+});
+
+/**
+ * GET /api/chat/survey/course/:courseId
+ * List chat survey responses for instructor/TA review.
+ */
+router.get('/survey/course/:courseId', async (req, res) => {
+    try {
+        const { courseId } = req.params;
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const hasAccess = await canReadCourseFeedback(db, req.user, courseId);
+        if (!hasAccess) {
+            return res.status(403).json({ success: false, message: 'No access to survey responses for this course' });
+        }
+
+        const options = {
+            status: req.query.status,
+            studentId: req.query.studentId,
+            conversationId: req.query.conversationId,
+            limit: Number.parseInt(req.query.limit, 10)
+        };
+
+        const [responses, stats] = await Promise.all([
+            ChatSurveyResponse.listSurveyResponsesForCourse(db, courseId, options),
+            ChatSurveyResponse.getSurveyStatsForCourse(db, courseId)
+        ]);
+
+        return res.json({
+            success: true,
+            data: {
+                courseId,
+                responses,
+                count: responses.length,
+                stats
+            }
+        });
+    } catch (error) {
+        console.error('Error listing chat survey responses:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error while retrieving survey responses' });
+    }
+});
+
+/**
+ * GET /api/chat/survey/course/:courseId/export
+ * Export chat survey responses as CSV for instructor/TA review.
+ */
+router.get('/survey/course/:courseId/export', async (req, res) => {
+    try {
+        const { courseId } = req.params;
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const hasAccess = await canReadCourseFeedback(db, req.user, courseId);
+        if (!hasAccess) {
+            return res.status(403).json({ success: false, message: 'No access to survey responses for this course' });
+        }
+
+        const responses = await ChatSurveyResponse.listSurveyResponsesForCourse(db, courseId, {
+            status: req.query.status,
+            studentId: req.query.studentId,
+            conversationId: req.query.conversationId,
+            limit: Number.parseInt(req.query.limit, 10) || 1000
+        });
+
+        const csv = ChatSurveyResponse.surveyResponsesToCsv(responses);
+        const safeCourseId = String(courseId).replace(/[^A-Za-z0-9_-]/g, '_');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="chat-survey-responses-${safeCourseId}.csv"`);
+        return res.send(csv);
+    } catch (error) {
+        console.error('Error exporting chat survey responses:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error while exporting survey responses' });
     }
 });
 
