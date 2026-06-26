@@ -422,6 +422,22 @@ async function setupMockedSettingsRoutes(page, options = {}) {
                 ragSettings: { student: { topK: 3 } },
             },
         },
+        chatSurveySettings: {
+            enabled: false,
+            triggerMessageCount: 10,
+            promptText: 'Was this chat helpful?',
+            ratingPrompt: 'How useful was this conversation?',
+            allowFreeText: false,
+        },
+        chatSurveyDefaults: {
+            enabled: false,
+            triggerMessageCount: 10,
+            promptText: 'Was this chat helpful?',
+            ratingPrompt: 'How useful was this conversation?',
+            allowFreeText: false,
+            minTriggerMessageCount: 2,
+            maxTriggerMessageCount: 30,
+        },
         superCourseSettings: {
             studentTopK: 9,
             instructorTopK: 10,
@@ -545,6 +561,33 @@ async function setupMockedSettingsRoutes(page, options = {}) {
                     allowLectureMaterialAccess: false,
                     allowSourceAttributionDownloads: true,
                 },
+            }));
+            return;
+        }
+
+        if (pathname === '/api/settings/chat-survey') {
+            if (method === 'POST') {
+                const body = route.request().postDataJSON();
+                state.chatSurveySettings = {
+                    enabled: body.enabled === true,
+                    triggerMessageCount: body.triggerMessageCount,
+                    promptText: body.promptText,
+                    ratingPrompt: body.ratingPrompt,
+                    allowFreeText: body.allowFreeText === true,
+                };
+                await route.fulfill(jsonResponse({
+                    success: true,
+                    message: 'Chat survey settings saved successfully',
+                    settings: state.chatSurveySettings,
+                    defaults: state.chatSurveyDefaults,
+                }));
+                return;
+            }
+
+            await route.fulfill(jsonResponse({
+                success: true,
+                settings: state.chatSurveySettings,
+                defaults: state.chatSurveyDefaults,
             }));
             return;
         }
