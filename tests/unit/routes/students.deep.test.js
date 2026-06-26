@@ -1,0 +1,92 @@
+/**
+ * Deeper in-process route tests for src/routes/students.js (supertest) — the
+ * instructor/admin views of a student's chat sessions (list, single, delete) not
+ * covered by students.test.js (which exercises the student-facing "own" routes).
+ * No heavy deps: chat_sessions + courses over the in-memory Mongo + req.user.
+ */
+const { memoryDb } = require('../helpers/memory-db');
+const { makeRouteApp, request } = require('../helpers/route-app');
+const studentsRouter = require('../../../src/routes/students');
+
+const adminInstructor = { userId: 'i1', role: 'instructor', permissions: { systemAdmin: true } };
+const plainInstructor = { userId: 'i1', role: 'instructor' };
+const student = { userId: 's1', role: 'student' };
+const app = (opts) => makeRouteApp(studentsRouter, opts);
+
+const ownedCourse = { courseId: 'C1', instructorId: 'i1' };
+const session = (over = {}) => ({
+    sessionId: 'sess1', courseId: 'C1', studentId: 's1', studentName: 'Alice',
+    savedAt: new Date('2026-02-01'), isDeleted: false, ...over,
+});
+
+beforeAll(() => {
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+});
+afterAll(() => jest.restoreAllMocks());
+
+describe('GET /:courseId/:studentId/sessions — admin list', () => {
+    test('401 without a user, 403 for a plain (non-admin) instructor', async () => {
+        expect((await request(app({ db: memoryDb({}) })).get('/C1/s1/sessions')).status).toBe(401);
+        expect((await request(app({ db: memoryDb({}), user: plainInstructor })).get('/C1/s1/sessions')).status).toBe(403);
+    });
+
+    test('404 when the admin has no access to the course', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'someone-else' }] });
+        const res = await request(app({ db, user: adminInstructor })).get('/C1/s1/sessions');
+        expect(res.status).toBe(404);
+    });
+
+    test('returns the student\'s non-deleted sessions with a recalculated duration', async () => {
+        const db = memoryDb({
+            courses: [ownedCourse],
+            chat_sessions: [
+                session({ sessionId: 'a' }),
+                session({ sessionId: 'b', isDeleted: true }), // soft-deleted by instructor → hidden
+                session({ sessionId: 'c', studentId: 's2' }), // different student
+            ],
+        });
+        const res = await request(app({ db, user: adminInstructor })).get('/C1/s1/sessions');
+        expect(res.status).toBe(200);
+        expect(res.body.data.sessions.map(s => s.sessionId)).toEqual(['a']);
+        expect(res.body.data.studentName).toBe('Alice');
+        expect(res.body.data.sessions[0]).toHaveProperty('duration');
+    });
+});
+
+describe('GET /:courseId/:studentId/sessions/:sessionId — admin single', () => {
+    test('404 when the session does not exist', async () => {
+        const db = memoryDb({ courses: [ownedCourse], chat_sessions: [] });
+        const res = await request(app({ db, user: adminInstructor })).get('/C1/s1/sessions/missing');
+        expect(res.status).toBe(404);
+    });
+
+    test('200 returns the full session for download', async () => {
+        const db = memoryDb({ courses: [ownedCourse], chat_sessions: [session()] });
+        const res = await request(app({ db, user: adminInstructor })).get('/C1/s1/sessions/sess1');
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ sessionId: 'sess1', studentId: 's1' });
+        expect(res.body.data).toHaveProperty('duration');
+    });
+});
+
+describe('DELETE /:courseId/:studentId/sessions/:sessionId — instructor soft delete', () => {
+    test('403 for a student', async () => {
+        const db = memoryDb({ chat_sessions: [session()] });
+        const res = await request(app({ db, user: student })).delete('/C1/s1/sessions/sess1');
+        expect(res.status).toBe(403);
+    });
+
+    test('404 when the session is missing', async () => {
+        const db = memoryDb({ chat_sessions: [] });
+        const res = await request(app({ db, user: plainInstructor })).delete('/C1/s1/sessions/missing');
+        expect(res.status).toBe(404);
+    });
+
+    test('a plain instructor (no admin) can soft-delete the session', async () => {
+        const db = memoryDb({ chat_sessions: [session()] });
+        const res = await request(app({ db, user: plainInstructor })).delete('/C1/s1/sessions/sess1');
+        expect(res.status).toBe(200);
+        expect((await db.collection('chat_sessions').findOne({ sessionId: 'sess1' })).isDeleted).toBe(true);
+    });
+});

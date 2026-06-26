@@ -306,9 +306,22 @@ updates by `_id` (e.g. systemAdmin revoke).
   `week`/`lectureName` alias, read path, save echo, swallow-on-not-found characterization).
 - [x] `src/routes/llmKeyMiddleware.js` — `tests/unit/routes/llmKeyMiddleware.test.js` (function-level, fake
   req/res: `sendLlmKeyError` translation, registry-missing 503, success pass-through, LlmKeyError-vs-rethrow split).
-- [ ] Deepen remaining course endpoints (create/update/transfer, retrieval mode, units) or broaden into
-  uncovered routers (`learning-objectives.js`, `instructorChat.js`, `user-agreement.js`).
-  **Skip/e2e:** `chat.js`, `qdrant.js`, `studentSuperCourse.js` (AI/vector heavy — low unit fidelity).
+- [x] `src/routes/instructorChat.js` — `tests/unit/routes/instructorChat.test.js` (session save/list/get/delete
+  CRUD, `/pool` mapping + key gate, `POST /` validation + key gate). `superCourseService` mocked; the full
+  LLM answer flow left to e2e. Added `replaceOne()` to `memory-db`.
+- [x] **Deepened `src/routes/courses.js`** — `tests/unit/routes/courses.deep.test.js` (create, update,
+  retrieval-mode, soft-delete, unit add/delete/rename). Same mock header as `courses.test.js`. **`transfer`
+  still uncovered** (heavy copy/Qdrant path — e2e).
+- [x] **Deepened `src/routes/settings.js`** — `tests/unit/routes/settings.deep.test.js` (admin-gated
+  `/global` get/post, course-scoped `/quiz` get/post round-trip, `/anonymize-students` get/post round-trip).
+  Prompt/LLM-key settings endpoints still uncovered (need llmKeyStore mock — follow-up).
+- [x] **Deepened `src/routes/students.js`** — `tests/unit/routes/students.deep.test.js` (instructor/admin
+  session list/single/delete; note instructor delete only checks `role`, not systemAdmin).
+- [x] **Deepened `src/routes/quiz.js`** — `tests/unit/routes/quiz.deep.test.js` (`GET /questions` enabled
+  gate + answer sanitization, `GET /materials` access gate + listing).
+- [ ] Remaining deepening (lower ROI): `courses.js` transfer; settings prompt/LLM-key endpoints; questions
+  `auto-link`/`generate-ai`/`check-answer` and documents `upload`/`cleanup-orphans` (AI/gridfs heavy).
+  **Skip/e2e:** `chat.js`, `qdrant.js`, `studentSuperCourse.js`, `shibboleth.js` (AI/vector/SAML — low unit fidelity).
 
 ---
 
@@ -397,6 +410,13 @@ pass, NOT to be fixed while writing tests.
   rather than a 401. Not reachable in production (mounted behind `requireAuth`). Characterized in
   `tests/unit/routes/user-agreement.test.js`; not fixed.
 
+- **`POST /api/courses` 500s when `contentTypes` is omitted.** Every use treats `contentTypes` as
+  optional (`contentTypes || []`) EXCEPT the success-path call `generateCourseStructure(weeks,
+  lecturesPerWeek, contentTypes)`, which does `contentTypes.includes('practice-quizzes')` on the raw
+  (possibly undefined) value and throws — so a create request without `contentTypes` returns a 500 after
+  the course has already been written to Mongo. Characterized in `tests/unit/routes/courses.deep.test.js`
+  (the happy-path test passes `contentTypes`); not fixed.
+
 *(append new findings below as you go)*
 
 ---
@@ -413,6 +433,10 @@ pass, NOT to be fixed while writing tests.
   Course unit-update helpers use it; test their read side, or extend the helper minimally.
 - **bcrypt**-backed functions (`User.createUser/authenticateUser`, `authService` login/register)
   work with the real dep but are slower; isolate them or test the non-bcrypt helpers.
+- **`replaceOne(query, doc, { upsert })`** is supported (added for `instructorChat` session save): replaces
+  the matched doc in place (preserving `_id`), or upserts a new doc seeded with the filter's equality fields.
+- **`session` option on the route harness** (`makeRouteApp(router, { session })`) injects `req.session` for
+  routers that read it directly (e.g. `auth.js` preferences/set-course).
 
 When you extend the helper, it's shared infra — re-run the **whole** `npm run test:unit`
 afterward to make sure existing suites stay green.
