@@ -365,9 +365,9 @@
                         <!-- AI prompts -->
                         <div class="settings-panel" id="settings-panel-prompts" data-panel="prompts" hidden>
                             <h2 class="settings-panel-title" tabindex="-1">AI prompts</h2>
-                            <p class="settings-panel-desc">The system prompts that define how BiocBot behaves in each chat mode for this course.</p>
+                            <p class="settings-panel-desc">The system and workflow prompts that define how BiocBot behaves for this course.</p>
                             <section class="settings-section" id="ai-persona-section">
-                                <h3>AI persona prompts</h3>
+                                <h3>Course prompts</h3>
                                 <div class="settings-content">
                                     <div class="setting-item vertical">
                                         <div class="setting-info">
@@ -426,6 +426,16 @@
                                         </div>
                                         <div class="setting-controls full-width-control">
                                             <textarea id="quiz-help-prompt" rows="10" placeholder="Enter quiz help chat prompt..." aria-labelledby="quiz-help-prompt-label" aria-describedby="quiz-help-prompt-desc"></textarea>
+                                        </div>
+                                    </div>
+
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="chat-summary-prompt-label">Summarize &amp; start new chat prompt</h4>
+                                            <p id="chat-summary-prompt-desc">Instructions used when a student summarizes the current chat into a new same-unit session. BiocBot automatically adds the unit, mode, and transcript.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="chat-summary-prompt" rows="10" placeholder="Enter chat summary prompt..." aria-labelledby="chat-summary-prompt-label" aria-describedby="chat-summary-prompt-desc"></textarea>
                                         </div>
                                     </div>
                                 </div>

@@ -181,6 +181,7 @@ function buildSettingsCourse({
             explain: 'Seed explain prompt',
             directive: 'Seed directive prompt',
             quizHelp: 'Seed quiz help prompt',
+            chatSummary: 'Seed chat summary prompt',
             studentIdleTimeout: 180,
         };
         course.isAdditiveRetrieval = false;
@@ -393,6 +394,8 @@ async function setupMockedSettingsRoutes(page, options = {}) {
                 tutor: 'Default tutor prompt',
                 explain: 'Default explain prompt',
                 directive: 'Default directive prompt',
+                quizHelp: 'Default quiz help prompt',
+                chatSummary: 'Default chat summary prompt',
             },
         },
         mhResetResult: { success: true, prompt: 'Default detection prompt' },
@@ -519,6 +522,7 @@ async function setupMockedSettingsRoutes(page, options = {}) {
                         explain: 'Default explain prompt',
                         directive: 'Default directive prompt',
                         quizHelp: 'Default quiz help prompt',
+                        chatSummary: 'Default chat summary prompt',
                         additiveRetrieval: true,
                         studentIdleTimeout: 240,
                     },
@@ -535,6 +539,7 @@ async function setupMockedSettingsRoutes(page, options = {}) {
                     explain: 'Mock explain prompt',
                     directive: 'Mock directive prompt',
                     quizHelp: 'Mock quiz help prompt',
+                    chatSummary: 'Mock chat summary prompt',
                     additiveRetrieval: true,
                     studentIdleTimeout: 300,
                 },
@@ -921,6 +926,10 @@ test.describe('Instructor settings UI', () => {
         await expect(page.locator('#system-admin-section')).toBeHidden();
         await expect(page.locator('#llm-model-section')).toBeHidden();
 
+        await openSettingsPanel(page, 'prompts');
+        await expect(page.locator('#chat-summary-prompt')).toHaveValue('Seed chat summary prompt');
+        await returnToSettingsHub(page);
+
         await openSettingsPanel(page, 'student-chat');
         await expect(page.locator('#student-chat-section')).toBeVisible();
         await expect(page.locator('#student-chat-topk-input')).toHaveValue('6');
@@ -969,6 +978,7 @@ test.describe('Instructor settings UI', () => {
         await page.locator('#explain-prompt').fill('Updated explain prompt from settings UI');
         await page.locator('#directive-prompt').fill('Updated directive prompt from settings UI');
         await page.locator('#quiz-help-prompt').fill('Updated quiz help prompt from settings UI');
+        await page.locator('#chat-summary-prompt').fill('Updated chat summary prompt from settings UI');
         await page.locator('#save-prompts').click();
         await expect(page.locator('.notification.success', { hasText: 'Prompts saved' })).toBeVisible({
             timeout: 10_000,
@@ -1000,6 +1010,7 @@ test.describe('Instructor settings UI', () => {
                 explain: course.prompts?.explain,
                 directive: course.prompts?.directive,
                 quizHelp: course.prompts?.quizHelp,
+                chatSummary: course.prompts?.chatSummary,
                 studentIdleTimeout: course.prompts?.studentIdleTimeout,
                 isAdditiveRetrieval: course.isAdditiveRetrieval,
                 additionalMaterialSecondarySearch: course.additionalMaterialSecondarySearch,
@@ -1013,6 +1024,7 @@ test.describe('Instructor settings UI', () => {
             explain: 'Updated explain prompt from settings UI',
             directive: 'Updated directive prompt from settings UI',
             quizHelp: 'Updated quiz help prompt from settings UI',
+            chatSummary: 'Updated chat summary prompt from settings UI',
             studentIdleTimeout: 330,
             isAdditiveRetrieval: true,
             additionalMaterialSecondarySearch: true,
@@ -1191,6 +1203,7 @@ test.describe('Instructor settings UI', () => {
         await expect(page.locator('#explain-prompt')).toHaveValue('Default explain prompt');
         await expect(page.locator('#directive-prompt')).toHaveValue('Default directive prompt');
         await expect(page.locator('#quiz-help-prompt')).toHaveValue('Default quiz help prompt');
+        await expect(page.locator('#chat-summary-prompt')).toHaveValue('Default chat summary prompt');
         await expect(page.locator('.notification.success', { hasText: 'Prompts reset to defaults' })).toBeVisible();
 
         await openSettingsPanel(page, 'student-chat');
@@ -1655,6 +1668,7 @@ test.describe('Settings API authorization', () => {
                     explain: 'Unauthorized explain prompt',
                     directive: 'Unauthorized directive prompt',
                     quizHelp: 'Unauthorized quiz help prompt',
+                    chatSummary: 'Unauthorized chat summary prompt',
                     additiveRetrieval: true,
                     studentIdleTimeout: 120,
                 },

@@ -13,7 +13,7 @@
 const { test, expect } = require('./fixtures/monocart');
 const { TEST_USERS, loadCredentials, storageStatePath } = require('./helpers/users');
 const { withDb, getUserIdByUsername } = require('./helpers/quiz');
-const { resetLlmStub, enqueueLlmResponses, getLlmStubState } = require('./helpers/llm-stub');
+const { resetLlmStub, enqueueLlmResponses, addLlmStubRule, getLlmStubState } = require('./helpers/llm-stub');
 const {
     STU_COURSE_ID,
     STU_COURSE_NAME,
@@ -386,6 +386,43 @@ test.describe('POST /api/chat/summary', () => {
 
         const stubState = await getLlmStubState(api);
         expect(stubState.callCount).toBe(1);
+    });
+
+    test('uses the course-specific chat summary prompt when configured', async ({ request: api }) => {
+        await withDb((db) =>
+            db.collection('courses').updateOne(
+                { courseId: STU_COURSE_ID },
+                { $set: { 'prompts.chatSummary': 'COURSE CUSTOM SUMMARY INSTRUCTIONS: mention glycolysis regulation.' } }
+            )
+        );
+        await addLlmStubRule(api, {
+            matchMessage: 'COURSE CUSTOM SUMMARY INSTRUCTIONS',
+            content: 'I used the custom course summary prompt for glycolysis regulation.',
+        });
+
+        const res = await api.post('/api/chat/summary', {
+            data: {
+                courseId: STU_COURSE_ID,
+                unitName: 'Unit 1',
+                mode: 'tutor',
+                messages: [
+                    {
+                        type: 'user',
+                        messageType: 'regular-chat',
+                        content: 'How is glycolysis regulated?',
+                    },
+                    {
+                        type: 'bot',
+                        messageType: 'regular-chat',
+                        content: 'BiocBot discussed phosphofructokinase and ATP inhibition.',
+                    },
+                ],
+            },
+        });
+
+        expect(res.ok()).toBeTruthy();
+        const body = await res.json();
+        expect(body.summary).toBe('I used the custom course summary prompt for glycolysis regulation.');
     });
 
     test('requires at least one regular student message and one regular bot message', async ({ request: api }) => {

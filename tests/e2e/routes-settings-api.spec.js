@@ -82,6 +82,7 @@ test.describe('prompts (course-level)', () => {
                     explain: 'COURSE_EXPLAIN',
                     directive: 'COURSE_DIRECTIVE',
                     quizHelp: 'COURSE_QUIZ_HELP',
+                    chatSummary: 'COURSE_CHAT_SUMMARY',
                     studentIdleTimeout: 180,
                 },
             },
@@ -91,6 +92,7 @@ test.describe('prompts (course-level)', () => {
         const body = await res.json();
         expect(body.isCourseSpecific).toBe(true);
         expect(body.prompts.base).toBe('COURSE_BASE');
+        expect(body.prompts.chatSummary).toBe('COURSE_CHAT_SUMMARY');
         expect(body.prompts.studentIdleTimeout).toBe(180);
     });
 
@@ -114,6 +116,20 @@ test.describe('prompts (course-level)', () => {
         await seedCourse({ courseId: COURSE_A, instructorId });
         const res = await api.post('/api/settings/prompts', {
             data: { courseId: COURSE_A, base: 1, protege: 'b', tutor: 'c', explain: 'd', directive: 'e' },
+        });
+        expect(res.status()).toBe(400);
+        const body = await res.json();
+        expect(body.message).toMatch(/Invalid prompt format/i);
+    });
+
+    test('POST /prompts 400 when chatSummary is not a string', async ({ request: api }) => {
+        await seedCourse({ courseId: COURSE_A, instructorId });
+        const res = await api.post('/api/settings/prompts', {
+            data: {
+                courseId: COURSE_A,
+                base: 'a', protege: 'b', tutor: 'c', explain: 'd', directive: 'e',
+                chatSummary: 123,
+            },
         });
         expect(res.status()).toBe(400);
         const body = await res.json();
@@ -180,6 +196,7 @@ test.describe('prompts (course-level)', () => {
                 courseId: COURSE_A,
                 base: 'B', protege: 'P', tutor: 'T', explain: 'E', directive: 'D',
                 quizHelp: 'Q',
+                chatSummary: 'SUMMARY_PROMPT',
                 additiveRetrieval: true,
                 additionalMaterialSecondarySearch: true,
                 studentIdleTimeout: 300,
@@ -190,6 +207,7 @@ test.describe('prompts (course-level)', () => {
             db.collection('courses').findOne({ courseId: COURSE_A })
         );
         expect(doc.prompts.base).toBe('B');
+        expect(doc.prompts.chatSummary).toBe('SUMMARY_PROMPT');
         expect(doc.isAdditiveRetrieval).toBe(true);
         expect(doc.additionalMaterialSecondarySearch).toBe(true);
         expect(doc.prompts.studentIdleTimeout).toBe(300);

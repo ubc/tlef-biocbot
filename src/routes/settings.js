@@ -598,6 +598,7 @@ router.get('/prompts', async (req, res) => {
             explain: coursePrompts.explain || prompts.DEFAULT_PROMPTS.explain,
             directive: coursePrompts.directive || prompts.DEFAULT_PROMPTS.directive,
             quizHelp: coursePrompts.quizHelp || prompts.DEFAULT_PROMPTS.quizHelp,
+            chatSummary: coursePrompts.chatSummary || prompts.DEFAULT_PROMPTS.chatSummary,
             // Course-level additive retrieval setting
             additiveRetrieval: course ? !!course.isAdditiveRetrieval : false,
             // Course-level secondary search for additional materials (off by default)
@@ -632,7 +633,7 @@ router.post('/prompts', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        const { base, protege, tutor, explain, directive, quizHelp, additiveRetrieval, additionalMaterialSecondarySearch, studentIdleTimeout, courseId } = req.body;
+        const { base, protege, tutor, explain, directive, quizHelp, chatSummary, additiveRetrieval, additionalMaterialSecondarySearch, studentIdleTimeout, courseId } = req.body;
 
         if (!courseId) {
             return res.status(400).json({ success: false, message: 'courseId is required to save settings' });
@@ -643,7 +644,14 @@ router.post('/prompts', async (req, res) => {
         }
 
         // Validation - ensure they are strings (prompts) and boolean (additiveRetrieval)
-        if (typeof base !== 'string' || typeof protege !== 'string' || typeof tutor !== 'string' || typeof explain !== 'string' || typeof directive !== 'string') {
+        if (
+            typeof base !== 'string' ||
+            typeof protege !== 'string' ||
+            typeof tutor !== 'string' ||
+            typeof explain !== 'string' ||
+            typeof directive !== 'string' ||
+            (chatSummary !== undefined && typeof chatSummary !== 'string')
+        ) {
             return res.status(400).json({ success: false, message: 'Invalid prompt format' });
         }
 
@@ -667,6 +675,7 @@ router.post('/prompts', async (req, res) => {
                     'prompts.explain': explain,
                     'prompts.directive': directive,
                     'prompts.quizHelp': quizHelp || prompts.DEFAULT_PROMPTS.quizHelp,
+                    'prompts.chatSummary': chatSummary && chatSummary.trim() ? chatSummary : prompts.DEFAULT_PROMPTS.chatSummary,
                     'prompts.studentIdleTimeout': timeoutVal,
                     isAdditiveRetrieval: !!additiveRetrieval,
                     additionalMaterialSecondarySearch: !!additionalMaterialSecondarySearch,

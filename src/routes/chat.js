@@ -359,6 +359,7 @@ async function canCreateFeedbackForCourse(db, user, courseId) {
 const SUMMARY_MAX_MESSAGES = 80;
 const SUMMARY_MAX_MESSAGE_CHARS = 2000;
 const SUMMARY_MAX_TOTAL_CHARS = 20000;
+const SUMMARY_MAX_PROMPT_CHARS = 8000;
 
 function normalizeSummaryContent(content) {
     return String(content || '')
@@ -407,23 +408,27 @@ function normalizeSummaryMessages(messages = []) {
     return bounded;
 }
 
-function buildChatSummaryPrompt({ messages, unitName, mode }) {
+function resolveChatSummaryInstructions(course) {
+    const coursePrompt = course
+        && course.prompts
+        && typeof course.prompts.chatSummary === 'string'
+        ? course.prompts.chatSummary.trim()
+        : '';
+    return (coursePrompt || prompts.DEFAULT_PROMPTS.chatSummary).slice(0, SUMMARY_MAX_PROMPT_CHARS);
+}
+
+function buildChatSummaryPrompt({ messages, unitName, mode, instructions }) {
     const transcript = messages
         .map((message) => `${message.role === 'student' ? 'Student' : 'BiocBot'}: ${message.content}`)
         .join('\n\n');
+    const promptInstructions = String(instructions || prompts.DEFAULT_PROMPTS.chatSummary).trim()
+        || prompts.DEFAULT_PROMPTS.chatSummary;
 
-    return `Summarize the prior BiocBot tutoring conversation below so it can become the first student message in a new chat session.
+    return `${promptInstructions}
 
 Context:
 - Unit: ${unitName}
 - Bot mode to preserve: ${mode === 'protege' ? 'protege' : 'tutor'}
-
-Requirements:
-1. Write in first person as the student.
-2. Include the main topics discussed, important explanations BiocBot gave, conclusions reached, and any remaining confusion or follow-up needs.
-3. Do not include greetings, sign-offs, assessment setup, UI text, source-button text, or metadata.
-4. Do not invent facts that are not in the transcript.
-5. Keep it concise: 120-250 words.
 
 Transcript:
 ${transcript}`;
@@ -568,7 +573,8 @@ router.post('/summary', async (req, res) => {
         const summaryPrompt = buildChatSummaryPrompt({
             messages: summaryMessages,
             unitName,
-            mode
+            mode,
+            instructions: resolveChatSummaryInstructions(course)
         });
 
         const response = await ai.llm.sendMessage(summaryPrompt, {

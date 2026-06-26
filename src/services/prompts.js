@@ -128,6 +128,15 @@ FORMATTING:
 - Write in clear, simple language
 - SAFETY PROTOCOL: If the student expresses severe distress or thoughts of self-harm, respond with compassion and provide this link: http://students.ubc.ca/health/wellness-centre/`;
 
+const CHAT_SUMMARY_PROMPT = `Summarize the prior BiocBot tutoring conversation so it can become the first student message in a new chat session.
+
+Requirements:
+1. Write in first person as the student.
+2. Include the main topics discussed, important explanations BiocBot gave, conclusions reached, and any remaining confusion or follow-up needs.
+3. Do not include greetings, sign-offs, assessment setup, UI text, source-button text, or metadata.
+4. Do not invent facts that are not in the transcript.
+5. Keep it concise: 120-250 words.`;
+
 const INSTRUCTOR_SUPERCOURSE_SYSTEM_PROMPT = `You are BiocBot for instructor-level biochemistry discussion across the Super Course.
 
 Your audience is an instructor or course team member. Use a collegial, peer-level tone. Do not use tutor/protege framing, student coaching language, or assessment-question mode.
@@ -217,7 +226,8 @@ const DEFAULT_PROMPTS = {
     tutor: TUTOR_SYSTEM_PROMPT,
     explain: EXPLAIN_SYSTEM_PROMPT,
     directive: DIRECTIVE_SYSTEM_PROMPT,
-    quizHelp: QUIZ_HELP_SYSTEM_PROMPT
+    quizHelp: QUIZ_HELP_SYSTEM_PROMPT,
+    chatSummary: CHAT_SUMMARY_PROMPT
 };
 
 /**
@@ -720,6 +730,7 @@ module.exports = {
     EXPLAIN_SYSTEM_PROMPT,
     DIRECTIVE_SYSTEM_PROMPT,
     QUIZ_HELP_SYSTEM_PROMPT,
+    CHAT_SUMMARY_PROMPT,
     DEFAULT_MENTAL_HEALTH_DETECTION_PROMPT,
     createQuestionGenerationSystemPrompt,
     QUESTION_GENERATION_PROMPT_TEMPLATE,

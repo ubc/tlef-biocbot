@@ -840,7 +840,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             'tutor-prompt': promptValues.tutor,
             'explain-prompt': promptValues.explain,
             'directive-prompt': promptValues.directive,
-            'quiz-help-prompt': promptValues.quizHelp
+            'quiz-help-prompt': promptValues.quizHelp,
+            'chat-summary-prompt': promptValues.chatSummary
         };
         for (const [id, value] of Object.entries(fields)) {
             const el = document.getElementById(id);
@@ -1111,6 +1112,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 explain: document.getElementById('explain-prompt')?.value ?? '',
                 directive: document.getElementById('directive-prompt')?.value ?? '',
                 quizHelp: document.getElementById('quiz-help-prompt')?.value ?? '',
+                chatSummary: document.getElementById('chat-summary-prompt')?.value ?? '',
                 additiveRetrieval: document.getElementById('additive-retrieval-toggle')?.checked === true,
                 additionalMaterialSecondarySearch: document.getElementById('additional-material-secondary-toggle')?.checked === true,
                 studentIdleTimeout,
@@ -1355,7 +1357,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         busyLabel: 'Resetting...'
     });
 
-    // AI persona prompts
+    // Course prompts
     wireSectionButton('save-prompts', async () => {
         await savePromptsConfigToServer();
         showNotification('Prompts saved', 'success');
@@ -1363,7 +1365,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     wireSectionButton('reset-prompts', async () => {
         // Fetch the platform defaults (GET without courseId), fill the fields,
-        // then save. Only the six persona prompts reset - additive retrieval and
+        // then save. Only prompt text resets - additive retrieval and
         // idle timeout belong to other sections and keep their current values.
         const response = await fetch('/api/settings/prompts');
         const result = await response.json();
@@ -1374,7 +1376,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await savePromptsConfigToServer();
         showNotification('Prompts reset to defaults', 'success');
     }, {
-        confirmMessage: 'Reset all AI persona prompts for this course to the default values?',
+        confirmMessage: 'Reset all course prompt text to the default values?',
         busyLabel: 'Resetting...'
     });
 
