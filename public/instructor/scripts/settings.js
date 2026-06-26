@@ -2,6 +2,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     const SUPER_STUDENT_LEVELS = ['intro', 'undergraduate', 'graduate'];
     const SUPER_INSTRUCTOR_LEVELS = ['overview', 'standard', 'deepDive'];
     const LLM_KEY_CONTACT_EMAIL = 'LT.hub@ubc.ca';
+    const DEFAULT_CHAT_SURVEY_SETTINGS = {
+        enabled: false,
+        triggerMessageCount: 10,
+        promptText: 'Was this chat helpful?',
+        ratingPrompt: 'How useful was this conversation?',
+        allowFreeText: false,
+        minTriggerMessageCount: 2,
+        maxTriggerMessageCount: 30
+    };
 
     const settingsHub = document.getElementById('settings-hub');
     const settingsPanels = document.getElementById('settings-panels');
@@ -180,6 +189,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             // Load quiz practice settings
             await loadQuizSettings();
+            await loadChatSurveySettings();
 
             // Load course year level
             await loadCourseLevel();
@@ -936,6 +946,62 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    function applyChatSurveySettings(settings = DEFAULT_CHAT_SURVEY_SETTINGS, defaults = DEFAULT_CHAT_SURVEY_SETTINGS) {
+        const merged = { ...DEFAULT_CHAT_SURVEY_SETTINGS, ...(defaults || {}), ...(settings || {}) };
+        const enabledToggle = document.getElementById('chat-survey-enabled-toggle');
+        const triggerInput = document.getElementById('chat-survey-trigger-input');
+        const promptInput = document.getElementById('chat-survey-prompt-input');
+        const ratingInput = document.getElementById('chat-survey-rating-input');
+        const freeTextToggle = document.getElementById('chat-survey-free-text-toggle');
+
+        if (enabledToggle) enabledToggle.checked = merged.enabled === true;
+        if (triggerInput) {
+            triggerInput.min = merged.minTriggerMessageCount || DEFAULT_CHAT_SURVEY_SETTINGS.minTriggerMessageCount;
+            triggerInput.max = merged.maxTriggerMessageCount || DEFAULT_CHAT_SURVEY_SETTINGS.maxTriggerMessageCount;
+            triggerInput.value = merged.triggerMessageCount || DEFAULT_CHAT_SURVEY_SETTINGS.triggerMessageCount;
+        }
+        if (promptInput) promptInput.value = merged.promptText || DEFAULT_CHAT_SURVEY_SETTINGS.promptText;
+        if (ratingInput) ratingInput.value = merged.ratingPrompt || DEFAULT_CHAT_SURVEY_SETTINGS.ratingPrompt;
+        if (freeTextToggle) freeTextToggle.checked = merged.allowFreeText === true;
+    }
+
+    async function loadChatSurveySettings() {
+        try {
+            const courseId = await getCurrentCourseId();
+            if (!courseId) return;
+
+            const response = await fetch(`/api/settings/chat-survey?courseId=${encodeURIComponent(courseId)}`, {
+                credentials: 'include'
+            });
+            const result = await response.json();
+
+            if (result.success && result.settings) {
+                applyChatSurveySettings(result.settings, result.defaults);
+            }
+        } catch (error) {
+            console.error('Error loading chat survey settings:', error);
+        }
+    }
+
+    function collectChatSurveySettingsFromForm() {
+        const triggerInput = document.getElementById('chat-survey-trigger-input');
+        const triggerMessageCount = Number(triggerInput?.value || DEFAULT_CHAT_SURVEY_SETTINGS.triggerMessageCount);
+        const min = Number(triggerInput?.min || DEFAULT_CHAT_SURVEY_SETTINGS.minTriggerMessageCount);
+        const max = Number(triggerInput?.max || DEFAULT_CHAT_SURVEY_SETTINGS.maxTriggerMessageCount);
+
+        if (!Number.isInteger(triggerMessageCount) || triggerMessageCount < min || triggerMessageCount > max) {
+            throw new Error(`Survey trigger must be a whole number from ${min} to ${max}`);
+        }
+
+        return {
+            enabled: document.getElementById('chat-survey-enabled-toggle')?.checked === true,
+            triggerMessageCount,
+            promptText: document.getElementById('chat-survey-prompt-input')?.value || DEFAULT_CHAT_SURVEY_SETTINGS.promptText,
+            ratingPrompt: document.getElementById('chat-survey-rating-input')?.value || DEFAULT_CHAT_SURVEY_SETTINGS.ratingPrompt,
+            allowFreeText: document.getElementById('chat-survey-free-text-toggle')?.checked === true
+        };
+    }
+
     /**
      * Load the course's year level into the Course Level select.
      */
@@ -1082,6 +1148,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         const result = await response.json();
         if (!response.ok || !result.success) {
             throw new Error(result.message || 'Failed to save quiz settings');
+        }
+        return result;
+    }
+
+    async function saveChatSurveySettingsToServer() {
+        const courseId = await getCurrentCourseId();
+        const response = await fetch('/api/settings/chat-survey', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+                courseId,
+                ...collectChatSurveySettingsFromForm()
+            })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to save chat survey settings');
+        }
+        if (result.settings) {
+            applyChatSurveySettings(result.settings);
         }
         return result;
     }
@@ -1237,12 +1324,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         showNotification('Course basics saved', 'success');
     }, { busyLabel: 'Saving...' });
 
-    // Student chat (top-K lives in ai-settings; additive retrieval in the
-    // prompts config; source attribution downloads in the quiz config)
+    // Student chat combines settings owned by several backend documents:
+    // Top-K in ai-settings, retrieval behavior in prompts, source downloads in
+    // quiz settings, and usefulness prompts in chat-survey settings.
     wireSectionButton('save-student-chat', async () => {
         await saveAiSettingsToServer();
         await savePromptsConfigToServer();
         await saveQuizConfigToServer();
+        await saveChatSurveySettingsToServer();
         showNotification('Student chat settings saved', 'success');
     }, { busyLabel: 'Saving...' });
 
@@ -1255,12 +1344,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (additiveToggle) additiveToggle.checked = true;
         if (additionalSecondaryToggle) additionalSecondaryToggle.checked = false;
         if (sourceAttributionToggle) sourceAttributionToggle.checked = false;
+        applyChatSurveySettings(DEFAULT_CHAT_SURVEY_SETTINGS, DEFAULT_CHAT_SURVEY_SETTINGS);
         await saveAiSettingsToServer();
         await savePromptsConfigToServer();
         await saveQuizConfigToServer();
+        await saveChatSurveySettingsToServer();
         showNotification('Student chat settings reset to defaults', 'success');
     }, {
-        confirmMessage: 'Reset student chat settings (Top-K, additive retrieval, additional material search, source downloads) to defaults?',
+        confirmMessage: 'Reset student chat settings (Top-K, additive retrieval, additional material search, source downloads, and survey settings) to defaults?',
         busyLabel: 'Resetting...'
     });
 

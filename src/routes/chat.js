@@ -13,6 +13,7 @@ const prompts = require('../services/prompts');
 const CourseModel = require('../models/Course');
 const DocumentModel = require('../models/Document');
 const MessageFeedback = require('../models/MessageFeedback');
+const ChatSurveyResponse = require('../models/ChatSurveyResponse');
 const BadWordsFilter = require('bad-words');
 const profanityFilter = new BadWordsFilter();
 const TrackerService = require('../services/tracker');
@@ -440,6 +441,158 @@ router.post('/feedback', async (req, res) => {
 });
 
 /**
+ * GET /api/chat/survey-settings
+ * Return the student-facing chat survey settings for an enrolled student.
+ */
+router.get('/survey-settings', async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+        if (user.role !== 'student') {
+            return res.status(403).json({ success: false, message: 'Only students can access chat survey settings' });
+        }
+
+        const { courseId, conversationId } = req.query;
+        if (!courseId) {
+            return res.status(400).json({ success: false, message: 'courseId is required' });
+        }
+
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const settingsResult = await CourseModel.getChatSurveySettings(db, courseId);
+        if (!settingsResult.success) {
+            return res.status(404).json({ success: false, message: settingsResult.error || 'Course not found' });
+        }
+
+        const hasAccess = await canCreateFeedbackForCourse(db, user, courseId);
+        if (!hasAccess) {
+            return res.status(403).json({ success: false, message: 'No access to this course survey' });
+        }
+
+        const settingsFingerprint = ChatSurveyResponse.buildSettingsFingerprint(settingsResult.settings);
+        let response = null;
+        if (conversationId) {
+            response = await ChatSurveyResponse.getSurveyResponseForSession(db, {
+                courseId,
+                studentId: user.userId,
+                conversationId,
+                settingsFingerprint
+            });
+        }
+
+        return res.json({
+            success: true,
+            data: {
+                courseId,
+                settings: settingsResult.settings,
+                defaults: settingsResult.defaults,
+                settingsFingerprint,
+                response
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching student chat survey settings:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error while retrieving survey settings' });
+    }
+});
+
+/**
+ * POST /api/chat/survey
+ * Record that a student saw, dismissed, or submitted the session survey.
+ */
+router.post('/survey', async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+        if (user.role !== 'student') {
+            return res.status(403).json({ success: false, message: 'Only students can submit chat surveys' });
+        }
+
+        const {
+            courseId,
+            unitName,
+            conversationId,
+            eventType,
+            rating,
+            comment,
+            messageCountAtPrompt,
+            botMode,
+            settingsFingerprint: suppliedSettingsFingerprint
+        } = req.body;
+
+        if (!courseId || !conversationId || !eventType) {
+            return res.status(400).json({
+                success: false,
+                message: 'courseId, conversationId, and eventType are required'
+            });
+        }
+
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const settingsResult = await CourseModel.getChatSurveySettings(db, courseId);
+        if (!settingsResult.success) {
+            return res.status(404).json({ success: false, message: settingsResult.error || 'Course not found' });
+        }
+
+        const hasAccess = await canCreateFeedbackForCourse(db, user, courseId);
+        if (!hasAccess) {
+            return res.status(403).json({ success: false, message: 'No access to submit surveys for this course' });
+        }
+
+        const settings = settingsResult.settings;
+        if (!settings.enabled) {
+            return res.status(400).json({ success: false, message: 'Chat survey is not enabled for this course' });
+        }
+
+        const settingsFingerprint = ChatSurveyResponse.buildSettingsFingerprint(settings);
+        if (suppliedSettingsFingerprint && suppliedSettingsFingerprint !== settingsFingerprint) {
+            return res.status(409).json({
+                success: false,
+                message: 'Chat survey settings changed. Please refresh and try again.'
+            });
+        }
+
+        const result = await ChatSurveyResponse.upsertChatSurveyEvent(db, {
+            courseId,
+            unitName,
+            conversationId,
+            eventType,
+            rating,
+            comment,
+            messageCountAtPrompt,
+            botMode,
+            settings,
+            settingsFingerprint,
+            studentId: user.userId,
+            studentName: user.displayName || user.username || user.userId
+        });
+
+        if (!result.success) {
+            return res.status(400).json({ success: false, message: result.error || 'Failed to save survey response' });
+        }
+
+        return res.json({
+            success: true,
+            message: 'Survey response saved',
+            data: { response: result.response }
+        });
+    } catch (error) {
+        console.error('Error saving chat survey response:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error while saving survey response' });
+    }
+});
+
+/**
  * GET /api/chat/feedback/course/:courseId
  * List message feedback for instructor/TA review.
  */
@@ -517,6 +670,85 @@ router.get('/feedback/course/:courseId/export', async (req, res) => {
     } catch (error) {
         console.error('Error exporting chat message feedback:', error);
         return res.status(500).json({ success: false, message: 'Internal server error while exporting feedback' });
+    }
+});
+
+/**
+ * GET /api/chat/survey/course/:courseId
+ * List chat survey responses for instructor/TA review.
+ */
+router.get('/survey/course/:courseId', async (req, res) => {
+    try {
+        const { courseId } = req.params;
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const hasAccess = await canReadCourseFeedback(db, req.user, courseId);
+        if (!hasAccess) {
+            return res.status(403).json({ success: false, message: 'No access to survey responses for this course' });
+        }
+
+        const options = {
+            status: req.query.status,
+            studentId: req.query.studentId,
+            conversationId: req.query.conversationId,
+            limit: Number.parseInt(req.query.limit, 10)
+        };
+
+        const [responses, stats] = await Promise.all([
+            ChatSurveyResponse.listSurveyResponsesForCourse(db, courseId, options),
+            ChatSurveyResponse.getSurveyStatsForCourse(db, courseId)
+        ]);
+
+        return res.json({
+            success: true,
+            data: {
+                courseId,
+                responses,
+                count: responses.length,
+                stats
+            }
+        });
+    } catch (error) {
+        console.error('Error listing chat survey responses:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error while retrieving survey responses' });
+    }
+});
+
+/**
+ * GET /api/chat/survey/course/:courseId/export
+ * Export chat survey responses as CSV for instructor/TA review.
+ */
+router.get('/survey/course/:courseId/export', async (req, res) => {
+    try {
+        const { courseId } = req.params;
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const hasAccess = await canReadCourseFeedback(db, req.user, courseId);
+        if (!hasAccess) {
+            return res.status(403).json({ success: false, message: 'No access to survey responses for this course' });
+        }
+
+        const responses = await ChatSurveyResponse.listSurveyResponsesForCourse(db, courseId, {
+            status: req.query.status,
+            studentId: req.query.studentId,
+            conversationId: req.query.conversationId,
+            limit: Number.parseInt(req.query.limit, 10) || 1000
+        });
+
+        const csv = ChatSurveyResponse.surveyResponsesToCsv(responses);
+        const safeCourseId = String(courseId).replace(/[^A-Za-z0-9_-]/g, '_');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="chat-survey-responses-${safeCourseId}.csv"`);
+        return res.send(csv);
+    } catch (error) {
+        console.error('Error exporting chat survey responses:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error while exporting survey responses' });
     }
 });
 

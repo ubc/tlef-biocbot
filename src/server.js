@@ -9,6 +9,7 @@ const { MongoClient } = require('mongodb');
 const { ensureCourseCodes } = require('./models/Course');
 const { ensureSuperchatsFromLegacy } = require('./models/Superchat');
 const { ensureIndexes: ensureMessageFeedbackIndexes } = require('./models/MessageFeedback');
+const { ensureIndexes: ensureChatSurveyResponseIndexes } = require('./models/ChatSurveyResponse');
 const coursesRoutes = require('./routes/courses');
 const flagsRoutes = require('./routes/flags');
 const lecturesRoutes = require('./routes/lectures');
@@ -613,6 +614,7 @@ async function startServer() {
         await ensureCourseCodes(db);
         await ensureSuperchatsFromLegacy(db);
         await ensureMessageFeedbackIndexes(db);
+        await ensureChatSurveyResponseIndexes(db);
 
         // Set up routes after authentication is initialized
         setupProtectedRoutes();

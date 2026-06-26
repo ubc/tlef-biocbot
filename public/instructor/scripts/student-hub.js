@@ -7,6 +7,9 @@ let instructorCourses = [];
 let currentStudents = [];
 let currentTAs = []; // Store TAs for the current course
 let anonymizeStudentsEnabled = false;
+let currentSurveyCourseId = null;
+let currentSurveyResponses = [];
+let currentSurveyStats = null;
 const dirtyEnrollment = new Map(); // studentId -> boolean (enrolled)
 
 document.addEventListener('DOMContentLoaded', async function() {
@@ -19,6 +22,28 @@ document.addEventListener('DOMContentLoaded', async function() {
 function initializeStudentHub() {
     // Course selection is now handled by the home page
     // No need for dropdown change handler
+    const surveyStatusFilter = document.getElementById('survey-status-filter');
+    if (surveyStatusFilter) {
+        surveyStatusFilter.addEventListener('change', () => {
+            if (currentSurveyCourseId) {
+                loadChatSurveyResponses(currentSurveyCourseId);
+            }
+        });
+    }
+
+    const refreshSurveyButton = document.getElementById('refresh-survey-responses');
+    if (refreshSurveyButton) {
+        refreshSurveyButton.addEventListener('click', () => {
+            if (currentSurveyCourseId) {
+                loadChatSurveyResponses(currentSurveyCourseId);
+            }
+        });
+    }
+
+    const downloadSurveyButton = document.getElementById('download-survey-responses');
+    if (downloadSurveyButton) {
+        downloadSurveyButton.addEventListener('click', downloadChatSurveyResponses);
+    }
 }
 
 async function loadInstructorCourses() {
@@ -120,9 +145,186 @@ async function loadStudents(courseId) {
         currentStudents = [...currentTAs, ...uniqueStudents];
         
         renderStudents(courseId);
+        await loadChatSurveyResponses(courseId);
     } catch (err) {
         console.error('Error loading students:', err);
         showNotification('Error loading students. Please try again.', 'error');
+    }
+}
+
+async function loadChatSurveyResponses(courseId) {
+    currentSurveyCourseId = courseId;
+    const statusEl = document.getElementById('survey-responses-status');
+    const container = document.getElementById('survey-responses-container');
+    const downloadButton = document.getElementById('download-survey-responses');
+
+    if (statusEl) {
+        statusEl.textContent = 'Loading survey responses...';
+        statusEl.classList.remove('error');
+        statusEl.style.display = 'block';
+    }
+    if (container) {
+        container.innerHTML = '';
+    }
+    if (downloadButton) {
+        downloadButton.disabled = true;
+    }
+
+    try {
+        const statusFilter = document.getElementById('survey-status-filter')?.value || 'all';
+        const params = new URLSearchParams({ limit: '100' });
+        if (statusFilter !== 'all') {
+            params.set('status', statusFilter);
+        }
+
+        const response = await authenticatedFetch(`/api/chat/survey/course/${encodeURIComponent(courseId)}?${params.toString()}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to load survey responses');
+        }
+
+        currentSurveyResponses = result.data?.responses || [];
+        currentSurveyStats = result.data?.stats || null;
+        renderSurveyStats(currentSurveyStats);
+        renderSurveyResponses(currentSurveyResponses);
+    } catch (err) {
+        console.error('Error loading chat survey responses:', err);
+        currentSurveyResponses = [];
+        currentSurveyStats = null;
+        renderSurveyStats(null);
+        if (statusEl) {
+            statusEl.textContent = 'Could not load survey responses. Please try again.';
+            statusEl.classList.add('error');
+            statusEl.style.display = 'block';
+        }
+    } finally {
+        if (downloadButton) {
+            downloadButton.disabled = !currentSurveyCourseId;
+        }
+    }
+}
+
+function renderSurveyStats(stats) {
+    const shownEl = document.getElementById('survey-stat-shown');
+    const submittedEl = document.getElementById('survey-stat-submitted');
+    const dismissedEl = document.getElementById('survey-stat-dismissed');
+    const averageEl = document.getElementById('survey-stat-average');
+
+    if (shownEl) shownEl.textContent = String(stats?.shown || 0);
+    if (submittedEl) submittedEl.textContent = String(stats?.submitted || 0);
+    if (dismissedEl) dismissedEl.textContent = String(stats?.dismissed || 0);
+    if (averageEl) {
+        averageEl.textContent = typeof stats?.averageRating === 'number'
+            ? `${stats.averageRating.toFixed(1)}/5`
+            : '--';
+    }
+}
+
+function renderSurveyResponses(responses) {
+    const statusEl = document.getElementById('survey-responses-status');
+    const container = document.getElementById('survey-responses-container');
+    if (!container) return;
+
+    if (!responses.length) {
+        container.innerHTML = '';
+        if (statusEl) {
+            statusEl.textContent = 'No survey responses for this course yet.';
+            statusEl.classList.remove('error');
+            statusEl.style.display = 'block';
+        }
+        return;
+    }
+
+    if (statusEl) {
+        statusEl.style.display = 'none';
+    }
+
+    container.innerHTML = responses.map(response => {
+        const status = response.submittedAt ? 'Submitted' : response.dismissedAt ? 'Dismissed' : 'Shown';
+        const rating = typeof response.rating === 'number' ? `${response.rating}/5` : '--';
+        const studentName = response.studentName || response.studentId || 'Unknown student';
+        const updatedAt = response.updatedAt || response.submittedAt || response.dismissedAt || response.shownAt || response.createdAt;
+        const promptText = response.promptText || response.settingsSnapshot?.promptText || '';
+        const comment = response.comment || '';
+
+        return `
+            <article class="survey-response-card">
+                <div class="survey-response-main">
+                    <div>
+                        <h3>${escapeHTML(studentName)}</h3>
+                        <p class="survey-response-meta">
+                            ${escapeHTML(response.unitName || 'Unknown unit')} &middot; Session ${escapeHTML(shortenId(response.conversationId))}
+                        </p>
+                    </div>
+                    <div class="survey-response-rating">
+                        <strong>${escapeHTML(rating)}</strong>
+                        <span class="survey-status-pill ${status.toLowerCase()}">${escapeHTML(status)}</span>
+                    </div>
+                </div>
+                <dl class="survey-response-details">
+                    <div>
+                        <dt>Prompt</dt>
+                        <dd>${escapeHTML(promptText || '—')}</dd>
+                    </div>
+                    <div>
+                        <dt>Messages at prompt</dt>
+                        <dd>${response.messageCountAtPrompt ?? '—'}</dd>
+                    </div>
+                    <div>
+                        <dt>Last updated</dt>
+                        <dd>${escapeHTML(formatDateTime(updatedAt))}</dd>
+                    </div>
+                </dl>
+                ${comment ? `<p class="survey-response-comment">${escapeHTML(comment)}</p>` : ''}
+            </article>
+        `;
+    }).join('');
+}
+
+async function downloadChatSurveyResponses() {
+    if (!currentSurveyCourseId) {
+        showNotification('No course selected for survey export.', 'warning');
+        return;
+    }
+
+    const downloadButton = document.getElementById('download-survey-responses');
+    const previousText = downloadButton ? downloadButton.textContent : '';
+    if (downloadButton) {
+        downloadButton.disabled = true;
+        downloadButton.textContent = 'Downloading...';
+    }
+
+    try {
+        const statusFilter = document.getElementById('survey-status-filter')?.value || 'all';
+        const params = new URLSearchParams({ limit: '1000' });
+        if (statusFilter !== 'all') {
+            params.set('status', statusFilter);
+        }
+
+        const response = await authenticatedFetch(`/api/chat/survey/course/${encodeURIComponent(currentSurveyCourseId)}/export?${params.toString()}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const csv = await response.blob();
+        const url = URL.createObjectURL(csv);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `chat-survey-responses-${currentSurveyCourseId}-${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        showNotification('Survey responses downloaded.', 'success');
+    } catch (err) {
+        console.error('Error downloading chat survey responses:', err);
+        showNotification('Failed to download survey responses. Please try again.', 'error');
+    } finally {
+        if (downloadButton) {
+            downloadButton.disabled = false;
+            downloadButton.textContent = previousText || 'Download CSV';
+        }
     }
 }
 
@@ -326,6 +528,20 @@ function escapeHTML(str) {
         const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
         return map[s] || s;
     });
+}
+
+function shortenId(value) {
+    const text = String(value || '');
+    if (!text) return 'unknown';
+    if (text.length <= 16) return text;
+    return `${text.slice(0, 8)}...${text.slice(-4)}`;
+}
+
+function formatDateTime(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleString();
 }
 
 async function waitForAuth() {

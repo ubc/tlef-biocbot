@@ -158,6 +158,9 @@ async function handleExplainAction(text, topic = null) {
         
         // Add bot response
         addMessage(response.message, 'bot', true, false, response.sourceAttribution, false, null, null, response.messageId);
+        if (typeof maybeShowChatSurvey === 'function') {
+            maybeShowChatSurvey();
+        }
         
     } catch (error) {
         removeTypingIndicator();
