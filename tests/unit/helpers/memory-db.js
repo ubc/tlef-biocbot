@@ -312,6 +312,24 @@ function aggAccumulate(docs, acc) {
     }
 }
 
+function aggUnwind(rows, spec) {
+    const path = (typeof spec === 'string' ? spec : spec.path).replace(/^\$/, '');
+    const preserve = typeof spec === 'object' && spec.preserveNullAndEmptyArrays === true;
+    const out = [];
+    for (const doc of rows) {
+        const val = getPath(doc, path);
+        if (Array.isArray(val)) {
+            if (val.length === 0) { if (preserve) out.push(doc); continue; }
+            for (const item of val) { const copy = clone(doc); setPath(copy, path, item); out.push(copy); }
+        } else if (val === undefined || val === null) {
+            if (preserve) out.push(doc);
+        } else {
+            out.push(doc); // non-array scalar unwinds to itself
+        }
+    }
+    return out;
+}
+
 function aggGroup(rows, spec) {
     const { _id: idExpr, ...accumulators } = spec;
     const groups = new Map();
@@ -479,6 +497,7 @@ class MemoryCollection {
         let rows = this.docs.map(clone);
         for (const stage of pipeline) {
             if (stage.$match) rows = rows.filter((doc) => matchesQuery(doc, stage.$match));
+            else if (stage.$unwind) rows = aggUnwind(rows, stage.$unwind);
             else if (stage.$group) rows = aggGroup(rows, stage.$group);
             else if (stage.$project) rows = aggProject(rows, stage.$project);
             else if (stage.$sort) rows = sortRows(rows, stage.$sort);

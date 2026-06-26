@@ -342,3 +342,282 @@ describe('Course.createCourseFromOnboarding', () => {
         expect(res).toMatchObject({ success: true, created: false, courseId: 'OTHER' });
     });
 });
+
+describe('Course.getRagSettings / updateRagSettings / updateAllowInSuperCourse', () => {
+    test('getRagSettings resolves stored topK + allowInSuperCourse, defaulting topK to 3', async () => {
+        const db = memoryDb({ courses: [
+            { courseId: 'C1', ragSettings: { student: { topK: 8 } }, allowInSuperCourse: true },
+            { courseId: 'C2' },
+        ] });
+        expect(await Course.getRagSettings(db, 'C1')).toEqual({
+            success: true, ragSettings: { student: { topK: 8 } }, allowInSuperCourse: true,
+        });
+        expect(await Course.getRagSettings(db, 'C2')).toEqual({
+            success: true, ragSettings: { student: { topK: 3 } }, allowInSuperCourse: false,
+        });
+    });
+
+    test('getRagSettings rejects a missing or deleted course', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', status: 'deleted' }] });
+        expect(await Course.getRagSettings(db, 'C1')).toMatchObject({ success: false, error: 'Course not found' });
+        expect(await Course.getRagSettings(db, 'NOPE')).toMatchObject({ success: false, error: 'Course not found' });
+    });
+
+    test('updateRagSettings rejects an out-of-range topK before writing', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1' }] });
+        expect(await Course.updateRagSettings(db, 'C1', { student: { topK: 99 } })).toEqual({
+            success: false, error: 'Student Chat Top-K must be an integer from 1 to 20',
+        });
+    });
+
+    test('updateRagSettings persists a valid topK and reads back', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1' }] });
+        const res = await Course.updateRagSettings(db, 'C1', { student: { topK: 7 } });
+        expect(res).toEqual({ success: true, ragSettings: { student: { topK: 7 } }, error: null });
+        expect(await Course.getRagSettings(db, 'C1')).toMatchObject({ ragSettings: { student: { topK: 7 } } });
+    });
+
+    test('updateRagSettings reports "Course not found" for a valid topK but missing course', async () => {
+        const db = memoryDb({ courses: [] });
+        expect(await Course.updateRagSettings(db, 'NOPE', { student: { topK: 5 } })).toMatchObject({
+            success: false, error: 'Course not found',
+        });
+    });
+
+    test('updateAllowInSuperCourse coerces to a strict boolean and persists', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1' }] });
+        expect(await Course.updateAllowInSuperCourse(db, 'C1', 'yes')).toEqual({
+            success: true, allowInSuperCourse: false, error: null, // only true stays true
+        });
+        expect(await Course.updateAllowInSuperCourse(db, 'C1', true)).toMatchObject({ allowInSuperCourse: true });
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).allowInSuperCourse).toBe(true);
+    });
+});
+
+describe('Course.getQuizSettings / updateQuizSettings', () => {
+    test('getQuizSettings returns defaults for a missing course or unset settings', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1' }] });
+        const defaults = { enabled: false, testableUnits: 'all', allowLectureMaterialAccess: true, allowSourceAttributionDownloads: false };
+        expect(await Course.getQuizSettings(db, 'C1')).toEqual(defaults);
+        expect(await Course.getQuizSettings(db, 'NOPE')).toEqual(defaults);
+    });
+
+    test('getQuizSettings merges stored values over defaults', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', quizSettings: { enabled: true } }] });
+        expect(await Course.getQuizSettings(db, 'C1')).toEqual({
+            enabled: true, testableUnits: 'all', allowLectureMaterialAccess: true, allowSourceAttributionDownloads: false,
+        });
+    });
+
+    test('updateQuizSettings fills defaults, persists, and reads back', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1' }] });
+        const res = await Course.updateQuizSettings(db, 'C1', { enabled: true }, 'i1');
+        expect(res.success).toBe(true);
+        expect(await Course.getQuizSettings(db, 'C1')).toEqual({
+            enabled: true, testableUnits: 'all', allowLectureMaterialAccess: true, allowSourceAttributionDownloads: false,
+        });
+    });
+
+    test('updateQuizSettings rejects a missing course', async () => {
+        const db = memoryDb({ courses: [] });
+        expect(await Course.updateQuizSettings(db, 'NOPE', {}, 'i1')).toMatchObject({ success: false, error: 'Course not found' });
+    });
+});
+
+describe('Course.getAnonymizeStudents / updateAnonymizeStudents', () => {
+    test('defaults to enabled=true when unset (anonymize on by default)', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1' }] });
+        expect(await Course.getAnonymizeStudents(db, 'C1', 'i1')).toEqual({ success: true, enabled: true });
+    });
+
+    test('reads a per-instructor override and rejects a missing course', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', anonymizeStudents: { i1: { enabled: false } } }] });
+        expect(await Course.getAnonymizeStudents(db, 'C1', 'i1')).toEqual({ success: true, enabled: false });
+        expect(await Course.getAnonymizeStudents(db, 'NOPE', 'i1')).toMatchObject({ success: false, error: 'Course not found' });
+    });
+
+    test('updateAnonymizeStudents persists per instructor and reads back', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1' }] });
+        expect(await Course.updateAnonymizeStudents(db, 'C1', 'i1', false)).toEqual({ success: true });
+        expect(await Course.getAnonymizeStudents(db, 'C1', 'i1')).toEqual({ success: true, enabled: false });
+        // A different instructor still gets the default.
+        expect(await Course.getAnonymizeStudents(db, 'C1', 'i2')).toEqual({ success: true, enabled: true });
+    });
+});
+
+describe('Course.joinCourse', () => {
+    const base = { courseId: 'C1', courseCode: 'ABC123', courseName: 'Bio' };
+
+    test('rejects missing, deactivated, or revoked-access cases', async () => {
+        expect(await Course.joinCourse(memoryDb({ courses: [] }), 'NOPE', 's1', 'ABC123')).toMatchObject({
+            success: false, error: 'Course not found',
+        });
+        expect(await Course.joinCourse(memoryDb({ courses: [{ ...base, status: 'inactive' }] }), 'C1', 's1', 'ABC123')).toMatchObject({
+            success: false, error: 'Course is deactivated by the instructor',
+        });
+        const revoked = memoryDb({ courses: [{ ...base, studentEnrollment: { s1: { enrolled: false } } }] });
+        expect(await Course.joinCourse(revoked, 'C1', 's1', 'ABC123')).toMatchObject({
+            success: false, error: 'Access revoked by instructor',
+        });
+    });
+
+    test('rejects a wrong code but accepts the correct code case-insensitively', async () => {
+        const db = memoryDb({ courses: [{ ...base }] });
+        expect(await Course.joinCourse(db, 'C1', 's1', 'WRONG')).toMatchObject({ success: false, error: 'Invalid course code' });
+
+        const res = await Course.joinCourse(db, 'C1', 's1', '  abc123 ');
+        expect(res).toMatchObject({ success: true, enrolled: true });
+        expect(await Course.getStudentEnrollment(db, 'C1', 's1')).toMatchObject({ enrolled: true, status: 'enrolled' });
+    });
+
+    test('skipCodeValidation bypasses the code check', async () => {
+        const db = memoryDb({ courses: [{ ...base }] });
+        expect(await Course.joinCourse(db, 'C1', 's1', 'irrelevant', { skipCodeValidation: true })).toMatchObject({ success: true });
+    });
+});
+
+describe('Course.joinCourseAsInstructor', () => {
+    const base = { courseId: 'C1', instructorCourseCode: 'INS999', instructorId: 'owner', instructors: ['owner'] };
+
+    test('short-circuits when the instructor already has access', async () => {
+        const db = memoryDb({ courses: [{ ...base }] });
+        expect(await Course.joinCourseAsInstructor(db, 'C1', 'owner', 'whatever')).toMatchObject({
+            success: true, alreadyJoined: true,
+        });
+    });
+
+    test('rejects a wrong code, then adds the instructor on the correct code', async () => {
+        const db = memoryDb({ courses: [{ ...base }] });
+        expect(await Course.joinCourseAsInstructor(db, 'C1', 'newby', 'WRONG')).toMatchObject({
+            success: false, error: 'Invalid instructor course code',
+        });
+        const res = await Course.joinCourseAsInstructor(db, 'C1', 'newby', 'ins999');
+        expect(res).toMatchObject({ success: true });
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).instructors).toContain('newby');
+    });
+
+    test('rejects a deleted/inactive course', async () => {
+        const db = memoryDb({ courses: [{ ...base, status: 'deleted' }] });
+        expect(await Course.joinCourseAsInstructor(db, 'C1', 'newby', 'INS999')).toMatchObject({
+            success: false, error: 'Course is not available to join',
+        });
+    });
+});
+
+describe('Course.getCoursesForUser', () => {
+    test('instructor: matches primary or additional instructor, excludes deleted, inactive sorted last', async () => {
+        const db = memoryDb({ courses: [
+            { courseId: 'ACTIVE', instructorId: 'i1', updatedAt: new Date('2026-01-01') },
+            { courseId: 'EXTRA', instructors: ['i1'], updatedAt: new Date('2026-02-01') },
+            { courseId: 'INACTIVE', instructorId: 'i1', status: 'inactive', updatedAt: new Date('2026-03-01') },
+            { courseId: 'DELETED', instructorId: 'i1', status: 'deleted' },
+            { courseId: 'OTHER', instructorId: 'someone-else' },
+        ] });
+        const ids = (await Course.getCoursesForUser(db, 'i1', 'instructor')).map(c => c.courseId);
+        expect(ids).not.toContain('DELETED');
+        expect(ids).not.toContain('OTHER');
+        expect(ids).toEqual(['EXTRA', 'ACTIVE', 'INACTIVE']); // active by updatedAt desc, inactive last
+    });
+
+    test('ta: matches assigned TA courses, excluding deleted', async () => {
+        const db = memoryDb({ courses: [
+            { courseId: 'C1', tas: ['t1'] },
+            { courseId: 'C2', tas: ['t1'], status: 'deleted' },
+            { courseId: 'C3', tas: ['t2'] },
+        ] });
+        const ids = (await Course.getCoursesForUser(db, 't1', 'ta')).map(c => c.courseId);
+        expect(ids).toEqual(['C1']);
+    });
+});
+
+describe('Course.upsertCourse', () => {
+    test('inserts a new course, generating two distinct course codes and timestamps', async () => {
+        const db = memoryDb({ courses: [] });
+        const result = await Course.upsertCourse(db, { courseId: 'NEW', courseName: 'Bio', instructorId: 'i1' });
+        expect(result.upsertedCount).toBe(1);
+
+        const stored = await db.collection('courses').findOne({ courseId: 'NEW' });
+        expect(stored.courseCode).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
+        expect(stored.instructorCourseCode).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
+        expect(stored.instructorCourseCode).not.toBe(stored.courseCode);
+        expect(stored.createdAt).toBeInstanceOf(Date);
+    });
+
+    test('regenerates the instructor code when it collides with the student code', async () => {
+        const db = memoryDb({ courses: [] });
+        await Course.upsertCourse(db, { courseId: 'NEW', courseCode: 'ABC234', instructorCourseCode: 'abc234' });
+        const stored = await db.collection('courses').findOne({ courseId: 'NEW' });
+        expect(stored.courseCode).toBe('ABC234');
+        expect(stored.instructorCourseCode).not.toBe('abc234'); // collided -> regenerated
+    });
+
+    test('updates an existing course in place', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', courseCode: 'AAA111', instructorCourseCode: 'BBB222', courseName: 'Old' }] });
+        const result = await Course.upsertCourse(db, { courseId: 'C1', courseCode: 'AAA111', instructorCourseCode: 'BBB222', courseName: 'New' });
+        expect(result.matchedCount).toBe(1);
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).courseName).toBe('New');
+    });
+});
+
+describe('Course.getPassThreshold', () => {
+    test('returns the stored threshold, or 0 as the default', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', lectures: [
+            { name: 'Unit 1', passThreshold: 3 },
+            { name: 'Unit 2' }, // no threshold -> 0
+        ] }] });
+        expect(await Course.getPassThreshold(db, 'C1', 'Unit 1')).toBe(3);
+        expect(await Course.getPassThreshold(db, 'C1', 'Unit 2')).toBe(0);
+        expect(await Course.getPassThreshold(db, 'C1', 'Missing')).toBe(0);
+        expect(await Course.getPassThreshold(db, 'NOPE', 'Unit 1')).toBe(0);
+    });
+});
+
+describe('Course.getLearningObjectives', () => {
+    test('returns the lecture objectives, or [] when absent', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', lectures: [
+            { name: 'Unit 1', learningObjectives: ['LO1', 'LO2'] },
+            { name: 'Unit 2' },
+        ] }] });
+        expect(await Course.getLearningObjectives(db, 'C1', 'Unit 1')).toEqual(['LO1', 'LO2']);
+        expect(await Course.getLearningObjectives(db, 'C1', 'Unit 2')).toEqual([]);
+        expect(await Course.getLearningObjectives(db, 'C1', 'Missing')).toEqual([]);
+        expect(await Course.getLearningObjectives(db, 'NOPE', 'Unit 1')).toEqual([]);
+    });
+});
+
+describe('Course.addInstructorToCourse', () => {
+    test('rejects a missing course', async () => {
+        expect(await Course.addInstructorToCourse(memoryDb({ courses: [] }), 'NOPE', 'i1')).toMatchObject({
+            success: false, error: 'Course not found',
+        });
+    });
+
+    test('adds the instructor (idempotently) and backfills instructorId when absent', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1' }] });
+        await Course.addInstructorToCourse(db, 'C1', 'i1');
+        await Course.addInstructorToCourse(db, 'C1', 'i1'); // idempotent via $addToSet
+        const stored = await db.collection('courses').findOne({ courseId: 'C1' });
+        expect(stored.instructors).toEqual(['i1']);
+        expect(stored.instructorId).toBe('i1'); // backfilled (was absent)
+    });
+
+    test('does not overwrite an existing primary instructorId', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'owner', instructors: ['owner'] }] });
+        await Course.addInstructorToCourse(db, 'C1', 'i2');
+        const stored = await db.collection('courses').findOne({ courseId: 'C1' });
+        expect(stored.instructorId).toBe('owner');
+        expect(stored.instructors).toEqual(['owner', 'i2']);
+    });
+});
+
+describe('Course.addTAToCourse', () => {
+    test('rejects a missing course, otherwise adds the TA idempotently', async () => {
+        expect(await Course.addTAToCourse(memoryDb({ courses: [] }), 'NOPE', 't1')).toMatchObject({
+            success: false, error: 'Course not found',
+        });
+        const db = memoryDb({ courses: [{ courseId: 'C1' }] });
+        await Course.addTAToCourse(db, 'C1', 't1');
+        await Course.addTAToCourse(db, 'C1', 't1');
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).tas).toEqual(['t1']);
+    });
+});
