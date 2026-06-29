@@ -1,0 +1,189 @@
+const express = require('express');
+const router = express.Router();
+const CourseModel = require('../models/Course');
+const { getAcademicApiClient } = require('../services/academicApi');
+const { syncCourseRoster } = require('../services/academicRosterSync');
+
+router.use(express.json());
+
+function getAcademicApi(req) {
+    return req.app.locals.academicApi || getAcademicApiClient();
+}
+
+async function requireInstructorCourse(req, res, courseId) {
+    const db = req.app.locals.db;
+    const user = req.user;
+
+    if (!db) {
+        res.status(503).json({ success: false, message: 'Database connection not available' });
+        return null;
+    }
+
+    if (!user || user.role !== 'instructor') {
+        res.status(403).json({ success: false, message: 'Only instructors can manage academic roster sync' });
+        return null;
+    }
+
+    const course = await CourseModel.getCourseById(db, courseId);
+    if (!course || course.status === 'deleted') {
+        res.status(404).json({ success: false, message: 'Course not found' });
+        return null;
+    }
+
+    const hasAccess = course.instructorId === user.userId ||
+        (Array.isArray(course.instructors) && course.instructors.includes(user.userId));
+
+    if (!hasAccess) {
+        res.status(403).json({ success: false, message: 'You can only manage sync for your own courses' });
+        return null;
+    }
+
+    return course;
+}
+
+router.get('/academic-periods', async (req, res) => {
+    try {
+        const campus = req.query.campus || process.env.UBC_API_DEFAULT_CAMPUS || 'V';
+        const periods = await getAcademicApi(req).getAcademicPeriods(campus);
+
+        return res.json({
+            success: true,
+            data: periods
+        });
+    } catch (error) {
+        console.error('Error fetching academic periods:', error);
+        return res.status(error.code === 'ACADEMIC_API_TOOLKIT_MISSING' ? 503 : 502).json({
+            success: false,
+            message: error.message || 'Failed to fetch academic periods'
+        });
+    }
+});
+
+router.get('/instructor-sections', async (req, res) => {
+    try {
+        const user = req.user;
+        const academicPeriod = req.query.academicPeriod || process.env.UBC_API_CURRENT_ACADEMIC_PERIOD;
+
+        if (!user || user.role !== 'instructor') {
+            return res.status(403).json({ success: false, message: 'Only instructors can fetch instructor sections' });
+        }
+
+        if (!user.puid) {
+            return res.status(400).json({
+                success: false,
+                message: 'Your account is missing a PUID from CWL/Shibboleth'
+            });
+        }
+
+        if (!academicPeriod) {
+            return res.status(400).json({ success: false, message: 'academicPeriod is required' });
+        }
+
+        const sections = await getAcademicApi(req).getInstructorSections(user.puid, academicPeriod);
+
+        return res.json({
+            success: true,
+            data: sections
+        });
+    } catch (error) {
+        console.error('Error fetching instructor sections:', error);
+        return res.status(error.code === 'ACADEMIC_API_TOOLKIT_MISSING' ? 503 : 502).json({
+            success: false,
+            message: error.message || 'Failed to fetch instructor sections'
+        });
+    }
+});
+
+router.get('/courses/:courseId', async (req, res) => {
+    try {
+        const course = await requireInstructorCourse(req, res, req.params.courseId);
+        if (!course) return;
+
+        return res.json({
+            success: true,
+            data: {
+                courseId: course.courseId,
+                academicSync: course.academicSync || null
+            }
+        });
+    } catch (error) {
+        console.error('Error reading academic sync status:', error);
+        return res.status(500).json({ success: false, message: 'Failed to read academic sync status' });
+    }
+});
+
+router.put('/courses/:courseId/link', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        const course = await requireInstructorCourse(req, res, req.params.courseId);
+        if (!course) return;
+
+        const sectionIds = Array.isArray(req.body.sectionIds)
+            ? req.body.sectionIds.map((value) => String(value || '').trim()).filter(Boolean)
+            : [];
+        const academicPeriod = String(req.body.academicPeriod || '').trim();
+
+        if (!academicPeriod) {
+            return res.status(400).json({ success: false, message: 'academicPeriod is required' });
+        }
+
+        if (sectionIds.length === 0) {
+            return res.status(400).json({ success: false, message: 'Select at least one section' });
+        }
+
+        const now = new Date();
+        const academicSync = {
+            ...(course.academicSync || {}),
+            academicPeriod,
+            sectionIds,
+            linkedAt: now,
+            linkedBy: req.user.userId
+        };
+
+        await db.collection('courses').updateOne(
+            { courseId: course.courseId },
+            { $set: { academicSync, updatedAt: now } }
+        );
+
+        return res.json({
+            success: true,
+            message: 'Academic sections linked',
+            data: { courseId: course.courseId, academicSync }
+        });
+    } catch (error) {
+        console.error('Error linking academic sections:', error);
+        return res.status(500).json({ success: false, message: 'Failed to link academic sections' });
+    }
+});
+
+router.post('/courses/:courseId/sync', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        const course = await requireInstructorCourse(req, res, req.params.courseId);
+        if (!course) return;
+
+        const result = await syncCourseRoster(db, course.courseId, {
+            academicApi: getAcademicApi(req),
+            academicPeriod: req.body.academicPeriod,
+            sectionIds: req.body.sectionIds
+        });
+
+        if (!result.success) {
+            return res.status(400).json({ success: false, message: result.error || 'Roster sync failed' });
+        }
+
+        return res.json({
+            success: true,
+            message: 'Roster synced',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error syncing academic roster:', error);
+        return res.status(error.code === 'ACADEMIC_API_TOOLKIT_MISSING' ? 503 : 502).json({
+            success: false,
+            message: error.message || 'Failed to sync academic roster'
+        });
+    }
+});
+
+module.exports = router;

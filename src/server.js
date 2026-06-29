@@ -34,6 +34,7 @@ const struggleActivityRoutes = require('./routes/struggle-activity');
 const mentalHealthFlagsRoutes = require('./routes/mentalHealthFlags');
 const superChatNotesRoutes = require('./routes/superChatNotes');
 const superchatsRoutes = require('./routes/superchats');
+const academicSyncRoutes = require('./routes/academicSync');
 const LLMService = require('./services/llm');
 const LlmRegistry = require('./services/llmRegistry');
 const AuthService = require('./services/authService');
@@ -567,6 +568,7 @@ function setupAPIRoutes() {
     app.use('/api/instructor/chat', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, instructorChatRoutes);
     app.use('/api/superchat-notes', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, superChatNotesRoutes);
     app.use('/api/superchats', authMiddleware.requireAuth, authMiddleware.populateUser, superchatsRoutes);
+    app.use('/api/academic-sync', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, academicSyncRoutes);
     app.use('/api/student/super-course', authMiddleware.requireAuth, authMiddleware.populateUser, studentSuperCourseRoutes);
     app.use('/api/students', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, studentsRoutes);
     app.use('/api/user-agreement', authMiddleware.requireAuth, userAgreementRoutes);

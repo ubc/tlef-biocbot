@@ -152,6 +152,22 @@
                             </div>
                         </div>
 
+                        <div id="academic-sync-section" class="form-section" style="display: none;">
+                            <h3>Class List Sync</h3>
+                            <div class="form-row academic-sync-controls">
+                                <div class="form-group">
+                                    <label for="academic-period-input">Academic Period</label>
+                                    <input type="text" id="academic-period-input" name="academicPeriod" placeholder="AP-2026W1" autocomplete="off">
+                                </div>
+                                <div class="form-group academic-sync-action">
+                                    <label>&nbsp;</label>
+                                    <button type="button" id="load-academic-sections-btn" class="btn-secondary">Find My Sections</button>
+                                </div>
+                            </div>
+                            <div id="academic-sync-status" class="academic-sync-status" role="status" aria-live="polite"></div>
+                            <div id="academic-sections-list" class="academic-sections-list" hidden></div>
+                        </div>
+
                         <div id="course-structure-section" class="form-section">
                             <h3>Course Structure</h3>
                             <div class="form-row">

@@ -12,6 +12,11 @@ let onboardingState = {
     currentSubstep: 'objectives',
     substeps: ['objectives', 'materials', 'questions'],
     courseData: {},
+    academicSync: {
+        academicPeriod: '',
+        selectedSectionIds: [],
+        sections: []
+    },
     uploadedFile: null,
     createdCourseId: null,
     isSubmitting: false, // Prevent multiple submissions

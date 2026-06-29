@@ -16,6 +16,37 @@ class AuthService {
         this.db = db;
     }
 
+    async ensureDefaultAcademicIds() {
+        if (!this.db) return;
+
+        const users = this.db.collection('users');
+        await users.updateOne(
+            {
+                username: 'instructor',
+                $or: [{ puid: { $exists: false } }, { puid: null }, { puid: '' }]
+            },
+            {
+                $set: {
+                    puid: 'PUID-E000001',
+                    updatedAt: new Date()
+                }
+            }
+        );
+        await users.updateOne(
+            {
+                username: 'student',
+                $or: [{ puid: { $exists: false } }, { puid: null }, { puid: '' }]
+            },
+            {
+                $set: {
+                    puid: 'PUID-S000001',
+                    academicStudentId: 'STU-10001',
+                    updatedAt: new Date()
+                }
+            }
+        );
+    }
+
     /**
      * Create a new user account
      * @param {Object} userData - User registration data
@@ -262,6 +293,8 @@ class AuthService {
             baseRole: resolvedUser.baseRole,
             displayName: resolvedUser.displayName,
             authProvider: resolvedUser.authProvider,
+            puid: resolvedUser.puid,
+            academicStudentId: resolvedUser.academicStudentId,
             preferences: resolvedUser.preferences,
             permissions: resolvedUser.permissions
         };
@@ -282,6 +315,7 @@ class AuthService {
             // Check if users already exist
             const existingUsers = await User.getUsersByRole(this.db, 'instructor');
             if (existingUsers.length > 0) {
+                await this.ensureDefaultAcademicIds();
                 console.log('✅ Default users already exist');
                 return { success: true, message: 'Default users already exist' };
             }
@@ -292,7 +326,8 @@ class AuthService {
                 password: 'password123',
                 email: 'instructor@ubc.ca',
                 role: 'instructor',
-                displayName: 'Default Instructor'
+                displayName: 'Default Instructor',
+                puid: 'PUID-E000001'
             });
 
             if (!instructorResult.success) {
@@ -306,7 +341,9 @@ class AuthService {
                 password: 'password123',
                 email: 'student@ubc.ca',
                 role: 'student',
-                displayName: 'Default Student'
+                displayName: 'Default Student',
+                puid: 'PUID-S000001',
+                academicStudentId: 'STU-10001'
             });
 
             if (!studentResult.success) {
@@ -317,6 +354,7 @@ class AuthService {
             console.log('✅ Default users created successfully');
             console.log('   Instructor: instructor / password123');
             console.log('   Student: student / password123');
+            await this.ensureDefaultAcademicIds();
 
             return {
                 success: true,

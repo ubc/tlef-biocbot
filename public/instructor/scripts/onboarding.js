@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     canBypassOnboardingInstructorCourseCodes = await checkCourseCodeBypassPermission();
     applyJoinCourseCodePermission();
+    initializeAcademicSyncPicker();
 
     await checkOnboardingStatus();
     

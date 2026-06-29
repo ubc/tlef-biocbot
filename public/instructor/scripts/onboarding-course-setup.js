@@ -36,6 +36,192 @@ function applyJoinCourseCodePermission() {
     }
 }
 
+function getDefaultAcademicPeriod() {
+    return `AP-${new Date().getFullYear()}W1`;
+}
+
+function setAcademicSyncStatus(message, type = 'info') {
+    const status = document.getElementById('academic-sync-status');
+    if (!status) return;
+
+    status.textContent = message || '';
+    status.className = `academic-sync-status ${type ? `academic-sync-status-${type}` : ''}`;
+}
+
+function resetAcademicSectionSelection() {
+    onboardingState.academicSync.selectedSectionIds = [];
+    onboardingState.academicSync.sections = [];
+
+    const list = document.getElementById('academic-sections-list');
+    if (list) {
+        list.hidden = true;
+        list.innerHTML = '';
+    }
+
+    setAcademicSyncStatus('');
+}
+
+function updateAcademicSyncVisibility() {
+    const courseSelect = document.getElementById('course-select');
+    const syncSection = document.getElementById('academic-sync-section');
+    const periodInput = document.getElementById('academic-period-input');
+
+    if (!syncSection || !courseSelect) return;
+
+    const shouldShow = courseSelect.value === 'custom';
+    syncSection.style.display = shouldShow ? 'block' : 'none';
+
+    if (shouldShow && periodInput && !periodInput.value.trim()) {
+        periodInput.value = getDefaultAcademicPeriod();
+        onboardingState.academicSync.academicPeriod = periodInput.value.trim();
+    }
+
+    if (!shouldShow) {
+        resetAcademicSectionSelection();
+    }
+}
+
+function getSectionId(section = {}) {
+    return section.courseSectionId || section.id || section.sectionId || section.referenceId || '';
+}
+
+function getSectionLabel(section = {}) {
+    const subject = section.course?.courseSubject || section.courseSubject || section.subjectCode || '';
+    const number = section.course?.courseNumber || section.courseNumber || '';
+    const sectionNumber = section.sectionNumber || section.courseSectionNumber || section.number || '';
+    const title = section.course?.courseTitle || section.courseTitle || section.title || '';
+    const pieces = [subject, number, sectionNumber ? `Section ${sectionNumber}` : '']
+        .filter(Boolean)
+        .join(' ');
+
+    return pieces || title || getSectionId(section) || 'Unnamed section';
+}
+
+function getSectionMeta(section = {}) {
+    return [
+        section.courseSectionId,
+        section.sectionStatus?.description || section.sectionStatus || section.status,
+        section.course?.courseTitle || section.courseTitle || section.title
+    ].filter(Boolean).join(' · ');
+}
+
+function syncSelectedAcademicSectionsFromDOM() {
+    const checked = Array.from(document.querySelectorAll('input[name="academic-section"]:checked'))
+        .map(input => input.value)
+        .filter(Boolean);
+
+    onboardingState.academicSync.selectedSectionIds = checked;
+}
+
+function renderAcademicSections(sections = []) {
+    const list = document.getElementById('academic-sections-list');
+    if (!list) return;
+
+    list.innerHTML = '';
+
+    if (!sections.length) {
+        list.hidden = true;
+        setAcademicSyncStatus('No sections found for that period.', 'warn');
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    sections.forEach(section => {
+        const sectionId = getSectionId(section);
+        if (!sectionId) return;
+
+        const label = document.createElement('label');
+        label.className = 'academic-section-option';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.name = 'academic-section';
+        checkbox.value = sectionId;
+        checkbox.addEventListener('change', syncSelectedAcademicSectionsFromDOM);
+
+        const text = document.createElement('span');
+        text.className = 'academic-section-text';
+
+        const title = document.createElement('strong');
+        title.textContent = getSectionLabel(section);
+
+        const meta = document.createElement('small');
+        meta.textContent = getSectionMeta(section);
+
+        text.appendChild(title);
+        text.appendChild(meta);
+        label.appendChild(checkbox);
+        label.appendChild(text);
+        fragment.appendChild(label);
+    });
+
+    list.appendChild(fragment);
+    list.hidden = list.children.length === 0;
+    setAcademicSyncStatus(`${list.children.length} section${list.children.length === 1 ? '' : 's'} found.`, 'success');
+}
+
+async function loadAcademicSectionsForOnboarding() {
+    const periodInput = document.getElementById('academic-period-input');
+    const button = document.getElementById('load-academic-sections-btn');
+    const academicPeriod = periodInput ? periodInput.value.trim() : '';
+
+    if (!academicPeriod) {
+        showFieldError(periodInput, 'Enter an academic period');
+        return;
+    }
+
+    onboardingState.academicSync.academicPeriod = academicPeriod;
+    onboardingState.academicSync.selectedSectionIds = [];
+
+    const originalText = button ? button.textContent : '';
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'Finding...';
+    }
+    setAcademicSyncStatus('Finding sections...', 'info');
+
+    try {
+        const response = await authenticatedFetch(`/api/academic-sync/instructor-sections?academicPeriod=${encodeURIComponent(academicPeriod)}`);
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to load sections');
+        }
+
+        onboardingState.academicSync.sections = Array.isArray(result.data) ? result.data : [];
+        renderAcademicSections(onboardingState.academicSync.sections);
+    } catch (error) {
+        console.error('Error loading academic sections:', error);
+        resetAcademicSectionSelection();
+        setAcademicSyncStatus(error.message || 'Could not load sections.', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    }
+}
+
+function initializeAcademicSyncPicker() {
+    const button = document.getElementById('load-academic-sections-btn');
+    const periodInput = document.getElementById('academic-period-input');
+
+    if (periodInput && !periodInput.value.trim()) {
+        periodInput.value = getDefaultAcademicPeriod();
+        onboardingState.academicSync.academicPeriod = periodInput.value.trim();
+    }
+
+    if (periodInput) {
+        periodInput.addEventListener('input', () => {
+            onboardingState.academicSync.academicPeriod = periodInput.value.trim();
+        });
+    }
+
+    if (button) {
+        button.addEventListener('click', loadAcademicSectionsForOnboarding);
+    }
+}
+
 /**
  * Handle course selection change
  */
@@ -126,6 +312,8 @@ function populateSelectedCourseDetails(courseId) {
         // Store the course ID for joining
         onboardingState.existingCourseId = courseId;
     }
+
+    updateAcademicSyncVisibility();
 }
 
 function animateOnboardingJoinCourseCodeError(field) {
@@ -317,6 +505,7 @@ async function handleCourseSetup(event) {
                             // Use the existing incomplete course
                             onboardingState.createdCourseId = incompleteCourse.courseId;
                             onboardingState.existingCourseId = incompleteCourse.courseId;
+                            await linkAcademicSectionsForOnboarding(incompleteCourse.courseId);
                             console.log('Using existing incomplete course:', incompleteCourse.courseId);
                             // Continue to next step with existing course
                             nextStep();
@@ -330,6 +519,7 @@ async function handleCourseSetup(event) {
         // Create course and save to database
         const response = await createCourse(onboardingState.courseData);
         onboardingState.createdCourseId = response.courseId;
+        await linkAcademicSectionsForOnboarding(response.courseId);
         
         // Move to next step (guided unit setup)
         nextStep();
@@ -342,6 +532,52 @@ async function handleCourseSetup(event) {
         onboardingState.isSubmitting = false;
         submitButton.disabled = false;
         submitButton.textContent = 'Continue to Unit Setup';
+    }
+}
+
+async function linkAcademicSectionsForOnboarding(courseId) {
+    syncSelectedAcademicSectionsFromDOM();
+
+    const sectionIds = onboardingState.academicSync.selectedSectionIds || [];
+    const academicPeriod = onboardingState.academicSync.academicPeriod;
+
+    if (!courseId || !academicPeriod || sectionIds.length === 0) {
+        return null;
+    }
+
+    try {
+        setAcademicSyncStatus('Linking sections...', 'info');
+
+        const linkResponse = await authenticatedFetch(`/api/academic-sync/courses/${encodeURIComponent(courseId)}/link`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ academicPeriod, sectionIds })
+        });
+        const linkResult = await linkResponse.json();
+
+        if (!linkResponse.ok || !linkResult.success) {
+            throw new Error(linkResult.message || 'Failed to link sections');
+        }
+
+        const syncResponse = await authenticatedFetch(`/api/academic-sync/courses/${encodeURIComponent(courseId)}/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ academicPeriod, sectionIds })
+        });
+        const syncResult = await syncResponse.json();
+
+        if (!syncResponse.ok || !syncResult.success) {
+            throw new Error(syncResult.message || 'Failed to sync roster');
+        }
+
+        const summary = syncResult.data || {};
+        setAcademicSyncStatus(`Roster synced: ${summary.added || 0} added, ${summary.updated || 0} updated, ${summary.removed || 0} removed.`, 'success');
+        return syncResult;
+    } catch (error) {
+        console.error('Error linking academic sections:', error);
+        setAcademicSyncStatus(error.message || 'Could not sync class list.', 'error');
+        showNotification(`Course created, but class list sync failed: ${error.message}`, 'error');
+        return null;
     }
 }
 
@@ -707,6 +943,7 @@ async function loadAvailableCourses() {
         courseSelect.appendChild(customOption);
         
         console.log('Available courses loaded and deduplicated:', dedupeCourses(courses));
+        updateAcademicSyncVisibility();
         
     } catch (error) {
         console.error('Error loading available courses:', error);
@@ -720,5 +957,6 @@ async function loadAvailableCourses() {
             customOption.textContent = 'Enter custom course name...';
             courseSelect.appendChild(customOption);
         }
+        updateAcademicSyncVisibility();
     }
 }

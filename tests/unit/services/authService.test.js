@@ -100,6 +100,8 @@ describe('authService.createSessionUser', () => {
             baseRole: 'student',
             displayName: undefined,
             authProvider: undefined,
+            puid: undefined,
+            academicStudentId: undefined,
             preferences: { courseId: 'C1' },
             permissions: { systemAdmin: true },
         });
