@@ -198,6 +198,7 @@ function initializePassport(db) {
             try {
                 passport.use('ubcshib', new UBCShibStrategy(
                     {
+                        entryPoint: process.env.SAML_ENTRY_POINT,
                         issuer: ubcShibIssuer,
                         callbackUrl: ubcShibCallbackUrl,
                         cert: ubcShibCert,
@@ -206,7 +207,8 @@ function initializePassport(db) {
                         enableSLO: process.env.ENABLE_SLO !== 'false',
                         validateInResponseTo: process.env.SAML_VALIDATE_IN_RESPONSE_TO !== 'false',
                         acceptedClockSkewMs: parseInt(process.env.SAML_CLOCK_SKEW_MS) || 0,
-                        logoutUrl: process.env.SAML_LOGOUT_URL || process.env.SAML_ENTRY_POINT // Required for logout generation
+                        logoutUrl: process.env.SAML_LOGOUT_URL || process.env.SAML_ENTRY_POINT,
+                        metadataUrl: process.env.SAML_METADATA_URL
                     },
                     async (profile, done) => {
 

@@ -10,6 +10,47 @@ function getAcademicApi(req) {
     return req.app.locals.academicApi || getAcademicApiClient();
 }
 
+function getDisplayValue(value, preferredKeys = ['code', 'description', 'name', 'value', 'id']) {
+    if (value == null) return '';
+    if (typeof value === 'string' || typeof value === 'number') return String(value);
+    if (typeof value !== 'object') return '';
+
+    for (const key of preferredKeys) {
+        if (value[key] != null && typeof value[key] !== 'object') {
+            return String(value[key]);
+        }
+    }
+
+    return '';
+}
+
+function getSectionId(section = {}) {
+    return section.courseSectionId || section.id || section.sectionId || section.referenceId || '';
+}
+
+function normalizeSectionForPicker(section = {}) {
+    const subject = getDisplayValue(section.course?.courseSubject || section.courseSubject || section.subjectCode);
+    const number = getDisplayValue(section.course?.courseNumber || section.courseNumber);
+    const sectionNumber = getDisplayValue(section.sectionNumber || section.courseSectionNumber || section.number);
+    const title = getDisplayValue(section.course?.courseTitle || section.courseTitle || section.course?.title || section.title, ['description', 'name', 'value', 'code']);
+    const displayName = [subject, number, sectionNumber ? `Section ${sectionNumber}` : '']
+        .filter(Boolean)
+        .join(' ') || title || getSectionId(section) || 'Unnamed section';
+
+    return {
+        ...section,
+        picker: {
+            sectionId: getSectionId(section),
+            displayName,
+            meta: [
+                getSectionId(section),
+                getDisplayValue(section.sectionStatus || section.status, ['description', 'name', 'code', 'value']),
+                title
+            ].filter(Boolean).join(' · ')
+        }
+    };
+}
+
 async function requireInstructorCourse(req, res, courseId) {
     const db = req.app.locals.db;
     const user = req.user;
@@ -83,7 +124,7 @@ router.get('/instructor-sections', async (req, res) => {
 
         return res.json({
             success: true,
-            data: sections
+            data: (sections || []).map(normalizeSectionForPicker)
         });
     } catch (error) {
         console.error('Error fetching instructor sections:', error);

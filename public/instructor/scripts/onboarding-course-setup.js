@@ -68,7 +68,7 @@ function updateAcademicSyncVisibility() {
 
     if (!syncSection || !courseSelect) return;
 
-    const shouldShow = courseSelect.value === 'custom';
+    const shouldShow = courseSelect.value === '' || courseSelect.value === 'custom';
     syncSection.style.display = shouldShow ? 'block' : 'none';
 
     if (shouldShow && periodInput && !periodInput.value.trim()) {
@@ -82,14 +82,32 @@ function updateAcademicSyncVisibility() {
 }
 
 function getSectionId(section = {}) {
-    return section.courseSectionId || section.id || section.sectionId || section.referenceId || '';
+    return section.picker?.sectionId || section.courseSectionId || section.id || section.sectionId || section.referenceId || '';
+}
+
+function getDisplayValue(value, preferredKeys = ['code', 'description', 'name', 'value', 'id']) {
+    if (value == null) return '';
+    if (typeof value === 'string' || typeof value === 'number') return String(value);
+    if (typeof value !== 'object') return '';
+
+    for (const key of preferredKeys) {
+        if (value[key] != null && typeof value[key] !== 'object') {
+            return String(value[key]);
+        }
+    }
+
+    return '';
 }
 
 function getSectionLabel(section = {}) {
-    const subject = section.course?.courseSubject || section.courseSubject || section.subjectCode || '';
-    const number = section.course?.courseNumber || section.courseNumber || '';
-    const sectionNumber = section.sectionNumber || section.courseSectionNumber || section.number || '';
-    const title = section.course?.courseTitle || section.courseTitle || section.title || '';
+    if (section.picker?.displayName) {
+        return section.picker.displayName;
+    }
+
+    const subject = getDisplayValue(section.course?.courseSubject || section.courseSubject || section.subjectCode);
+    const number = getDisplayValue(section.course?.courseNumber || section.courseNumber);
+    const sectionNumber = getDisplayValue(section.sectionNumber || section.courseSectionNumber || section.number);
+    const title = getDisplayValue(section.course?.courseTitle || section.courseTitle || section.title, ['description', 'name', 'value', 'code']);
     const pieces = [subject, number, sectionNumber ? `Section ${sectionNumber}` : '']
         .filter(Boolean)
         .join(' ');
@@ -98,11 +116,50 @@ function getSectionLabel(section = {}) {
 }
 
 function getSectionMeta(section = {}) {
+    if (section.picker?.meta) {
+        return section.picker.meta;
+    }
+
     return [
         section.courseSectionId,
-        section.sectionStatus?.description || section.sectionStatus || section.status,
-        section.course?.courseTitle || section.courseTitle || section.title
+        getDisplayValue(section.sectionStatus || section.status, ['description', 'name', 'code', 'value']),
+        getDisplayValue(section.course?.courseTitle || section.courseTitle || section.title, ['description', 'name', 'value', 'code'])
     ].filter(Boolean).join(' · ');
+}
+
+function getAcademicCourseNameFromSection(section = {}) {
+    const subject = getDisplayValue(section.course?.courseSubject || section.courseSubject || section.subjectCode);
+    const number = getDisplayValue(section.course?.courseNumber || section.courseNumber);
+    const title = getDisplayValue(section.course?.courseTitle || section.courseTitle || section.course?.title || section.title, ['description', 'name', 'value', 'code']);
+    const code = [subject, number].filter(Boolean).join(' ');
+
+    return [code, title].filter(Boolean).join(' - ') || getSectionLabel(section);
+}
+
+function maybePopulateCourseNameFromAcademicSelection() {
+    const courseSelect = document.getElementById('course-select');
+    const customCourseInput = document.getElementById('custom-course-name');
+
+    if (!courseSelect || !customCourseInput || courseSelect.value !== 'custom') {
+        return;
+    }
+
+    if (customCourseInput.value.trim()) {
+        return;
+    }
+
+    const firstSelectedId = onboardingState.academicSync.selectedSectionIds[0];
+    if (!firstSelectedId) {
+        return;
+    }
+
+    const section = onboardingState.academicSync.sections.find(item => getSectionId(item) === firstSelectedId);
+    if (!section) {
+        return;
+    }
+
+    customCourseInput.value = getAcademicCourseNameFromSection(section);
+    onboardingState.courseData.course = customCourseInput.value;
 }
 
 function syncSelectedAcademicSectionsFromDOM() {
@@ -111,6 +168,7 @@ function syncSelectedAcademicSectionsFromDOM() {
         .filter(Boolean);
 
     onboardingState.academicSync.selectedSectionIds = checked;
+    maybePopulateCourseNameFromAcademicSelection();
 }
 
 function renderAcademicSections(sections = []) {
@@ -137,6 +195,7 @@ function renderAcademicSections(sections = []) {
         checkbox.type = 'checkbox';
         checkbox.name = 'academic-section';
         checkbox.value = sectionId;
+        checkbox.checked = sections.length === 1;
         checkbox.addEventListener('change', syncSelectedAcademicSectionsFromDOM);
 
         const text = document.createElement('span');
@@ -157,6 +216,7 @@ function renderAcademicSections(sections = []) {
 
     list.appendChild(fragment);
     list.hidden = list.children.length === 0;
+    syncSelectedAcademicSectionsFromDOM();
     setAcademicSyncStatus(`${list.children.length} section${list.children.length === 1 ? '' : 's'} found.`, 'success');
 }
 
@@ -214,6 +274,7 @@ function initializeAcademicSyncPicker() {
     if (periodInput) {
         periodInput.addEventListener('input', () => {
             onboardingState.academicSync.academicPeriod = periodInput.value.trim();
+            resetAcademicSectionSelection();
         });
     }
 

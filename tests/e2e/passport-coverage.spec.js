@@ -239,6 +239,7 @@ test.describe('passport SAML strategy', () => {
             disableRequestAcsUrl: false,
         });
         expect(defaults.ubcOptions).toMatchObject({
+            entryPoint: 'https://idp.test.local/sso',
             enableSLO: true,
             validateInResponseTo: false,
             acceptedClockSkewMs: 0,

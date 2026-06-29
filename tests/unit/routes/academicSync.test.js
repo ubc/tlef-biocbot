@@ -12,7 +12,16 @@ const instructor = {
 describe('academicSync routes', () => {
     test('fetches instructor sections through the injected academic API client', async () => {
         const academicApi = {
-            getInstructorSections: jest.fn().mockResolvedValue([{ courseSectionId: 'SEC-1' }])
+            getInstructorSections: jest.fn().mockResolvedValue([{
+                courseSectionId: 'SEC-1',
+                sectionNumber: '101',
+                sectionStatus: { code: 'Open', description: 'Open' },
+                course: {
+                    courseNumber: '110',
+                    title: 'Computation, Programs, and Programming',
+                    courseSubject: { code: 'CPSC', description: 'CPSC' }
+                }
+            }])
         };
         const app = makeRouteApp(academicSyncRouter, {
             db: memoryDb(),
@@ -27,7 +36,14 @@ describe('academicSync routes', () => {
         expect(academicApi.getInstructorSections).toHaveBeenCalledWith('puid-inst-1', 'AP-2024W1');
         expect(res.body).toMatchObject({
             success: true,
-            data: [{ courseSectionId: 'SEC-1' }]
+            data: [{
+                courseSectionId: 'SEC-1',
+                picker: {
+                    sectionId: 'SEC-1',
+                    displayName: 'CPSC 110 Section 101',
+                    meta: 'SEC-1 · Open · Computation, Programs, and Programming'
+                }
+            }]
         });
     });
 
