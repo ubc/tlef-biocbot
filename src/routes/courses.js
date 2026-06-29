@@ -18,9 +18,46 @@ const {
     validateApiKey
 } = require('../services/llmKeyStore');
 const { resolveCourseAi } = require('./llmKeyMiddleware');
+const { getAcademicApiClient } = require('../services/academicApi');
 
 // Middleware to parse JSON bodies
 router.use(express.json());
+
+/**
+ * True when the UBC academic record lists this user as an instructor of record
+ * for at least one section linked to the course. Such an instructor can join
+ * the BiocBot course directly, without an instructor course code — they're
+ * already a verified co-instructor of the underlying section (e.g. a colleague
+ * joining a pre-made, co-taught course).
+ *
+ * Fails closed: any missing data or academic-API error returns false, so the
+ * normal code-based join still applies.
+ */
+async function isVerifiedInstructorOfRecord(req, course, user) {
+    const sync = course && course.academicSync;
+    const linkedSectionIds = Array.isArray(sync && sync.sectionIds)
+        ? sync.sectionIds.filter(Boolean)
+        : [];
+    const academicPeriod = sync && sync.academicPeriod;
+
+    if (!user || !user.puid || !academicPeriod || linkedSectionIds.length === 0) {
+        return false;
+    }
+
+    try {
+        const api = req.app.locals.academicApi || getAcademicApiClient();
+        const sections = await api.getInstructorSections(user.puid, academicPeriod);
+        const taughtSectionIds = new Set(
+            (sections || [])
+                .map((s) => s.courseSectionId || s.id || s.sectionId)
+                .filter(Boolean)
+        );
+        return linkedSectionIds.some((id) => taughtSectionIds.has(id));
+    } catch (error) {
+        console.error('Instructor-of-record verification failed:', error.message);
+        return false;
+    }
+}
 
 function hasInstructorOrTAAccess(course, userId) {
     return course.instructorId === userId ||
@@ -2323,6 +2360,70 @@ router.get('/available/joinable', async (req, res) => {
 });
 
 /**
+ * GET /api/courses/:courseId/instructor-join-status
+ * Report whether the current instructor needs a course code to join.
+ *
+ * This is a UX hint only. The POST join route repeats every check before
+ * granting access.
+ */
+router.get('/:courseId/instructor-join-status', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({
+                success: false,
+                message: 'Database connection not available'
+            });
+        }
+
+        const user = req.user;
+        if (!user || user.role !== 'instructor') {
+            return res.status(403).json({
+                success: false,
+                message: 'Only instructors can check instructor join status'
+            });
+        }
+
+        const course = await db.collection('courses').findOne({
+            courseId: req.params.courseId,
+            status: { $ne: 'deleted' }
+        });
+        if (!course) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        const alreadyHasAccess = hasInstructorAccess(course, user.userId);
+        const canBypassCourseCodes = await userCanBypassCourseCodes(db, user);
+        const instructorOfRecord = !alreadyHasAccess && !canBypassCourseCodes
+            ? await isVerifiedInstructorOfRecord(req, course, user)
+            : false;
+
+        let reason = 'courseCode';
+        if (alreadyHasAccess) reason = 'alreadyInstructor';
+        else if (canBypassCourseCodes) reason = 'admin';
+        else if (instructorOfRecord) reason = 'instructorOfRecord';
+
+        return res.json({
+            success: true,
+            data: {
+                courseId: course.courseId,
+                requiresCode: !(alreadyHasAccess || canBypassCourseCodes || instructorOfRecord),
+                reason
+            }
+        });
+    } catch (error) {
+        console.error('Error checking instructor join status:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error while checking instructor join status'
+        });
+    }
+});
+
+/**
  * POST /api/courses/:courseId/join
  * Join a course (Student via code, TA direct join)
  */
@@ -2525,10 +2626,7 @@ router.post('/:courseId/instructors', async (req, res) => {
         }
 
         const canBypassCourseCodes = await userCanBypassCourseCodes(db, user);
-        const existingCourse = await db.collection('courses').findOne(
-            { courseId },
-            { projection: { instructorId: 1, instructors: 1 } }
-        );
+        const existingCourse = await db.collection('courses').findOne({ courseId });
 
         if (!existingCourse) {
             return res.status(404).json({
@@ -2538,8 +2636,12 @@ router.post('/:courseId/instructors', async (req, res) => {
         }
 
         const alreadyHasAccess = hasInstructorAccess(existingCourse, instructorId);
+        const instructorOfRecord = !canBypassCourseCodes && !alreadyHasAccess
+            ? await isVerifiedInstructorOfRecord(req, existingCourse, user)
+            : false;
+        const canJoinWithoutCode = canBypassCourseCodes || alreadyHasAccess || instructorOfRecord;
 
-        if (!canBypassCourseCodes && !alreadyHasAccess && !code) {
+        if (!canJoinWithoutCode && !code) {
             return res.status(400).json({
                 success: false,
                 message: 'Instructor course code is required'
@@ -2547,7 +2649,7 @@ router.post('/:courseId/instructors', async (req, res) => {
         }
 
         const result = await CourseModel.joinCourseAsInstructor(db, courseId, instructorId, code, {
-            skipCodeValidation: canBypassCourseCodes
+            skipCodeValidation: canJoinWithoutCode
         });
         
         if (!result.success) {

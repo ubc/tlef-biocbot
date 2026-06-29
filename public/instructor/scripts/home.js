@@ -5,6 +5,7 @@
 
 let anonymizeStudentsEnabled = false;
 let canBypassInstructorCourseCodes = false;
+let selectedCourseRequiresInstructorCode = true;
 // Pinned courseId during a setSelectedCourse cascade. Subroutines call
 // getSelectedCourseId() which would otherwise re-read localStorage on every
 // invocation — and a concurrent test (or another tab) can mutate that storage
@@ -2146,6 +2147,7 @@ function resetJoinCourseSelection() {
     const joinCourseSelectDropdown = document.getElementById('join-course-select-dropdown');
     const codeEntryGroup = document.getElementById('instructor-code-entry-group');
     const codeInput = document.getElementById('instructor-course-code-input');
+    selectedCourseRequiresInstructorCode = !canBypassInstructorCourseCodes;
 
     if (selectedCourseDetails) {
         selectedCourseDetails.style.display = 'none';
@@ -2177,7 +2179,7 @@ function resetJoinCourseSelection() {
 /**
  * Handle join-course dropdown change
  */
-function handleJoinCourseSelectionChange(event) {
+async function handleJoinCourseSelectionChange(event) {
     const courseId = event.target.value;
     const selectedCourseDetails = document.getElementById('selected-course-details');
     const joinCourseBtn = document.getElementById('join-course-btn');
@@ -2194,6 +2196,7 @@ function handleJoinCourseSelectionChange(event) {
 
     const selectedOption = event.target.options[event.target.selectedIndex];
     const courseName = selectedOption ? selectedOption.textContent : courseId;
+    selectedCourseRequiresInstructorCode = !canBypassInstructorCourseCodes;
 
     if (selectedCourseDetails) {
         selectedCourseDetails.style.display = 'block';
@@ -2224,6 +2227,38 @@ function handleJoinCourseSelectionChange(event) {
         joinCourseBtn.dataset.courseId = courseId;
         joinCourseBtn.dataset.courseName = courseName;
     }
+
+    if (!canBypassInstructorCourseCodes) {
+        if (joinCourseBtn) joinCourseBtn.disabled = true;
+        try {
+            const response = await fetch(`/api/courses/${encodeURIComponent(courseId)}/instructor-join-status`, {
+                credentials: 'include'
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || 'Failed to check instructor access');
+            }
+            if (joinCourseBtn?.dataset.courseId !== courseId) return;
+
+            selectedCourseRequiresInstructorCode = result.data?.requiresCode !== false;
+            if (joinCourseDescription) {
+                joinCourseDescription.textContent = selectedCourseRequiresInstructorCode
+                    ? 'Enter the instructor course code to join this course.'
+                    : (result.data?.reason === 'instructorOfRecord'
+                        ? 'Another instructor has created this course shell. Since you are an instructor of record, you can join it without an instructor code.'
+                        : 'No instructor code is required for you to join this course.');
+            }
+            if (codeEntryGroup) {
+                codeEntryGroup.style.display = selectedCourseRequiresInstructorCode ? 'block' : 'none';
+            }
+        } catch (error) {
+            console.error('Error checking instructor-of-record access:', error);
+            selectedCourseRequiresInstructorCode = true;
+            if (codeEntryGroup) codeEntryGroup.style.display = 'block';
+        } finally {
+            if (joinCourseBtn?.dataset.courseId === courseId) joinCourseBtn.disabled = false;
+        }
+    }
 }
 
 /**
@@ -2243,7 +2278,7 @@ async function handleJoinCourse() {
         return;
     }
 
-    if (!canBypassInstructorCourseCodes && !code) {
+    if (selectedCourseRequiresInstructorCode && !code) {
         setJoinCourseCodeFeedback('Instructor course code is required to join this course.');
         return;
     }

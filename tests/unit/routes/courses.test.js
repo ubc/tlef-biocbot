@@ -21,7 +21,7 @@ const { memoryDb } = require('../helpers/memory-db');
 const { makeRouteApp, request } = require('../helpers/route-app');
 const coursesRouter = require('../../../src/routes/courses');
 
-const instructor = { userId: 'i1', role: 'instructor' };
+const instructor = { userId: 'i1', role: 'instructor', puid: 'PUID-I1' };
 const otherInstructor = { userId: 'i2', role: 'instructor' };
 const ta = { userId: 't1', role: 'ta' };
 const student = { userId: 's1', role: 'student' };
@@ -258,6 +258,51 @@ describe('joining courses', () => {
         expect(res.status).toBe(200);
         expect(res.body.data).toMatchObject({ courseId: 'C1', instructorId: 'i1', alreadyJoined: false });
         expect((await db.collection('courses').findOne({ courseId: 'C1' })).instructors).toContain('i1');
+    });
+
+    test('instructor of record joins an academically linked course without a code', async () => {
+        const db = memoryDb({ courses: [{
+            courseId: 'C1',
+            instructorId: 'owner',
+            instructorCourseCode: 'INST12',
+            academicSync: { academicPeriod: 'AP-2026W1', sectionIds: ['SEC-BIOC302-101'] }
+        }] });
+        const academicApi = {
+            getInstructorSections: jest.fn().mockResolvedValue([
+                { courseSectionId: 'SEC-BIOC302-101' }
+            ])
+        };
+
+        const status = await request(app({ db, user: instructor, locals: { academicApi } }))
+            .get('/C1/instructor-join-status');
+        expect(status.status).toBe(200);
+        expect(status.body.data).toMatchObject({ requiresCode: false, reason: 'instructorOfRecord' });
+
+        const joined = await request(app({ db, user: instructor, locals: { academicApi } }))
+            .post('/C1/instructors').send({ instructorId: 'i1' });
+        expect(joined.status).toBe(200);
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).instructors).toContain('i1');
+        expect(academicApi.getInstructorSections).toHaveBeenCalledWith('PUID-I1', 'AP-2026W1');
+    });
+
+    test('academic verification fails closed and still requires the instructor code', async () => {
+        const db = memoryDb({ courses: [{
+            courseId: 'C1',
+            instructorId: 'owner',
+            instructorCourseCode: 'INST12',
+            academicSync: { academicPeriod: 'AP-2026W1', sectionIds: ['SEC-BIOC302-101'] }
+        }] });
+        const academicApi = { getInstructorSections: jest.fn().mockRejectedValue(new Error('API unavailable')) };
+
+        const status = await request(app({ db, user: instructor, locals: { academicApi } }))
+            .get('/C1/instructor-join-status');
+        expect(status.status).toBe(200);
+        expect(status.body.data).toMatchObject({ requiresCode: true, reason: 'courseCode' });
+
+        const joined = await request(app({ db, user: instructor, locals: { academicApi } }))
+            .post('/C1/instructors').send({ instructorId: 'i1' });
+        expect(joined.status).toBe(400);
+        expect(joined.body.message).toMatch(/course code is required/i);
     });
 });
 

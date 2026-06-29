@@ -31,6 +31,8 @@ let currentWeek = null;
 let currentContentType = null;
 
 let canBypassOnboardingInstructorCourseCodes = false;
+let onboardingSelectedCourseRequiresCode = true;
+let onboardingSelectedCourseJoinReason = 'courseCode';
 
 // Assessment Questions Functionality
 // Global variables for assessment questions

@@ -36,6 +36,44 @@ function applyJoinCourseCodePermission() {
     }
 }
 
+async function refreshOnboardingInstructorJoinStatus(courseId) {
+    const codeGroup = document.getElementById('instructor-course-code-group');
+    const codeHelp = document.getElementById('instructor-course-code-help');
+    const joinButton = document.getElementById('join-course-btn');
+
+    onboardingSelectedCourseRequiresCode = !canBypassOnboardingInstructorCourseCodes;
+    onboardingSelectedCourseJoinReason = canBypassOnboardingInstructorCourseCodes ? 'admin' : 'courseCode';
+    if (canBypassOnboardingInstructorCourseCodes || !courseId) return;
+
+    if (joinButton) joinButton.disabled = true;
+    try {
+        const response = await authenticatedFetch(`/api/courses/${encodeURIComponent(courseId)}/instructor-join-status`);
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to check instructor access');
+        }
+        if (onboardingState.existingCourseId !== courseId) return;
+
+        onboardingSelectedCourseRequiresCode = result.data?.requiresCode !== false;
+        onboardingSelectedCourseJoinReason = result.data?.reason || 'courseCode';
+        if (codeGroup) codeGroup.style.display = onboardingSelectedCourseRequiresCode ? 'block' : 'none';
+        if (codeHelp && !onboardingSelectedCourseRequiresCode) {
+            codeHelp.textContent = result.data?.reason === 'instructorOfRecord'
+                ? 'Your teaching assignment was verified, so no instructor code is required.'
+                : 'No instructor code is required for you to join this course.';
+        }
+        populateSelectedCourseDetails(courseId);
+    } catch (error) {
+        console.error('Error checking instructor-of-record access:', error);
+        // Fail closed in the UI as well: keep the normal code requirement.
+        onboardingSelectedCourseRequiresCode = true;
+        onboardingSelectedCourseJoinReason = 'courseCode';
+        if (codeGroup) codeGroup.style.display = 'block';
+    } finally {
+        if (joinButton && onboardingState.existingCourseId === courseId) joinButton.disabled = false;
+    }
+}
+
 // Best-guess id for the current session, used only to preselect an option
 // in the populated dropdown — never sent as a fabricated value on its own.
 function getPreferredAcademicPeriodId() {
@@ -393,6 +431,8 @@ function handleCourseSelection(event) {
 
     if (createMode) {
         onboardingState.existingCourseId = null;
+        onboardingSelectedCourseRequiresCode = true;
+        onboardingSelectedCourseJoinReason = 'courseCode';
         if (codeGroup) codeGroup.style.display = 'none';
         if (codeInput) codeInput.value = '';
         // Keep any name already typed/autofilled; otherwise leave it for the
@@ -401,6 +441,8 @@ function handleCourseSelection(event) {
         onboardingState.courseData.course = customName || null;
         updateAcademicSyncVisibility();
     } else {
+        onboardingSelectedCourseRequiresCode = !canBypassOnboardingInstructorCourseCodes;
+        onboardingSelectedCourseJoinReason = canBypassOnboardingInstructorCourseCodes ? 'admin' : 'courseCode';
         if (codeGroup) {
             codeGroup.style.display = canBypassOnboardingInstructorCourseCodes ? 'none' : 'block';
         }
@@ -409,6 +451,7 @@ function handleCourseSelection(event) {
         // Store course data and populate course details (also hides Class List Sync)
         onboardingState.courseData.course = courseSelect.value;
         populateSelectedCourseDetails(courseSelect.value);
+        refreshOnboardingInstructorJoinStatus(courseSelect.value);
     }
 }
 
@@ -441,9 +484,11 @@ function populateSelectedCourseDetails(courseId) {
             <div class="course-info">
                 <h4>${courseName}</h4>
                 <p><strong>Course ID:</strong> ${courseId}</p>
-                <p>${canBypassOnboardingInstructorCourseCodes
-                    ? 'You have admin access, so you can join this course without entering an instructor code.'
-                    : 'Enter the instructor course code to join this course.'}</p>
+                <p>${onboardingSelectedCourseJoinReason === 'instructorOfRecord'
+                    ? 'Another instructor has created this course shell. Since you are an instructor of record, you can join it without an instructor code.'
+                    : (!onboardingSelectedCourseRequiresCode
+                        ? 'You have admin access, so you can join this course without entering an instructor code.'
+                        : 'Enter the instructor course code to join this course.')}</p>
             </div>
         `;
         
@@ -507,7 +552,7 @@ async function joinExistingCourse() {
 
     const codeInput = document.getElementById('instructor-course-code');
     const code = codeInput ? codeInput.value.trim().toUpperCase() : '';
-    if (!canBypassOnboardingInstructorCourseCodes && !code) {
+    if (onboardingSelectedCourseRequiresCode && !code) {
         setOnboardingJoinCourseCodeFeedback('Instructor course code is required to join this course.');
         return;
     }
