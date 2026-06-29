@@ -336,10 +336,15 @@ describe('Course.createCourseFromOnboarding', () => {
         expect(res).toMatchObject({ success: true, created: false, modifiedCount: 0, message: 'Course already exists', totalUnits: 9 });
     });
 
-    test('does not recreate when the instructor already owns a course', async () => {
+    test('creates an additional course even when the instructor already owns one', async () => {
+        // An instructor can set up more than one course (e.g. another of their
+        // sections); owning a different course must not block creation.
         const db = memoryDb({ courses: [{ courseId: 'OTHER', instructorId: 'i1' }] });
         const res = await Course.createCourseFromOnboarding(db, onboarding);
-        expect(res).toMatchObject({ success: true, created: false, courseId: 'OTHER' });
+        expect(res).toMatchObject({ success: true, created: true, courseId: 'BIOC401', totalUnits: 6 });
+
+        const stored = await db.collection('courses').findOne({ courseId: 'BIOC401' });
+        expect(stored).not.toBeNull();
     });
 });
 

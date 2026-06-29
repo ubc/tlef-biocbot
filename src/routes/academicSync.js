@@ -51,6 +51,25 @@ function normalizeSectionForPicker(section = {}) {
     };
 }
 
+// Map of academic section id -> the first non-deleted course linked to it, so we
+// can tell which sections already have a BiocBot course (one course per section).
+async function getLinkedSectionCourseMap(db) {
+    const courses = await db.collection('courses').find(
+        { status: { $ne: 'deleted' }, 'academicSync.sectionIds.0': { $exists: true } },
+        { projection: { courseId: 1, 'academicSync.sectionIds': 1 } }
+    ).toArray();
+
+    const map = new Map();
+    for (const course of courses) {
+        for (const sectionId of (course.academicSync?.sectionIds || [])) {
+            if (!map.has(sectionId)) {
+                map.set(sectionId, course.courseId);
+            }
+        }
+    }
+    return map;
+}
+
 async function requireInstructorCourse(req, res, courseId) {
     const db = req.app.locals.db;
     const user = req.user;
@@ -122,9 +141,20 @@ router.get('/instructor-sections', async (req, res) => {
 
         const sections = await getAcademicApi(req).getInstructorSections(user.puid, academicPeriod);
 
+        // Flag sections that already have a BiocBot course linked to them, so the
+        // picker can mark them "Already set up" and prevent creating duplicates.
+        const db = req.app.locals.db;
+        const linkedSectionCourses = db ? await getLinkedSectionCourseMap(db) : new Map();
+
         return res.json({
             success: true,
-            data: (sections || []).map(normalizeSectionForPicker)
+            data: (sections || []).map((section) => {
+                const normalized = normalizeSectionForPicker(section);
+                const linkedCourseId = linkedSectionCourses.get(normalized.picker.sectionId) || null;
+                normalized.picker.alreadySetUp = !!linkedCourseId;
+                normalized.picker.linkedCourseId = linkedCourseId;
+                return normalized;
+            })
         });
     } catch (error) {
         console.error('Error fetching instructor sections:', error);

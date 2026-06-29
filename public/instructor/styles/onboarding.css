@@ -281,6 +281,16 @@
   border-color: #4caf50;
 }
 
+.academic-section-option.is-disabled {
+  opacity: 0.6;
+  background: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.academic-section-option.is-disabled:hover {
+  border-color: #e0e0e0;
+}
+
 .academic-section-option input {
   margin-top: 0.2rem;
 }

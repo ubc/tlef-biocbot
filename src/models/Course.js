@@ -1121,14 +1121,11 @@ async function createCourseFromOnboarding(db, onboardingData) {
     } = onboardingData;
     
     try {
-        // Check if course already exists for this instructor
-        const existingCourse = await collection.findOne({ 
-            $or: [
-                { courseId: onboardingData.courseId },
-                { instructorId: onboardingData.instructorId }
-            ]
-        });
-        
+        // Only treat it as "already exists" when this exact course id is present.
+        // Matching by instructorId would block an instructor from ever creating a
+        // second course (e.g. setting up another of their sections).
+        const existingCourse = await collection.findOne({ courseId: onboardingData.courseId });
+
         if (existingCourse) {
             console.log(`Course already exists for instructor ${instructorId}: ${existingCourse.courseId}`);
             return {

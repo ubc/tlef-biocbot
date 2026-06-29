@@ -262,7 +262,7 @@ function showCourseSelection(courses) {
             <p style="margin: 0 0 15px 0; color: #666;">Choose the course you want to access:</p>
             <select id="course-select" aria-label="Select your course" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
                 <option value="">Choose a course...</option>
-                ${courses.map(course => `<option value="${course.courseId}" data-enrolled="${course.isEnrolled}">${course.courseName}</option>`).join('')}
+                ${courses.map(course => `<option value="${course.courseId}">${course.courseName}</option>`).join('')}
             </select>
         </div>
     `;
@@ -285,52 +285,20 @@ function showCourseSelection(courses) {
     const courseSelect = document.getElementById('course-select');
     if (courseSelect) {
         courseSelect.addEventListener('change', async function() {
-            const selectedOption = this.options[this.selectedIndex];
             const selectedCourseId = this.value;
-            const isEnrolled = selectedOption.getAttribute('data-enrolled') === 'true';
 
             if (selectedCourseId) {
-                console.log('Course selected:', selectedCourseId, 'Enrolled:', isEnrolled);
-                
-                if (isEnrolled) {
-                    // Already enrolled, load normally
-                    await loadCourseData(selectedCourseId, true);
-                    // Hide the course selection after selection
-                    const courseSelectionWrapper = document.getElementById('course-selection-wrapper');
-                    if (courseSelectionWrapper) {
-                        courseSelectionWrapper.style.display = 'none';
-                    }
-                } else {
-                    // Not enrolled, prompt for code
-                    const code = prompt("Please enter the Course Code provided by your instructor:");
-                    if (code) {
-                        try {
-                            const response = await fetch(`/api/courses/${selectedCourseId}/join`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ code })
-                            });
-                            
-                            const result = await response.json();
-                            if (result.success) {
-                                alert('Successfully joined the course!');
-                                await loadCourseData(selectedCourseId, true);
-                                const courseSelectionWrapper = document.getElementById('course-selection-wrapper');
-                                if (courseSelectionWrapper) {
-                                    courseSelectionWrapper.style.display = 'none';
-                                }
-                            } else {
-                                alert(result.message || 'Failed to join course. Please check the code.');
-                                this.value = ""; // Reset dropdown
-                            }
-                        } catch (err) {
-                            console.error('Error joining course:', err);
-                            alert('Error joining course. Please try again.');
-                            this.value = ""; // Reset dropdown
-                        }
-                    } else {
-                        this.value = ""; // Reset dropdown if cancelled
-                    }
+                console.log('Course selected:', selectedCourseId);
+
+                // The selector only lists courses the student is enrolled in
+                // (enrollment comes from the academic roster sync), so we can
+                // load directly without any join/enrollment-code step.
+                await loadCourseData(selectedCourseId, true);
+
+                // Hide the course selection after selection
+                const courseSelectionWrapper = document.getElementById('course-selection-wrapper');
+                if (courseSelectionWrapper) {
+                    courseSelectionWrapper.style.display = 'none';
                 }
             }
         });

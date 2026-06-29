@@ -2245,12 +2245,19 @@ router.get('/available/all', async (req, res) => {
                     : false
             };
         }));
-        
-        console.log(`Retrieved ${transformedCourses.length} available courses`);
-        
+
+        // Students only get courses they're enrolled in (via the academic roster
+        // sync or an explicit enrollment). Non-enrolled courses are not exposed,
+        // so the selector never offers a course the student can't enter.
+        const responseCourses = (user && user.role === 'student')
+            ? transformedCourses.filter(course => course.isEnrolled)
+            : transformedCourses;
+
+        console.log(`Retrieved ${responseCourses.length} available courses`);
+
         res.json({
             success: true,
-            data: transformedCourses
+            data: responseCourses
         });
         
     } catch (error) {
@@ -2538,7 +2545,7 @@ router.post('/:courseId/instructors', async (req, res) => {
                 message: 'Instructor course code is required'
             });
         }
-        
+
         const result = await CourseModel.joinCourseAsInstructor(db, courseId, instructorId, code, {
             skipCodeValidation: canBypassCourseCodes
         });

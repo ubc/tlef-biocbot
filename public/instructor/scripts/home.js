@@ -2237,7 +2237,7 @@ async function handleJoinCourse() {
     const courseId = joinCourseBtn.dataset.courseId;
     const courseName = joinCourseBtn.dataset.courseName;
     const code = instructorCodeInput ? instructorCodeInput.value.trim().toUpperCase() : '';
-    
+
     if (!courseId) {
         showErrorMessage('No course selected');
         return;
@@ -2286,7 +2286,7 @@ async function handleJoinCourse() {
             loadAvailableCourses(),
             loadJoinableCourses()
         ]);
-        
+
         // Mark instructor's onboarding as complete since they joined an existing course
         if (typeof markInstructorOnboardingComplete === 'function') {
             await markInstructorOnboardingComplete(courseId);

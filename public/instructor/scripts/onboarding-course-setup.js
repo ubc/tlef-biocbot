@@ -36,8 +36,60 @@ function applyJoinCourseCodePermission() {
     }
 }
 
-function getDefaultAcademicPeriod() {
+// Best-guess id for the current session, used only to preselect an option
+// in the populated dropdown — never sent as a fabricated value on its own.
+function getPreferredAcademicPeriodId() {
     return `AP-${new Date().getFullYear()}W1`;
+}
+
+function getPeriodId(period = {}) {
+    return period.academicPeriod?.academicPeriodId || period.academicPeriodId || '';
+}
+
+function getPeriodLabel(period = {}) {
+    const id = getPeriodId(period);
+    const name = period.academicPeriod?.academicPeriodName || period.academicPeriodName || '';
+    return [name, id && name ? `(${id})` : id].filter(Boolean).join(' ') || id || 'Unknown session';
+}
+
+async function loadAcademicPeriods() {
+    const select = document.getElementById('academic-period-input');
+    if (!select || select.dataset.loaded === 'true') return;
+
+    try {
+        const response = await authenticatedFetch('/api/academic-sync/academic-periods');
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to load sessions');
+        }
+
+        const periods = (Array.isArray(result.data) ? result.data : [])
+            .filter(period => getPeriodId(period));
+
+        if (!periods.length) {
+            select.innerHTML = '<option value="">No sessions available</option>';
+            return;
+        }
+
+        const preferredId = getPreferredAcademicPeriodId();
+        select.innerHTML = '';
+        periods.forEach(period => {
+            const option = document.createElement('option');
+            option.value = getPeriodId(period);
+            option.textContent = getPeriodLabel(period);
+            select.appendChild(option);
+        });
+
+        // Preselect the current session if present, otherwise the latest period.
+        const hasPreferred = periods.some(period => getPeriodId(period) === preferredId);
+        select.value = hasPreferred ? preferredId : getPeriodId(periods[periods.length - 1]);
+        select.dataset.loaded = 'true';
+        onboardingState.academicSync.academicPeriod = select.value;
+    } catch (error) {
+        console.error('Error loading academic periods:', error);
+        select.innerHTML = '<option value="">Could not load sessions</option>';
+    }
 }
 
 function setAcademicSyncStatus(message, type = 'info') {
@@ -64,19 +116,15 @@ function resetAcademicSectionSelection() {
 function updateAcademicSyncVisibility() {
     const courseSelect = document.getElementById('course-select');
     const syncSection = document.getElementById('academic-sync-section');
-    const periodInput = document.getElementById('academic-period-input');
 
     if (!syncSection || !courseSelect) return;
 
-    const shouldShow = courseSelect.value === '' || courseSelect.value === 'custom';
+    const shouldShow = isCreateModeSelection(courseSelect.value);
     syncSection.style.display = shouldShow ? 'block' : 'none';
 
-    if (shouldShow && periodInput && !periodInput.value.trim()) {
-        periodInput.value = getDefaultAcademicPeriod();
-        onboardingState.academicSync.academicPeriod = periodInput.value.trim();
-    }
-
-    if (!shouldShow) {
+    if (shouldShow) {
+        loadAcademicPeriods();
+    } else {
         resetAcademicSectionSelection();
     }
 }
@@ -140,11 +188,15 @@ function maybePopulateCourseNameFromAcademicSelection() {
     const courseSelect = document.getElementById('course-select');
     const customCourseInput = document.getElementById('custom-course-name');
 
-    if (!courseSelect || !customCourseInput || courseSelect.value !== 'custom') {
+    if (!courseSelect || !customCourseInput || !isCreateModeSelection(courseSelect.value)) {
         return;
     }
 
-    if (customCourseInput.value.trim()) {
+    // Don't clobber a name the instructor typed by hand. We only overwrite when
+    // the field is empty or still holds a value we previously autofilled, so
+    // switching the selected section keeps the name in sync.
+    const wasAutofilled = customCourseInput.dataset.autofilled === 'true';
+    if (customCourseInput.value.trim() && !wasAutofilled) {
         return;
     }
 
@@ -159,7 +211,18 @@ function maybePopulateCourseNameFromAcademicSelection() {
     }
 
     customCourseInput.value = getAcademicCourseNameFromSection(section);
+    customCourseInput.dataset.autofilled = 'true';
     onboardingState.courseData.course = customCourseInput.value;
+}
+
+// Once the instructor engages the create flow (picks a section or types a name),
+// reflect that in the course dropdown so it reads "create a new course" and the
+// required-field validation passes instead of demanding a dropdown pick.
+function reflectCreateModeInCourseSelect() {
+    const courseSelect = document.getElementById('course-select');
+    if (courseSelect && courseSelect.value === '') {
+        courseSelect.value = 'custom';
+    }
 }
 
 function syncSelectedAcademicSectionsFromDOM() {
@@ -168,6 +231,9 @@ function syncSelectedAcademicSectionsFromDOM() {
         .filter(Boolean);
 
     onboardingState.academicSync.selectedSectionIds = checked;
+    if (checked.length) {
+        reflectCreateModeInCourseSelect();
+    }
     maybePopulateCourseNameFromAcademicSelection();
 }
 
@@ -183,20 +249,27 @@ function renderAcademicSections(sections = []) {
         return;
     }
 
+    // Sections that already have a BiocBot course can't be set up again.
+    const selectableSections = sections.filter(section => !section.picker?.alreadySetUp);
+
     const fragment = document.createDocumentFragment();
     sections.forEach(section => {
         const sectionId = getSectionId(section);
         if (!sectionId) return;
 
-        const label = document.createElement('label');
-        label.className = 'academic-section-option';
+        const alreadySetUp = section.picker?.alreadySetUp === true;
 
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.name = 'academic-section';
-        checkbox.value = sectionId;
-        checkbox.checked = sections.length === 1;
-        checkbox.addEventListener('change', syncSelectedAcademicSectionsFromDOM);
+        const label = document.createElement('label');
+        label.className = alreadySetUp ? 'academic-section-option is-disabled' : 'academic-section-option';
+
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'academic-section';
+        radio.value = sectionId;
+        radio.disabled = alreadySetUp;
+        // Auto-select only when there's exactly one section you can actually set up.
+        radio.checked = !alreadySetUp && selectableSections.length === 1;
+        radio.addEventListener('change', syncSelectedAcademicSectionsFromDOM);
 
         const text = document.createElement('span');
         text.className = 'academic-section-text';
@@ -205,11 +278,13 @@ function renderAcademicSections(sections = []) {
         title.textContent = getSectionLabel(section);
 
         const meta = document.createElement('small');
-        meta.textContent = getSectionMeta(section);
+        meta.textContent = alreadySetUp
+            ? `${getSectionMeta(section)} · Already set up`
+            : getSectionMeta(section);
 
         text.appendChild(title);
         text.appendChild(meta);
-        label.appendChild(checkbox);
+        label.appendChild(radio);
         label.appendChild(text);
         fragment.appendChild(label);
     });
@@ -217,7 +292,10 @@ function renderAcademicSections(sections = []) {
     list.appendChild(fragment);
     list.hidden = list.children.length === 0;
     syncSelectedAcademicSectionsFromDOM();
-    setAcademicSyncStatus(`${list.children.length} section${list.children.length === 1 ? '' : 's'} found.`, 'success');
+
+    const alreadyCount = sections.length - selectableSections.length;
+    const baseMsg = `${sections.length} section${sections.length === 1 ? '' : 's'} found.`;
+    setAcademicSyncStatus(alreadyCount ? `${baseMsg} ${alreadyCount} already set up.` : baseMsg, 'success');
 }
 
 async function loadAcademicSectionsForOnboarding() {
@@ -264,16 +342,13 @@ async function loadAcademicSectionsForOnboarding() {
 
 function initializeAcademicSyncPicker() {
     const button = document.getElementById('load-academic-sections-btn');
-    const periodInput = document.getElementById('academic-period-input');
+    const periodSelect = document.getElementById('academic-period-input');
 
-    if (periodInput && !periodInput.value.trim()) {
-        periodInput.value = getDefaultAcademicPeriod();
-        onboardingState.academicSync.academicPeriod = periodInput.value.trim();
-    }
+    loadAcademicPeriods();
 
-    if (periodInput) {
-        periodInput.addEventListener('input', () => {
-            onboardingState.academicSync.academicPeriod = periodInput.value.trim();
+    if (periodSelect) {
+        periodSelect.addEventListener('change', () => {
+            onboardingState.academicSync.academicPeriod = periodSelect.value.trim();
             resetAcademicSectionSelection();
         });
     }
@@ -286,9 +361,17 @@ function initializeAcademicSyncPicker() {
 /**
  * Handle course selection change
  */
+// A blank ('') or 'custom' selection both mean "create a new course" — the
+// instructor either types a name or finds their section via Class List Sync.
+// Any other value is an existing course id, which means "join".
+function isCreateModeSelection(value) {
+    return value === '' || value === 'custom';
+}
+
 function handleCourseSelection(event) {
     const courseSelect = event.target;
     const customCourseSection = document.getElementById('custom-course-section');
+    const apiKeySection = document.getElementById('course-api-key-section');
     const courseStructureSection = document.getElementById('course-structure-section');
     const joinCourseSection = document.getElementById('join-course-section');
     const continueBtn = document.getElementById('continue-btn');
@@ -296,46 +379,34 @@ function handleCourseSelection(event) {
     const codeGroup = document.getElementById('instructor-course-code-group');
     const codeInput = document.getElementById('instructor-course-code');
     clearOnboardingJoinCourseCodeFeedback();
-    
-    if (courseSelect.value === 'custom') {
-        // Show custom course input and course structure
-        customCourseSection.style.display = 'block';
-        courseStructureSection.style.display = 'block';
-        joinCourseSection.style.display = 'none';
-        continueBtn.style.display = 'inline-block';
-        joinCourseBtn.style.display = 'none';
-        
-        // Clear course data
-        onboardingState.courseData.course = null;
+
+    const createMode = isCreateModeSelection(courseSelect.value);
+
+    // Course-name field, Class List Sync, API key and structure are all part of
+    // the "create a new course" flow; the join panel replaces them otherwise.
+    customCourseSection.style.display = createMode ? 'block' : 'none';
+    if (apiKeySection) apiKeySection.style.display = createMode ? 'block' : 'none';
+    courseStructureSection.style.display = createMode ? 'block' : 'none';
+    joinCourseSection.style.display = createMode ? 'none' : 'block';
+    continueBtn.style.display = createMode ? 'inline-block' : 'none';
+    joinCourseBtn.style.display = createMode ? 'none' : 'inline-block';
+
+    if (createMode) {
         onboardingState.existingCourseId = null;
         if (codeGroup) codeGroup.style.display = 'none';
         if (codeInput) codeInput.value = '';
-    } else if (courseSelect.value === '') {
-        // No course selected
-        customCourseSection.style.display = 'none';
-        courseStructureSection.style.display = 'block';
-        joinCourseSection.style.display = 'none';
-        continueBtn.style.display = 'inline-block';
-        joinCourseBtn.style.display = 'none';
-        
-        // Clear course data
-        onboardingState.courseData.course = null;
-        onboardingState.existingCourseId = null;
-        if (codeGroup) codeGroup.style.display = 'none';
-        if (codeInput) codeInput.value = '';
+        // Keep any name already typed/autofilled; otherwise leave it for the
+        // Class List Sync picker to populate.
+        const customName = document.getElementById('custom-course-name').value.trim();
+        onboardingState.courseData.course = customName || null;
+        updateAcademicSyncVisibility();
     } else {
-        // Existing course selected
-        customCourseSection.style.display = 'none';
-        courseStructureSection.style.display = 'none';
-        joinCourseSection.style.display = 'block';
-        continueBtn.style.display = 'none';
-        joinCourseBtn.style.display = 'inline-block';
         if (codeGroup) {
             codeGroup.style.display = canBypassOnboardingInstructorCourseCodes ? 'none' : 'block';
         }
         if (codeInput) codeInput.value = '';
-        
-        // Store course data and populate course details
+
+        // Store course data and populate course details (also hides Class List Sync)
         onboardingState.courseData.course = courseSelect.value;
         populateSelectedCourseDetails(courseSelect.value);
     }
@@ -345,7 +416,13 @@ function handleCourseSelection(event) {
  * Handle custom course name input
  */
 function handleCustomCourseInput(event) {
+    // The instructor typed their own name, so stop auto-syncing it to the
+    // selected section.
+    event.target.dataset.autofilled = 'false';
     onboardingState.courseData.course = event.target.value;
+    if (event.target.value.trim()) {
+        reflectCreateModeInCourseSelect();
+    }
 }
 
 /**
@@ -518,8 +595,8 @@ async function handleCourseSetup(event) {
     const lecturesPerWeek = parseInt(formData.get('lecturesPerWeek'));
     
     onboardingState.courseData = {
-        course: formData.get('course') === 'custom' ? 
-            document.getElementById('custom-course-name').value : 
+        course: isCreateModeSelection(formData.get('course')) ?
+            document.getElementById('custom-course-name').value :
             formData.get('course'),
         apiKey: String(formData.get('apiKey') || '').trim(),
         weeks: weeks,
@@ -533,12 +610,12 @@ async function handleCourseSetup(event) {
     onboardingState.isSubmitting = true;
     submitButton.disabled = true;
     submitButton.textContent = 'Creating course...';
-    
+
     try {
-        // Only check for existing courses if not creating a custom course
+        // Only check for existing courses if not creating a new course
         const courseSelect = document.getElementById('course-select');
-        const isCustomCourse = courseSelect && courseSelect.value === 'custom';
-        
+        const isCustomCourse = courseSelect && isCreateModeSelection(courseSelect.value);
+
         if (!isCustomCourse) {
             // Check if course already exists (either for this instructor or globally)
             const existingCourse = await checkExistingCourse();
@@ -883,24 +960,21 @@ function validateCourseSetup() {
     const apiKeyInput = document.getElementById('course-api-key');
     
     let isValid = true;
-    
-    // Validate course selection
-    if (!courseSelect.value) {
-        showFieldError(courseSelect, 'Please select a course');
-        isValid = false;
-    }
-    
-    // Validate custom course name if selected
-    if (courseSelect.value === 'custom') {
+
+    const createMode = isCreateModeSelection(courseSelect.value);
+
+    // In create mode the course name comes from the custom-name field (typed or
+    // autofilled from a selected section); require it instead of a dropdown pick.
+    if (createMode) {
         const customName = document.getElementById('custom-course-name').value.trim();
         if (!customName) {
-            showFieldError(document.getElementById('custom-course-name'), 'Please enter a course name');
+            showFieldError(document.getElementById('custom-course-name'), 'Please enter a course name or pick a section above');
             isValid = false;
         }
     }
-    
-    // Only validate course structure fields if creating a new course (custom or no existing course)
-    if (courseSelect.value === 'custom' || courseSelect.value === '') {
+
+    // Only validate course structure fields if creating a new course
+    if (createMode) {
         if (!apiKeyInput || !apiKeyInput.value.trim()) {
             showFieldError(apiKeyInput, 'Enter the course OpenAI API key issued by the BiocBot team');
             isValid = false;
@@ -1000,7 +1074,7 @@ async function loadAvailableCourses() {
         // Add custom course option
         const customOption = document.createElement('option');
         customOption.value = 'custom';
-        customOption.textContent = 'Enter custom course name...';
+        customOption.textContent = 'Create a new course...';
         courseSelect.appendChild(customOption);
         
         console.log('Available courses loaded and deduplicated:', dedupeCourses(courses));
@@ -1015,7 +1089,7 @@ async function loadAvailableCourses() {
             // Add custom course option even if API fails
             const customOption = document.createElement('option');
             customOption.value = 'custom';
-            customOption.textContent = 'Enter custom course name...';
+            customOption.textContent = 'Create a new course...';
             courseSelect.appendChild(customOption);
         }
         updateAcademicSyncVisibility();

@@ -388,9 +388,13 @@ function setupProtectedRoutes() {
         try {
             const instructorId = req.user.userId; // Get from authenticated user
 
+            // "Set up another section" deliberately re-enters onboarding to create
+            // a new course, so skip the completed-course redirect in that case.
+            const addingCourse = req.query.addCourse;
+
             // Check if instructor has completed onboarding
             const db = req.app.locals.db;
-            if (db) {
+            if (db && !addingCourse) {
                 const collection = db.collection('courses');
                 const existingCourse = await collection.findOne({
                     instructorId,
@@ -403,7 +407,7 @@ function setupProtectedRoutes() {
                 }
             }
 
-            // If no completed course, show onboarding
+            // If no completed course (or explicitly adding another), show onboarding
             res.sendFile(path.join(__dirname, '../public/instructor/onboarding.html'));
 
         } catch (error) {

@@ -13,7 +13,17 @@ async function checkOnboardingStatus() {
         // Check if there's a courseId in URL params (from redirect)
         const urlParams = new URLSearchParams(window.location.search);
         const courseId = urlParams.get('courseId');
-        
+
+        // "Set up another section" from Home: start a fresh onboarding flow even
+        // though the instructor already has courses, so they can set up a new
+        // course for one of their other sections (via the session/section picker).
+        if (!courseId && urlParams.get('addCourse')) {
+            console.log('➕ [ONBOARDING] addCourse mode — starting a fresh course setup');
+            showOnboardingFlow();
+            showStep(1);
+            return;
+        }
+
         if (courseId) {
             console.log(`🔍 [ONBOARDING] Found courseId in URL params: ${courseId}`);
             // Check if this course has onboarding complete
@@ -34,7 +44,7 @@ async function checkOnboardingStatus() {
                     console.log('⚠️ [ONBOARDING] Course exists but onboarding not complete, resuming...');
                     onboardingState.createdCourseId = courseId;
                     onboardingState.existingCourseId = courseId;
-                    
+
                     // Check Unit 1 content to determine which step to resume at
                     const unit1 = courseData.data?.lectures?.find(lecture => lecture.name === 'Unit 1');
                     const hasObjectives = unit1?.learningObjectives && unit1.learningObjectives.length > 0;
@@ -296,6 +306,9 @@ function initializeFormHandlers() {
     const courseSelect = document.getElementById('course-select');
     if (courseSelect) {
         courseSelect.addEventListener('change', handleCourseSelection);
+        // Apply the initial layout for the default (blank = create) selection so
+        // the create-a-course fields show without waiting for a change event.
+        handleCourseSelection({ target: courseSelect });
     }
     
     // Custom course name handler
