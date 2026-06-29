@@ -10,7 +10,7 @@
  * $gt/$gte/$lt/$lte, dotted field paths, and Mongo's "scalar matches an array by
  * membership" rule. Supported update operators: $set, $setOnInsert (on upsert),
  * $inc, $unset, $addToSet (with $each), $pull (scalar or sub-document match), $push (with $each).
- * Also supports findOneAndUpdate(), countDocuments(), and distinct(field).
+ * Also supports findOneAndUpdate(), replaceOne() (with { upsert }), countDocuments(), and distinct(field).
  * Just enough for the model/service helpers under test — not a full Mongo.
  */
 
@@ -31,6 +31,24 @@ function getPath(obj, path) {
     if (obj == null) return undefined;
     if (path.indexOf('.') === -1) return obj[path];
     return path.split('.').reduce((acc, key) => (acc == null ? undefined : acc[key]), obj);
+}
+
+// Mongo dotted queries traverse arrays of embedded documents implicitly. Keep
+// update-path handling in getPath() strict, but flatten array branches for query
+// matching (e.g. `lectures.assessmentQuestions.questionId`).
+function getQueryPath(obj, path) {
+    const walk = (value, keys) => {
+        if (keys.length === 0 || value == null) return value;
+        if (Array.isArray(value)) {
+            return value.flatMap((item) => {
+                const found = walk(item, keys);
+                return Array.isArray(found) ? found : [found];
+            });
+        }
+        const [key, ...rest] = keys;
+        return walk(value[key], rest);
+    };
+    return walk(obj, path.split('.'));
 }
 
 function setPath(obj, path, value) {
@@ -106,7 +124,7 @@ function matchesQuery(doc, query = {}) {
     return Object.entries(query).every(([key, cond]) => {
         if (key === '$or') return Array.isArray(cond) && cond.some((sub) => matchesQuery(doc, sub));
         if (key === '$and') return Array.isArray(cond) && cond.every((sub) => matchesQuery(doc, sub));
-        return matchesField(getPath(doc, key), cond);
+        return matchesField(getQueryPath(doc, key), cond);
     });
 }
 
@@ -459,6 +477,30 @@ class MemoryCollection {
             if (applyUpdate(target, update)) modifiedCount += 1;
         }
         return { matchedCount: targets.length, modifiedCount };
+    }
+
+    async replaceOne(query, replacement, options = {}) {
+        const index = this.docs.findIndex((doc) => matchesQuery(doc, query || {}));
+        if (index !== -1) {
+            const { _id } = this.docs[index];
+            const fresh = clone(replacement);
+            if (fresh._id === undefined && _id !== undefined) fresh._id = _id;
+            this.docs[index] = fresh;
+            return { matchedCount: 1, modifiedCount: 1, upsertedCount: 0 };
+        }
+        if (options.upsert) {
+            const fresh = clone(replacement);
+            // Mongo adds the filter's equality fields to the new doc when absent.
+            for (const [key, value] of Object.entries(query || {})) {
+                if (key.startsWith('$')) continue;
+                if (value && typeof value === 'object' && !Array.isArray(value)) continue;
+                if (getPath(fresh, key) === undefined) setPath(fresh, key, value);
+            }
+            if (fresh._id === undefined) fresh._id = `mem-replace-${this.docs.length + 1}`;
+            this.docs.push(fresh);
+            return { matchedCount: 0, modifiedCount: 0, upsertedCount: 1, upsertedId: fresh._id };
+        }
+        return { matchedCount: 0, modifiedCount: 0, upsertedCount: 0 };
     }
 
     async deleteOne(query) {

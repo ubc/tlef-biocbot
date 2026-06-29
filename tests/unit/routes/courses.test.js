@@ -22,6 +22,7 @@ const { makeRouteApp, request } = require('../helpers/route-app');
 const coursesRouter = require('../../../src/routes/courses');
 
 const instructor = { userId: 'i1', role: 'instructor' };
+const otherInstructor = { userId: 'i2', role: 'instructor' };
 const ta = { userId: 't1', role: 'ta' };
 const student = { userId: 's1', role: 'student' };
 const app = (opts) => makeRouteApp(coursesRouter, opts);
@@ -101,5 +102,277 @@ describe('POST /:courseId/tas — add a TA', () => {
     test('400 when the course does not exist', async () => {
         const res = await request(app({ db: memoryDb({ courses: [] }), user: instructor })).post('/NOPE/tas').send({ taId: 't1' });
         expect(res.status).toBe(400);
+    });
+});
+
+describe('approved struggle topics', () => {
+    function topicsDb(overrides = {}) {
+        return memoryDb({ courses: [{
+            courseId: 'C1', instructorId: 'i1', tas: ['t1'],
+            lectures: [{ name: 'Unit 1' }, { name: 'Unit 2' }],
+            approvedStruggleTopics: ['Enzyme Kinetics', { topic: 'Protein Folding', unitId: 'Unit 2', source: 'manual' }],
+            ...overrides,
+        }] });
+    }
+
+    test('GET requires authentication and course access', async () => {
+        expect((await request(app({ db: topicsDb() })).get('/C1/approved-topics')).status).toBe(401);
+        expect((await request(app({ db: topicsDb(), user: otherInstructor })).get('/C1/approved-topics')).status).toBe(403);
+    });
+
+    test('GET returns normalized objects and labels to an enrolled student', async () => {
+        const db = topicsDb({ studentEnrollment: { s1: { enrolled: true } } });
+        const res = await request(app({ db, user: student })).get('/C1/approved-topics');
+        expect(res.status).toBe(200);
+        expect(res.body.data.topicLabels).toEqual(['Enzyme Kinetics', 'Protein Folding']);
+        expect(res.body.data.topics[1]).toMatchObject({ topic: 'Protein Folding', unitId: 'Unit 2' });
+    });
+
+    test('PUT validates the topics array and blocks a TA without course permission', async () => {
+        expect((await request(app({ db: topicsDb(), user: instructor })).put('/C1/approved-topics').send({ topics: 'ATP' })).status).toBe(400);
+
+        const db = topicsDb({ taPermissions: { t1: { canAccessCourses: false, canAccessFlags: true } } });
+        expect((await request(app({ db, user: ta })).put('/C1/approved-topics').send({ topics: ['ATP'] })).status).toBe(403);
+    });
+
+    test('PUT replaces, normalizes, and persists topics for the instructor', async () => {
+        const db = topicsDb();
+        const res = await request(app({ db, user: instructor })).put('/C1/approved-topics').send({
+            topics: ['  ATP Synthesis ', 'atp synthesis', { topic: 'Membrane Transport', unitId: 'Unit 1' }],
+        });
+        expect(res.status).toBe(200);
+        expect(res.body.data.topicLabels).toEqual(['ATP Synthesis', 'Membrane Transport']);
+        const stored = await db.collection('courses').findOne({ courseId: 'C1' });
+        expect(stored.lastUpdatedById).toBe('i1');
+        expect(stored.approvedStruggleTopics).toHaveLength(2);
+    });
+
+    test('PATCH rejects unknown topics and units', async () => {
+        expect((await request(app({ db: topicsDb(), user: instructor }))
+            .patch('/C1/approved-topics/unit').send({ topic: 'Unknown', unitId: 'Unit 1' })).status).toBe(404);
+        const invalidUnit = await request(app({ db: topicsDb(), user: instructor }))
+            .patch('/C1/approved-topics/unit').send({ topic: 'Enzyme Kinetics', unitId: 'Unit 99' });
+        expect(invalidUnit.status).toBe(400);
+    });
+
+    test('PATCH converts a legacy string topic and assigns its unit', async () => {
+        const db = topicsDb();
+        const res = await request(app({ db, user: instructor }))
+            .patch('/C1/approved-topics/unit').send({ topic: 'enzyme kinetics', unitId: 'Unit 1' });
+        expect(res.status).toBe(200);
+        expect(res.body.data.topic).toMatchObject({ topic: 'Enzyme Kinetics', unitId: 'Unit 1' });
+        const stored = await db.collection('courses').findOne({ courseId: 'C1' });
+        expect(stored.approvedStruggleTopics[0]).toMatchObject({ topic: 'Enzyme Kinetics', unitId: 'Unit 1' });
+    });
+});
+
+describe('available and joinable course lists', () => {
+    test('GET /available/all returns active courses and enrollment state for a student', async () => {
+        const db = memoryDb({ courses: [
+            { courseId: 'C1', courseName: 'Bio', status: 'active', studentEnrollment: { s1: { enrolled: true } } },
+            { courseId: 'C2', courseName: 'Chem', status: 'inactive' },
+            { courseId: 'C3', courseName: 'Gone', status: 'deleted' },
+        ] });
+        const res = await request(app({ db, user: student })).get('/available/all');
+        expect(res.status).toBe(200);
+        expect(res.body.data).toHaveLength(1);
+        expect(res.body.data[0]).toMatchObject({ courseId: 'C1', isEnrolled: true, status: 'active' });
+    });
+
+    test('GET /available/all limits instructors to courses they own or co-teach', async () => {
+        const db = memoryDb({ courses: [
+            { courseId: 'C1', instructorId: 'i1' },
+            { courseId: 'C2', instructorId: 'owner', instructors: ['i1'] },
+            { courseId: 'C3', instructorId: 'owner' },
+        ] });
+        const res = await request(app({ db, user: instructor })).get('/available/all');
+        expect(res.body.data.map(course => course.courseId)).toEqual(['C1', 'C2']);
+    });
+
+    test('GET /available/joinable rejects non-instructors', async () => {
+        expect((await request(app({ db: memoryDb({}), user: student })).get('/available/joinable')).status).toBe(403);
+    });
+
+    test('GET /available/joinable excludes courses the instructor already teaches', async () => {
+        const db = memoryDb({ courses: [
+            { courseId: 'own', instructorId: 'i1' },
+            { courseId: 'shared', instructorId: 'owner', instructors: ['i1'] },
+            { courseId: 'open', courseName: 'Open', instructorId: 'owner' },
+            { courseId: 'deleted', instructorId: 'owner', status: 'deleted' },
+        ] });
+        const res = await request(app({ db, user: instructor })).get('/available/joinable');
+        expect(res.status).toBe(200);
+        expect(res.body.data.map(course => course.courseId)).toEqual(['open']);
+    });
+});
+
+describe('joining courses', () => {
+    test('student join requires a code and rejects an invalid code', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', courseCode: 'ABC123' }] });
+        expect((await request(app({ db, user: student })).post('/C1/join').send({})).status).toBe(400);
+        expect((await request(app({ db, user: student })).post('/C1/join').send({ code: 'wrong' })).status).toBe(403);
+    });
+
+    test('student join accepts a case-insensitive code and persists enrollment', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', courseCode: 'ABC123' }] });
+        const res = await request(app({ db, user: student })).post('/C1/join').send({ code: ' abc123 ' });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toEqual({ courseId: 'C1', enrolled: true });
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).studentEnrollment.s1.enrolled).toBe(true);
+    });
+
+    test('student join cannot override an instructor revocation', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', courseCode: 'ABC123', studentEnrollment: { s1: { enrolled: false } } }] });
+        const res = await request(app({ db, user: student })).post('/C1/join').send({ code: 'ABC123' });
+        expect(res.status).toBe(403);
+        expect(res.body.message).toBe('Access revoked by instructor');
+    });
+
+    test('TA join requires a code when not assigned or invited', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', courseCode: 'TA1234', tas: [] }] });
+        expect((await request(app({ db, user: ta })).post('/C1/join').send({})).status).toBe(400);
+        expect((await request(app({ db, user: ta })).post('/C1/join').send({ code: 'bad' })).status).toBe(403);
+    });
+
+    test('invited TA joins without a code and the invitation is removed', async () => {
+        const invitedTA = { ...ta, invitedCourses: ['C1'] };
+        const db = memoryDb({
+            courses: [{ courseId: 'C1', courseName: 'Bio', tas: [] }],
+            users: [{ userId: 't1', role: 'ta', invitedCourses: ['C1', 'C2'] }],
+        });
+        const res = await request(app({ db, user: invitedTA })).post('/C1/join').send({});
+        expect(res.status).toBe(200);
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).tas).toContain('t1');
+        expect((await db.collection('users').findOne({ userId: 't1' })).invitedCourses).toEqual(['C2']);
+    });
+
+    test('instructor join validates identity and instructor code', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'owner', instructorCourseCode: 'INST12' }] });
+        expect((await request(app({ db, user: instructor })).post('/C1/instructors').send({ instructorId: 'someone-else', code: 'INST12' })).status).toBe(403);
+        expect((await request(app({ db, user: instructor })).post('/C1/instructors').send({ instructorId: 'i1', code: 'bad' })).status).toBe(403);
+    });
+
+    test('instructor joins with the correct code and is persisted as a co-instructor', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'owner', instructorCourseCode: 'INST12' }] });
+        const res = await request(app({ db, user: instructor })).post('/C1/instructors').send({ instructorId: 'i1', code: ' inst12 ' });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ courseId: 'C1', instructorId: 'i1', alreadyJoined: false });
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).instructors).toContain('i1');
+    });
+});
+
+describe('TA removal and permissions', () => {
+    function taDb(overrides = {}, users = [{ userId: 't1', role: 'ta', invitedCourses: [] }]) {
+        return memoryDb({
+            courses: [{ courseId: 'C1', instructorId: 'i1', tas: ['t1'], ...overrides }],
+            users,
+        });
+    }
+
+    test('DELETE TA requires the owning instructor', async () => {
+        expect((await request(app({ db: taDb(), user: ta })).delete('/C1/tas/t1')).status).toBe(403);
+        expect((await request(app({ db: taDb(), user: otherInstructor })).delete('/C1/tas/t1')).status).toBe(403);
+    });
+
+    test('DELETE TA removes permissions and demotes a TA with no remaining assignments', async () => {
+        const db = taDb({ taPermissions: { t1: { canAccessCourses: true, canAccessFlags: true } } });
+        const res = await request(app({ db, user: instructor })).delete('/C1/tas/t1');
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ taId: 't1', remainingCourseCount: 0, role: 'student' });
+        const course = await db.collection('courses').findOne({ courseId: 'C1' });
+        const user = await db.collection('users').findOne({ userId: 't1' });
+        expect(course.tas).not.toContain('t1');
+        expect(course.taPermissions.t1).toBeUndefined();
+        expect(user.role).toBe('student');
+    });
+
+    test('PUT permissions validates booleans and course ownership', async () => {
+        expect((await request(app({ db: taDb(), user: instructor })).put('/C1/ta-permissions/t1').send({ canAccessCourses: true })).status).toBe(400);
+        expect((await request(app({ db: taDb({ instructorId: 'owner' }), user: instructor })).put('/C1/ta-permissions/t1')
+            .send({ canAccessCourses: true, canAccessFlags: false })).status).toBe(403);
+    });
+
+    test('PUT permissions persists both feature flags', async () => {
+        const db = taDb();
+        const res = await request(app({ db, user: instructor })).put('/C1/ta-permissions/t1')
+            .send({ canAccessCourses: false, canAccessFlags: true });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ taId: 't1', canAccessCourses: false, canAccessFlags: true });
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).taPermissions.t1)
+            .toMatchObject({ canAccessCourses: false, canAccessFlags: true });
+    });
+
+    test('GET one permission allows a TA to view only their own defaults', async () => {
+        const res = await request(app({ db: taDb(), user: ta })).get('/C1/ta-permissions/t1');
+        expect(res.status).toBe(200);
+        expect(res.body.data.permissions).toEqual({ canAccessCourses: true, canAccessFlags: true });
+        expect((await request(app({ db: taDb(), user: ta })).get('/C1/ta-permissions/t2')).status).toBe(403);
+    });
+
+    test('GET all permissions returns explicit and default values for every TA', async () => {
+        const db = taDb({
+            tas: ['t1', 't2'],
+            taPermissions: { t1: { canAccessCourses: false, canAccessFlags: true } },
+        });
+        const res = await request(app({ db, user: instructor })).get('/C1/ta-permissions');
+        expect(res.status).toBe(200);
+        expect(res.body.data.taPermissions).toEqual({
+            t1: { canAccessCourses: false, canAccessFlags: true },
+            t2: { canAccessCourses: true, canAccessFlags: true },
+        });
+    });
+});
+
+describe('student enrollment management', () => {
+    test('PUT validates boolean enrollment and instructor ownership', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1' }] });
+        expect((await request(app({ db, user: instructor })).put('/C1/student-enrollment/s1').send({ enrolled: 'yes' })).status).toBe(400);
+        expect((await request(app({ db, user: student })).put('/C1/student-enrollment/s1').send({ enrolled: true })).status).toBe(403);
+        expect((await request(app({ db, user: otherInstructor })).put('/C1/student-enrollment/s1').send({ enrolled: true })).status).toBe(403);
+    });
+
+    test('PUT persists a revoked enrollment', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1' }] });
+        const res = await request(app({ db, user: instructor })).put('/C1/student-enrollment/s1').send({ enrolled: false });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toEqual({ courseId: 'C1', studentId: 's1', enrolled: false });
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).studentEnrollment.s1.enrolled).toBe(false);
+    });
+
+    test('GET enrollment is student-only and reports explicit bans', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', studentEnrollment: { s1: { enrolled: false } } }] });
+        expect((await request(app({ db })).get('/C1/student-enrollment')).status).toBe(401);
+        expect((await request(app({ db, user: instructor })).get('/C1/student-enrollment')).status).toBe(403);
+        const res = await request(app({ db, user: student })).get('/C1/student-enrollment');
+        expect(res.status).toBe(200);
+        expect(res.body.data).toEqual({ courseId: 'C1', enrolled: false, status: 'banned' });
+    });
+
+    test('GET students merges preference, chat, and enrollment-only students', async () => {
+        const db = memoryDb({
+            courses: [{ courseId: 'C1', courseName: 'Bio', instructorId: 'i1', studentEnrollment: {
+                s1: { enrolled: false }, s3: { enrolled: true },
+            } }],
+            users: [
+                { userId: 's1', role: 'student', isActive: true, displayName: 'Alpha', preferences: { courseId: 'C1' } },
+                { userId: 's2', role: 'student', isActive: true, displayName: 'Beta' },
+            ],
+            chat_sessions: [{ studentId: 's2', courseId: 'C1' }],
+        });
+        const res = await request(app({ db, user: instructor })).get('/C1/students');
+        expect(res.status).toBe(200);
+        expect(res.body.data.totalStudents).toBe(3);
+        expect(res.body.data.students.map(s => s.userId)).toEqual(['s1', 's2', 's3']);
+        expect(res.body.data.students.find(s => s.userId === 's1').enrolled).toBe(false);
+        expect(res.body.data.students.find(s => s.userId === 's3')).toMatchObject({ displayName: 's3', enrolled: true });
+    });
+
+    test('GET students blocks a TA whose flags permission is disabled', async () => {
+        const db = memoryDb({ courses: [{
+            courseId: 'C1', tas: ['t1'], taPermissions: { t1: { canAccessCourses: true, canAccessFlags: false } },
+        }] });
+        const res = await request(app({ db, user: ta })).get('/C1/students');
+        expect(res.status).toBe(403);
+        expect(res.body.message).toMatch(/permission to view student flags/);
     });
 });

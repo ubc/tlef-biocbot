@@ -7,13 +7,14 @@ where the last one stopped. Background lives in project memory
 
 ---
 
-## 0. Current status (2026-06-25)
+## 0. Current status (2026-06-26)
 
-- **520 unit tests passing** across 29 suites via `npm run test:unit` (509 new + 11 baseline).
-- **Overall `src/**` statement coverage ≈ 22%** (models 83%, services 29%, routes 7%, middleware 42%).
-  Routes dominate the codebase (6,052 of 9,407 statements) and were 0% until this batch — now being
-  unit-tested in-process with supertest (see Routes below).
-- Branch: `api_key_flow`. All work so far is **ADD-ONLY** (only new files under `tests/unit/`).
+- **646 unit tests passing** across 39 suites via `npm run test:unit`.
+- **Overall `src/**` statement coverage = 35.4%** (models 87.2%, services 29.3%, routes 25.0%, middleware 41.8%).
+  Routes dominate the codebase (6,332 of 9,933 statements) and were 0% until this initiative — now
+  being unit-tested in-process with supertest (see Routes below); 8 primary routers covered so far.
+- Branch: `more_unit_tests`. Work remains **ADD-ONLY with respect to production code** (new tests,
+  test-helper extensions, and this tracker only).
 - Shared in-memory Mongo double already built: `tests/unit/helpers/memory-db.js`.
 
 **Modules with unit tests so far:**
@@ -248,8 +249,9 @@ mocking or aggregate support · **P3** = heavy external integration / prefer e2e
 All current `src/models/*.js` files have direct unit-test files.
 
 ### ⬜ Remaining — Services
-- [ ] **P2 `src/services/superChatNotesService.js`** — `checkSimilar` (`DUP_THRESHOLD` logic),
-  CRUD wrappers. Check what it loads at require-time (may need qdrant/embeddings mocks).
+- [x] `src/services/superChatNotesService.js` — `tests/unit/services/superChatNotesService.test.js`
+  (create vector-backfill, re-embed-only-when-content-changes, delete swallow-on-Qdrant-failure,
+  `checkSimilar` threshold, `incrementUsage`). `notesQdrantService` mocked with shared spies; model real.
 - [ ] **P3 `src/services/llm.js`** — heavy (1070 lines). Only small pure bits worth it
   (model/effort allow-lists, any JSON-extraction helper). Mostly NOT unit-testable.
 - [ ] **P3 `src/services/qdrantService.js`, `notesQdrantService.js`** — external vector DB;
@@ -270,10 +272,56 @@ updates by `_id` (e.g. systemAdmin revoke).
 - [x] `src/routes/superchats.js` — `tests/unit/routes/superchats.test.js` (auth gate, CRUD, LLM-key branches)
 - [x] `src/routes/students.js` — `tests/unit/routes/students.test.js` (admin gate, student-grouping/duration, rename/delete-own)
 - [x] `src/routes/settings.js` — `tests/unit/routes/settings.test.js` (can-delete-all, system-admins, ai-settings get/put/reset)
-- [x] `src/routes/courses.js` — `tests/unit/routes/courses.test.js` (list/get/TA-add cross-section; ~3 of ~40 endpoints)
-- [ ] More endpoints within the 4 above (esp. `courses.js` — only a slice covered), then `quiz.js`,
-  `flags.js`, `questions.js`, `documents.js`. **Skip/e2e:** `chat.js`, `qdrant.js`, `studentSuperCourse.js`
-  (AI/vector heavy — low unit fidelity).
+- [x] `src/routes/courses.js` — `tests/unit/routes/courses.test.js` (40 tests: list/get,
+  approved topics, available/joinable courses, student/TA/instructor joins, TA management and
+  permissions, student enrollment/listing; 34.4% statements)
+- [x] `src/routes/quiz.js` — `tests/unit/routes/quiz.test.js` (status, objective grading, attempts, history)
+- [x] `src/routes/flags.js` — `tests/unit/routes/flags.test.js` (create, own flags, status, stats, delete)
+- [x] `src/routes/questions.js` — `tests/unit/routes/questions.test.js` (19 tests: create/read/stats,
+  embedded-question access, update/delete guards, bulk creation; 33.6% statements)
+- [x] `src/routes/documents.js` — `tests/unit/routes/documents.test.js` (21 tests: text upload,
+  lecture list/stats, metadata/download, delete cleanup, extraction guards; 46.5% statements)
+- [x] `src/routes/auth.js` — `tests/unit/routes/auth.test.js` (login/register validation gates, /me,
+  preferences/set-course via injected session, /tas + /users + TA demote/promote, /methods env+settings).
+  **Passport paths NOT covered** (successful local login, SAML, logout session.destroy) — e2e. Required a
+  `session` option on the route harness (additive).
+- [x] `src/routes/onboarding.js` — `tests/unit/routes/onboarding.test.js` (create + key-validation gate,
+  read/update/delete access guards, instructor course-list ordering, complete, /stats route ordering).
+  Mocks only `validateApiKey` (network); `buildKeySubdocument`/`stripPrivateKeyFields` run real under NODE_ENV=test.
+- [x] `src/routes/superChatNotes.js` — `tests/unit/routes/superChatNotes.test.js` (16 tests: list/get with
+  `isOwn`, check-similar, create/update/delete author guards). Service + model real over memory-db (collection
+  is **`superchat_notes`**); only `notesQdrantService` mocked, notes LLM surface injected as `llmRegistry`.
+- [x] `src/routes/lectures.js` — `tests/unit/routes/lectures.test.js` (publish toggle + API-key gate,
+  publish-status/student-visible readers, pass-threshold validators, published-with-questions filtering).
+  llmKeyStore left real (pure `isKeyValid`/`structuredKeyError`); positional `lectures.$.x` write asserted via contract.
+- [x] `src/routes/mentalHealthFlags.js` — `tests/unit/routes/mentalHealthFlags.test.js` (anonymization for
+  non-admins, admin-only resolve/disregard, escalate/dismiss, db guard).
+- [x] `src/routes/struggle-activity.js` — `tests/unit/routes/struggle-activity.test.js` (per-student access
+  guard, course/persistence/weekly readers, Super Chat aggregates, prefix-vs-`/:courseId` route ordering).
+- [x] `src/routes/student-tracker.js` — `tests/unit/routes/student-tracker.test.js` (auth gate, per-course
+  topic scoping, single/ALL reset, revoked-enrollment guard).
+- [x] `src/routes/user-agreement.js` — `tests/unit/routes/user-agreement.test.js` (status default vs stored,
+  agree upsert + agreedAt stamp, db guard, missing-user 500 characterization).
+- [x] `src/routes/learning-objectives.js` — `tests/unit/routes/learning-objectives.test.js` (validation +
+  `week`/`lectureName` alias, read path, save echo, swallow-on-not-found characterization).
+- [x] `src/routes/llmKeyMiddleware.js` — `tests/unit/routes/llmKeyMiddleware.test.js` (function-level, fake
+  req/res: `sendLlmKeyError` translation, registry-missing 503, success pass-through, LlmKeyError-vs-rethrow split).
+- [x] `src/routes/instructorChat.js` — `tests/unit/routes/instructorChat.test.js` (session save/list/get/delete
+  CRUD, `/pool` mapping + key gate, `POST /` validation + key gate). `superCourseService` mocked; the full
+  LLM answer flow left to e2e. Added `replaceOne()` to `memory-db`.
+- [x] **Deepened `src/routes/courses.js`** — `tests/unit/routes/courses.deep.test.js` (create, update,
+  retrieval-mode, soft-delete, unit add/delete/rename). Same mock header as `courses.test.js`. **`transfer`
+  still uncovered** (heavy copy/Qdrant path — e2e).
+- [x] **Deepened `src/routes/settings.js`** — `tests/unit/routes/settings.deep.test.js` (admin-gated
+  `/global` get/post, course-scoped `/quiz` get/post round-trip, `/anonymize-students` get/post round-trip).
+  Prompt/LLM-key settings endpoints still uncovered (need llmKeyStore mock — follow-up).
+- [x] **Deepened `src/routes/students.js`** — `tests/unit/routes/students.deep.test.js` (instructor/admin
+  session list/single/delete; note instructor delete only checks `role`, not systemAdmin).
+- [x] **Deepened `src/routes/quiz.js`** — `tests/unit/routes/quiz.deep.test.js` (`GET /questions` enabled
+  gate + answer sanitization, `GET /materials` access gate + listing).
+- [ ] Remaining deepening (lower ROI): `courses.js` transfer; settings prompt/LLM-key endpoints; questions
+  `auto-link`/`generate-ai`/`check-answer` and documents `upload`/`cleanup-orphans` (AI/gridfs heavy).
+  **Skip/e2e:** `chat.js`, `qdrant.js`, `studentSuperCourse.js`, `shibboleth.js` (AI/vector/SAML — low unit fidelity).
 
 ---
 
@@ -320,6 +368,55 @@ pass, NOT to be fixed while writing tests.
   active user has no hash, any password is accepted and `lastLogin` is updated. Characterized in
   `User.test.js`; not fixed.
 
+- **`GET /api/questions/stats` does not require authentication or course access.** Anyone who knows
+  a `courseId` can retrieve aggregate question counts, points, and type breakdown. Characterized in
+  `tests/unit/routes/questions.test.js`; not fixed.
+
+- **`POST /api/documents/:documentId/extract-questions` does not require authentication or course
+  access.** An anonymous caller who knows a document ID can invoke the course LLM and receive extracted
+  questions. Characterized in `tests/unit/routes/documents.test.js`; not fixed.
+
+- **`mentalHealthFlags` handlers carry no role check of their own** (escalate/dismiss). The router relies
+  entirely on its mount-time middleware in `server.js`
+  (`requireAuth` + `populateUser` + `requireActiveCourseForNonInstructors`), so it is NOT reachable
+  unauthenticated. But *within* the router only `resolve`/`disregard` check `isAdmin`; `escalate`/`dismiss`
+  (and the `GET /course/:courseId` read) impose no instructor/TA restriction, so any authenticated caller
+  that clears the mount middleware can use them. Escalating an unknown flag returns HTTP 200 with
+  `{ success: false }` (the model reports not-found, but the route forwards it without a 404).
+  Characterized in `tests/unit/routes/mentalHealthFlags.test.js`; not fixed. (Note: the router unit tests
+  drive the handlers directly and therefore bypass the mount middleware — they do not assert anonymous access.)
+
+- **`POST /api/student/struggle/reset` returns 500 (not 404) when the authenticated user has no DB
+  record.** `User.resetUserStruggleState` returns `{ success: false }` for an unknown user, and the route
+  maps any non-success to a 500 with no user-not-found branch. Characterized in
+  `tests/unit/routes/student-tracker.test.js`; not fixed.
+
+- **`POST /api/lectures/publish` swallows the model's "lecture not found" on unpublish.**
+  `updateLecturePublishStatus` returns `{ success: false, error: 'Lecture not found' }` for an unknown
+  lecture name, but the route still responds HTTP 200 echoing the request (with `data.created` undefined).
+  So unpublishing a non-existent lecture looks successful to the client. Characterized in
+  `tests/unit/routes/lectures.test.js`; not fixed.
+
+- **`POST /api/learning-objectives` never inspects the model result.** `updateLearningObjectives`
+  returns `{ success: false, error: 'Course not found' / 'Lecture not found' }` for a missing course or
+  lecture, but the route discards `result` and always responds HTTP 200 success echoing the request. So
+  saving objectives to a non-existent course/lecture silently no-ops yet reports success. (The handler
+  also performs no auth/role check of its own — it trusts the body's `instructorId`; in production the
+  mount applies `requireAuth` + `requireActiveCourseForNonInstructors`.) Characterized in
+  `tests/unit/routes/learning-objectives.test.js`; not fixed.
+
+- **`user-agreement` handlers destructure `req.user` with no guard.** `GET /status` and `POST /agree`
+  both do `const { userId, role } = req.user`, so an unauthenticated request throws and yields a 500
+  rather than a 401. Not reachable in production (mounted behind `requireAuth`). Characterized in
+  `tests/unit/routes/user-agreement.test.js`; not fixed.
+
+- **`POST /api/courses` 500s when `contentTypes` is omitted.** Every use treats `contentTypes` as
+  optional (`contentTypes || []`) EXCEPT the success-path call `generateCourseStructure(weeks,
+  lecturesPerWeek, contentTypes)`, which does `contentTypes.includes('practice-quizzes')` on the raw
+  (possibly undefined) value and throws — so a create request without `contentTypes` returns a 500 after
+  the course has already been written to Mongo. Characterized in `tests/unit/routes/courses.deep.test.js`
+  (the happy-path test passes `contentTypes`); not fixed.
+
 *(append new findings below as you go)*
 
 ---
@@ -330,10 +427,16 @@ pass, NOT to be fixed while writing tests.
   covered (`$match`, `$group`, `$project`, `$sort`, `$limit`, `$skip` plus common accumulators,
   common expressions, and ISO-week expressions). Extend it only for new pipeline shapes you
   actually need, and re-run the full unit suite afterward.
-- **Positional `$` update operator** (`lectures.$.field`) is not applied by `memory-db`.
+- **Dotted queries through embedded arrays** are supported (added for question-route lookups such as
+  `lectures.assessmentQuestions.questionId`). **Positional `$` update operator** (`lectures.$.field`)
+  is not applied by `memory-db`.
   Course unit-update helpers use it; test their read side, or extend the helper minimally.
 - **bcrypt**-backed functions (`User.createUser/authenticateUser`, `authService` login/register)
   work with the real dep but are slower; isolate them or test the non-bcrypt helpers.
+- **`replaceOne(query, doc, { upsert })`** is supported (added for `instructorChat` session save): replaces
+  the matched doc in place (preserving `_id`), or upserts a new doc seeded with the filter's equality fields.
+- **`session` option on the route harness** (`makeRouteApp(router, { session })`) injects `req.session` for
+  routers that read it directly (e.g. `auth.js` preferences/set-course).
 
 When you extend the helper, it's shared infra — re-run the **whole** `npm run test:unit`
 afterward to make sure existing suites stay green.
