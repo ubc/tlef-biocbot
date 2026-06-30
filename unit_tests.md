@@ -64,7 +64,7 @@ consume API credits. Prompt-setting tests may exercise stored configuration only
 | `src/services/systemAdmin.js` | `tests/unit/services/systemAdmin.test.js` | list/grant/revoke + last-admin guard (added `$unset` to memory-db) |
 | `src/services/config.js` | `tests/unit/services/config.test.js` | env-driven config + provider validation; singleton `isValidated` reset per test |
 | `src/services/authService.js` | `tests/unit/services/authService.test.js` | PURE role/session helpers (db+bcrypt methods left to e2e) |
-| `src/middleware/auth.js` | `tests/unit/middleware/auth.test.js` | all guards via fake req/res/next (next vs status().json() vs redirect()) |
+| `src/middleware/auth.js` | `tests/unit/middleware/auth.test.js` | all guards via fake req/res/next (next vs status().json() vs redirect()); session-hydration fallback + catch paths added → **99.02% stmts / 100% funcs** (only two unreachable redirect branches remain, see §6) |
 
 ---
 
@@ -272,9 +272,16 @@ mocking or aggregate support · **P3** = heavy external integration / prefer e2e
   academic-ID backfill, and every default-user initialization outcome. The `User` model boundary is
   mocked here; its bcrypt/DB behavior remains covered by `models/User.test.js`. **100% statements,
   branches, functions, and lines.**
-- [x] `src/middleware/auth.js` — `requireAuth`, `requireRole`, `requireInstructorOrTA`,
-  `requireSystemAdmin`, `redirectIfAuthenticated`, `requireCourseContext`, `requireTAPermission`
-  via fake req/res/next (next() vs status().json() vs redirect()).
+- [x] `src/middleware/auth.js` — `requireAuth`, `requireRole`, `requireInstructor/Student/TA`,
+  `requireInstructorOrTA`, `requireSystemAdmin`, `populateUser`, `redirectIfAuthenticated`,
+  `requireCourseContext`, `requireTAPermission`, `requireStudentEnrolled`, and
+  `requireActiveCourseForNonInstructors` via fake req/res/next (next() vs status().json() vs
+  redirect()). Now covers the **session-hydration fallback** (`req.session.userId` →
+  `authService.getUserById`: hydrate/unknown-user-destroy/error-catch), every role-redirect
+  branch, and the model-backed catch paths (`getUserById`/`checkTAPermission`/
+  `getStudentEnrollment`/`getCourseById` forced to throw via `jest.spyOn`). **99.02% statements,
+  98.19% branches, 100% functions** — the only two uncovered lines are unreachable dead branches
+  (see §6).
 
 ### ⬜ Remaining — Models (use `memory-db`)
 All current `src/models/*.js` files have direct unit-test files.
@@ -283,9 +290,16 @@ All current `src/models/*.js` files have direct unit-test files.
 - [x] `src/services/superChatNotesService.js` — `tests/unit/services/superChatNotesService.test.js`
   (create vector-backfill, re-embed-only-when-content-changes, delete swallow-on-Qdrant-failure,
   `checkSimilar` threshold, `incrementUsage`). `notesQdrantService` mocked with shared spies; model real.
-- [x] `src/services/llm.js` — `tests/unit/services/llm.test.js` (20 tests;
+- [x] `src/services/llm.js` — `tests/unit/services/llm.test.js` (58 tests;
   provider toolkit mocked at import time; model/effort settings, option translation,
   image/conversation orchestration, prompt builders, parsers, grading and safety analysis).
+  **Deepened 2026-06-30:** added `_performInitialization`/`static create` (test-stub, real-provider,
+  failure-reset), every method's lazy-init-on-first-use branch, the provider-error path
+  (`mapOpenAIErrorToStatus` → `LlmKeyError` + `onProviderKeyFailure`, handler-throw swallow,
+  non-key rethrow), `generate`/`regenerate` orchestration incl. the 2-minute `Promise.race`
+  timeout (driven with `jest.advanceTimersByTimeAsync`), and the parser/prompt validation +
+  fallback branches. **99.72% statements, 100% functions, 100% lines, 90.53% branches** — the
+  branch remainder is defensive `||`/`?.` operands and provider-toolkit failure operands.
 - [x] `src/services/notesQdrantService.js` — `tests/unit/services/notesQdrantService.test.js`
   (12 tests; 100% statements/functions/lines with mocked Qdrant, embeddings, and chunker).
 - [x] `src/services/qdrantService.js` — `tests/unit/services/qdrantService.test.js`
@@ -501,6 +515,14 @@ pass, NOT to be fixed while writing tests.
   no match after the same course/access was already confirmed), and catch paths inside internal helpers
   that are neither exported nor independently injectable. Literal 100% would require production test
   seams, impossible collaborator state, or coverage-ignore directives. This pass used none of those.
+
+- **`requireInstructorOrTA` has two unreachable redirect branches.** After a user is denied
+  (`role !== 'instructor' && role !== 'ta'`), the role-based redirect block still tests
+  `user.role === 'instructor'` (→ `/instructor`) and `user.role === 'ta'` (→ `/ta`). Both are
+  dead: a user reaching that block can be neither role, so only the `student` and `else → /login`
+  arms are reachable. These are the sole two uncovered lines after the coverage pass
+  (`auth.js` 258, 262). Reaching literal 100% would require deleting the dead arms (a production
+  edit). Characterized in `tests/unit/middleware/auth.test.js`; not fixed.
 
 *(append new findings below as you go)*
 
