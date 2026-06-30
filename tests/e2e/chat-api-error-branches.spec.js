@@ -21,10 +21,9 @@
  *     embedding is unrelated to the only seeded document.
  *
  * Dead-code note (NOT covered here, intentionally):
- *   - analyzeChunkSources (lines 234-276) and checkLearningObjectivesMatch
- *     (lines 286-317) are defined but never referenced from this file or
- *     anywhere else in src/. They cannot be exercised via HTTP and forcing
- *     them would mean modifying production code. Their uncovered ranges are
+ *   - analyzeChunkSources (lines 234-276) is defined but never referenced from
+ *     this file or anywhere else in src/. It cannot be exercised via HTTP and
+ *     forcing it would mean modifying production code. Its uncovered range is
  *     listed in FINDINGS.md.
  */
 
