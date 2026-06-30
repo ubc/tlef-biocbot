@@ -15,6 +15,7 @@ jest.mock('../../../src/services/llmKeyStore', () => ({
 
 const { memoryDb } = require('../helpers/memory-db');
 const { makeRouteApp, request } = require('../helpers/route-app');
+const { resolveCourseAi } = require('../../../src/routes/llmKeyMiddleware');
 const quizRouter = require('../../../src/routes/quiz');
 
 const student = { userId: 's1', role: 'student' };
@@ -91,5 +92,92 @@ describe('GET /materials', () => {
         expect(res.status).toBe(200);
         expect(res.body.materials.map(m => m.documentId)).toEqual(['d1']);
         expect(res.body.materials[0]).toMatchObject({ originalName: 'slides.pdf', mimeType: 'application/pdf' });
+    });
+});
+
+describe('GET /materials/:documentId/download', () => {
+    test('validates course, settings, and document ownership', async () => {
+        expect((await request(app({ db: memoryDb({}) })).get('/materials/d1/download')).status).toBe(400);
+        const disabled = memoryDb({ courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: false } }] });
+        expect((await request(app({ db: disabled })).get('/materials/d1/download?courseId=C1')).status).toBe(403);
+        const missing = memoryDb({ courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }], documents: [] });
+        expect((await request(app({ db: missing })).get('/materials/d1/download?courseId=C1')).status).toBe(404);
+    });
+
+    test('downloads text with a safe inferred extension', async () => {
+        const db = memoryDb({
+            courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }],
+            documents: [{ documentId: 'd1', courseId: 'C1', contentType: 'text', originalName: '../Notes', mimeType: 'text/plain', content: 'ATP content' }],
+        });
+        const res = await request(app({ db })).get('/materials/d1/download?courseId=C1');
+        expect(res.status).toBe(200);
+        expect(res.text).toBe('ATP content');
+        expect(res.headers['content-disposition']).toContain('filename="Notes.txt"');
+    });
+
+    test('downloads legacy inline binary and rejects malformed data', async () => {
+        let db = memoryDb({
+            courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }],
+            documents: [{ documentId: 'd1', courseId: 'C1', contentType: 'file', originalName: 'slides.pdf', mimeType: 'application/pdf', fileData: { buffer: [1, 2, 3] } }],
+        });
+        expect((await request(app({ db })).get('/materials/d1/download?courseId=C1')).status).toBe(200);
+        db = memoryDb({
+            courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }],
+            documents: [{ documentId: 'd1', courseId: 'C1', contentType: 'file', originalName: 'bad.pdf', fileData: {} }],
+        });
+        expect((await request(app({ db })).get('/materials/d1/download?courseId=C1')).status).toBe(500);
+    });
+});
+
+describe('POST /chat — mocked quiz-help LLM', () => {
+    const chatBody = {
+        message: 'Explain why', courseId: 'C1', lectureName: 'Unit 1',
+        questionText: 'What is ATP?', questionType: 'short-answer',
+        correctAnswer: '[evaluated by AI]', studentAnswer: 'energy',
+    };
+
+    test('validates required fields and DB', async () => {
+        expect((await request(app({ db: memoryDb({}) })).post('/chat').send({})).status).toBe(400);
+        expect((await request(app({ db: null })).post('/chat').send(chatBody)).status).toBe(503);
+    });
+
+    test('profanity and safety messages bypass the mocked LLM response', async () => {
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage: jest.fn() }, qdrant: {} });
+        let res = await request(app({ db: memoryDb({}) })).post('/chat').send({ ...chatBody, message: 'this is shit' });
+        expect(res.body).toMatchObject({ success: true, source: 'system' });
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage: jest.fn() }, qdrant: {} });
+        res = await request(app({ db: memoryDb({}) })).post('/chat').send({ ...chatBody, message: 'I want to die' });
+        expect(res.body.source).toBe('system');
+        expect(res.body.message).toContain('Wellness Centre');
+    });
+
+    test('looks up the stored answer, retrieves one-unit context, and calls only the mock', async () => {
+        const sendMessage = jest.fn(async () => ({ content: 'Mock quiz help' }));
+        const searchDocuments = jest.fn(async () => [{ lectureName: 'Unit 1', fileName: 'notes', chunkText: 'ATP stores energy' }]);
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage }, qdrant: { searchDocuments } });
+        const db = memoryDb({ courses: [{
+            courseId: 'C1', prompts: { base: 'Custom base', quizHelp: 'Custom help' },
+            lectures: [{ name: 'Unit 1', assessmentQuestions: [{ question: 'What is ATP?', correctAnswer: 'adenosine triphosphate' }] }],
+        }] });
+        const res = await request(app({ db })).post('/chat').send({
+            ...chatBody,
+            conversationHistory: [{ role: 'user', content: 'Earlier' }, { role: 'assistant', content: 'Reply' }],
+        });
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ success: true, message: 'Mock quiz help', source: 'quiz-help' });
+        expect(searchDocuments).toHaveBeenCalledWith('Explain why', { courseId: 'C1', lectureNames: ['Unit 1'] }, 6);
+        expect(sendMessage.mock.calls[0][0]).toContain('adenosine triphosphate');
+        expect(sendMessage.mock.calls[0][1].systemPrompt).toContain('Custom help');
+    });
+
+    test('continues with no context when mocked vector retrieval fails', async () => {
+        const sendMessage = jest.fn(async () => ({}));
+        resolveCourseAi.mockResolvedValueOnce({
+            llm: { sendMessage },
+            qdrant: { searchDocuments: jest.fn(async () => { throw new Error('mock vector failure'); }) },
+        });
+        const res = await request(app({ db: memoryDb({ courses: [{ courseId: 'C1' }] }) })).post('/chat').send(chatBody);
+        expect(res.status).toBe(200);
+        expect(res.body.message).toContain('could not generate');
     });
 });

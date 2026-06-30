@@ -9,8 +9,8 @@ where the last one stopped. Background lives in project memory
 
 ## 0. Current status (2026-06-26)
 
-> **2026-06-30 coverage update:** 1,100 tests pass across 68 suites. Overall Jest
-> coverage is 70.69% statements, 61.71% branches, 81.30% functions, and 71.62%
+> **2026-06-30 coverage update:** 1,119 tests pass across 68 suites. Overall Jest
+> coverage is 73.27% statements, 64.18% branches, 83.81% functions, and 74.16%
 > lines. `src/services/qdrantService.js` now has a direct 36-test unit suite
 > (91.64% statements, 83.73% branches, 100% functions); no e2e tests were
 > changed or removed.
@@ -142,9 +142,18 @@ it throws) instead of "fixing" encrypt. That is the pattern to follow.
   - `npm run test:unit` — all unit tests
   - `npx jest tests/unit/<path>.test.js` — one file
   - `npm run test:unit:coverage` — full coverage
-  - Per-module coverage:
-    `npx jest --coverage --coverageReporters=text --collectCoverageFrom='src/models/Course.js'`
+- Per-module coverage:
+  `npx jest --coverage --coverageReporters=text --collectCoverageFrom='src/models/Course.js'`
+- Interactive Monocart unit report:
+  - Generate: `npm run test:unit:monocart`
+  - Open: `npm run test:report:unit`
+  - Output: `coverage-reports/unit-monocart/index.html`
+  - This uses the separate `jest.monocart.config.js` with native V8 coverage;
+    the regular Jest/Istanbul coverage command and percentages remain unchanged.
 - CI: `.github/workflows/unit.yml` runs these on every push/PR.
+- Jest uses `maxWorkers: 1`: the many Supertest route suites otherwise produce
+  sporadic Node 24 `ECONNRESET` / HTTP parser errors when temporary listeners run
+  concurrently. The serialized full suite remains fast (about five seconds).
 
 ---
 
