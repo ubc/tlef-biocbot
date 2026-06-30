@@ -325,20 +325,38 @@
                                     </div>
                                     <div class="setting-item vertical">
                                         <div class="setting-info">
-                                            <h4 id="chat-survey-prompt-label">Survey popup text</h4>
-                                            <p id="chat-survey-prompt-desc">Main text shown at the top of the student survey popup.</p>
+                                            <h4 id="chat-survey-prompt-label">Survey title</h4>
+                                            <p id="chat-survey-prompt-desc">Title shown at the top of the student survey popup.</p>
                                         </div>
                                         <div class="setting-controls full-width-control">
-                                            <textarea id="chat-survey-prompt-input" rows="3" aria-labelledby="chat-survey-prompt-label" aria-describedby="chat-survey-prompt-desc">Was this chat helpful?</textarea>
+                                            <textarea id="chat-survey-prompt-input" rows="2" aria-labelledby="chat-survey-prompt-label" aria-describedby="chat-survey-prompt-desc">How useful is this chat so far</textarea>
                                         </div>
                                     </div>
                                     <div class="setting-item vertical">
                                         <div class="setting-info">
-                                            <h4 id="chat-survey-rating-label">Star rating text</h4>
-                                            <p id="chat-survey-rating-desc">Text shown next to the 1-5 star rating control.</p>
+                                            <h4 id="chat-survey-intro-label">Intro text</h4>
+                                            <p id="chat-survey-intro-desc">Introductory paragraph shown below the title, before the rating questions.</p>
                                         </div>
                                         <div class="setting-controls full-width-control">
-                                            <textarea id="chat-survey-rating-input" rows="2" aria-labelledby="chat-survey-rating-label" aria-describedby="chat-survey-rating-desc">How useful was this conversation?</textarea>
+                                            <textarea id="chat-survey-intro-input" rows="3" aria-labelledby="chat-survey-intro-label" aria-describedby="chat-survey-intro-desc">So BIOCBOT would like your help to improve the user and learning experience, if you are able to please rate your recent experience with BIOCBOT</textarea>
+                                        </div>
+                                    </div>
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="chat-survey-accuracy-label">Question A — star rating text</h4>
+                                            <p id="chat-survey-accuracy-desc">First question shown with its own 1-5 star rating.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="chat-survey-accuracy-input" rows="2" aria-labelledby="chat-survey-accuracy-label" aria-describedby="chat-survey-accuracy-desc">Has BIOCBOT been presenting accurate and appropriate content?</textarea>
+                                        </div>
+                                    </div>
+                                    <div class="setting-item vertical">
+                                        <div class="setting-info">
+                                            <h4 id="chat-survey-satisfaction-label">Question B — star rating text</h4>
+                                            <p id="chat-survey-satisfaction-desc">Second question shown with its own 1-5 star rating.</p>
+                                        </div>
+                                        <div class="setting-controls full-width-control">
+                                            <textarea id="chat-survey-satisfaction-input" rows="2" aria-labelledby="chat-survey-satisfaction-label" aria-describedby="chat-survey-satisfaction-desc">Are you satisfied with your learning experience using BIOCBOT?</textarea>
                                         </div>
                                     </div>
                                     <div class="setting-item">
@@ -950,6 +968,28 @@
                                 <div class="settings-section-actions">
                                     <span class="settings-dirty-note" hidden>Unsaved changes</span>
                                     <button id="save-access-settings" class="primary-button">Save login settings</button>
+                                </div>
+                            </section>
+
+                            <section class="settings-section" id="academic-api-section" style="display: none;">
+                                <h3>Academic API integration</h3>
+                                <div class="settings-content">
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="academic-api-enabled-label">Enable academic API (Class List Sync)</h4>
+                                            <p id="academic-api-enabled-desc">When enabled, instructors can set up courses from their UBC sections and sync class lists, students are enrolled automatically from the roster, and instructors of record can join without a code. When disabled (the default), BiocBot uses course codes for joining and students browse and enrol with a course code. Only turn this on where the UBC academic API is available.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" id="academic-api-enabled-toggle" aria-labelledby="academic-api-enabled-label" aria-describedby="academic-api-enabled-desc">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="settings-section-actions">
+                                    <span class="settings-dirty-note" hidden>Unsaved changes</span>
+                                    <button id="save-academic-api-settings" class="primary-button">Save academic API settings</button>
                                 </div>
                             </section>
 

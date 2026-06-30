@@ -25,7 +25,9 @@ function seededDb(extra = {}) {
                     enabled: true,
                     triggerMessageCount: 10,
                     promptText: 'Did this chat help?',
-                    ratingPrompt: 'Rate this chat',
+                    introText: 'Please rate your experience',
+                    accuracyPrompt: 'Was it accurate?',
+                    satisfactionPrompt: 'Are you satisfied?',
                     allowFreeText: true
                 }
             },
@@ -42,7 +44,9 @@ function seededDb(extra = {}) {
                     enabled: false,
                     triggerMessageCount: 10,
                     promptText: 'Disabled survey',
-                    ratingPrompt: 'Rate it',
+                    introText: 'Disabled intro',
+                    accuracyPrompt: 'Disabled A',
+                    satisfactionPrompt: 'Disabled B',
                     allowFreeText: true
                 }
             }
@@ -77,7 +81,9 @@ describe('chat survey routes', () => {
             enabled: true,
             triggerMessageCount: 10,
             promptText: 'Did this chat help?',
-            ratingPrompt: 'Rate this chat',
+            introText: 'Please rate your experience',
+            accuracyPrompt: 'Was it accurate?',
+            satisfactionPrompt: 'Are you satisfied?',
             allowFreeText: true
         });
         expect(res.body.data.settingsFingerprint).toHaveLength(24);
@@ -89,7 +95,9 @@ describe('chat survey routes', () => {
             enabled: true,
             triggerMessageCount: 10,
             promptText: 'Did this chat help?',
-            ratingPrompt: 'Rate this chat',
+            introText: 'Please rate your experience',
+            accuracyPrompt: 'Was it accurate?',
+            satisfactionPrompt: 'Are you satisfied?',
             allowFreeText: true
         };
         const fingerprint = ChatSurveyResponse.buildSettingsFingerprint(settings);
@@ -128,7 +136,8 @@ describe('chat survey routes', () => {
             conversationId: 'session-1',
             eventType: 'submitted',
             settingsFingerprint: fingerprint,
-            rating: 4,
+            ratingAccuracy: 4,
+            ratingSatisfaction: 3,
             comment: '',
             messageCountAtPrompt: 10
         });
@@ -138,7 +147,8 @@ describe('chat survey routes', () => {
             courseId: 'C1',
             studentId: 's1',
             studentName: 'Student One',
-            rating: 4,
+            ratingAccuracy: 4,
+            ratingSatisfaction: 3,
             comment: null,
             lastEvent: 'submitted',
             messageCountAtPrompt: 10
@@ -184,7 +194,7 @@ describe('chat survey routes', () => {
             settingsFingerprint: fingerprint
         });
         expect(missingRating.status).toBe(400);
-        expect(missingRating.body.message).toBe('rating must be an integer from 1 to 5');
+        expect(missingRating.body.message).toBe('ratingAccuracy must be an integer from 1 to 5');
     });
 
     test('GET /survey/course/:courseId lists and exports survey responses for course instructors', async () => {
@@ -196,7 +206,8 @@ describe('chat survey routes', () => {
                     studentId: 's1',
                     studentName: 'A, Student',
                     conversationId: 'session-1',
-                    rating: 5,
+                    ratingAccuracy: 5,
+                    ratingSatisfaction: 4,
                     comment: 'Useful',
                     shownAt: new Date('2026-01-01'),
                     submittedAt: new Date('2026-01-02'),
@@ -214,7 +225,8 @@ describe('chat survey routes', () => {
         expect(list.body.data.stats).toMatchObject({
             total: 1,
             submitted: 1,
-            averageRating: 5
+            averageAccuracy: 5,
+            averageSatisfaction: 4
         });
 
         const exported = await request(app(db, instructor)).get('/survey/course/C1/export');

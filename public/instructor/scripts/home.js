@@ -5,6 +5,7 @@
 
 let anonymizeStudentsEnabled = false;
 let canBypassInstructorCourseCodes = false;
+let selectedCourseRequiresInstructorCode = true;
 // Pinned courseId during a setSelectedCourse cascade. Subroutines call
 // getSelectedCourseId() which would otherwise re-read localStorage on every
 // invocation — and a concurrent test (or another tab) can mutate that storage
@@ -1560,10 +1561,15 @@ async function initializeCourseSelection() {
         applyInstructorCodeJoinPermissions();
     }
     
+    // "Set Up Another Section" lets an instructor create more than one course,
+    // which only applies when the academic API is enabled. Hide it otherwise so
+    // onboarding stays single-course, matching the pre-feature behavior.
+    applyAcademicApiGateToHome();
+
     if (changeCourseBtn) {
         changeCourseBtn.addEventListener('click', showCourseSelector);
     }
-    
+
     if (cancelCourseSelectBtn) {
         cancelCourseSelectBtn.addEventListener('click', hideCourseSelector);
     }
@@ -1697,6 +1703,29 @@ async function checkCourseCodeBypassPermission() {
     } catch (error) {
         console.error('Error checking instructor course-code bypass permission:', error);
         return false;
+    }
+}
+
+// Hide "Set Up Another Section" unless the academic API is enabled for this
+// instance. The button is hidden by default and only revealed once we confirm
+// the feature is on, so a slow/failed check fails to the safe (hidden) state.
+async function applyAcademicApiGateToHome() {
+    const setupBtn = document.getElementById('setup-section-btn');
+    const container = setupBtn ? setupBtn.closest('div') : null;
+    const target = container || setupBtn;
+    if (!target) return;
+
+    target.style.display = 'none';
+    try {
+        const response = await fetch('/api/settings/academic-api-enabled', {
+            credentials: 'include'
+        });
+        const result = await response.json();
+        if (result && result.success && result.enabled) {
+            target.style.display = '';
+        }
+    } catch (error) {
+        console.error('Error checking academic API gate:', error);
     }
 }
 
@@ -2146,6 +2175,7 @@ function resetJoinCourseSelection() {
     const joinCourseSelectDropdown = document.getElementById('join-course-select-dropdown');
     const codeEntryGroup = document.getElementById('instructor-code-entry-group');
     const codeInput = document.getElementById('instructor-course-code-input');
+    selectedCourseRequiresInstructorCode = !canBypassInstructorCourseCodes;
 
     if (selectedCourseDetails) {
         selectedCourseDetails.style.display = 'none';
@@ -2177,7 +2207,7 @@ function resetJoinCourseSelection() {
 /**
  * Handle join-course dropdown change
  */
-function handleJoinCourseSelectionChange(event) {
+async function handleJoinCourseSelectionChange(event) {
     const courseId = event.target.value;
     const selectedCourseDetails = document.getElementById('selected-course-details');
     const joinCourseBtn = document.getElementById('join-course-btn');
@@ -2194,6 +2224,7 @@ function handleJoinCourseSelectionChange(event) {
 
     const selectedOption = event.target.options[event.target.selectedIndex];
     const courseName = selectedOption ? selectedOption.textContent : courseId;
+    selectedCourseRequiresInstructorCode = !canBypassInstructorCourseCodes;
 
     if (selectedCourseDetails) {
         selectedCourseDetails.style.display = 'block';
@@ -2224,6 +2255,38 @@ function handleJoinCourseSelectionChange(event) {
         joinCourseBtn.dataset.courseId = courseId;
         joinCourseBtn.dataset.courseName = courseName;
     }
+
+    if (!canBypassInstructorCourseCodes) {
+        if (joinCourseBtn) joinCourseBtn.disabled = true;
+        try {
+            const response = await fetch(`/api/courses/${encodeURIComponent(courseId)}/instructor-join-status`, {
+                credentials: 'include'
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || 'Failed to check instructor access');
+            }
+            if (joinCourseBtn?.dataset.courseId !== courseId) return;
+
+            selectedCourseRequiresInstructorCode = result.data?.requiresCode !== false;
+            if (joinCourseDescription) {
+                joinCourseDescription.textContent = selectedCourseRequiresInstructorCode
+                    ? 'Enter the instructor course code to join this course.'
+                    : (result.data?.reason === 'instructorOfRecord'
+                        ? 'Another instructor has created this course shell. Since you are an instructor of record, you can join it without an instructor code.'
+                        : 'No instructor code is required for you to join this course.');
+            }
+            if (codeEntryGroup) {
+                codeEntryGroup.style.display = selectedCourseRequiresInstructorCode ? 'block' : 'none';
+            }
+        } catch (error) {
+            console.error('Error checking instructor-of-record access:', error);
+            selectedCourseRequiresInstructorCode = true;
+            if (codeEntryGroup) codeEntryGroup.style.display = 'block';
+        } finally {
+            if (joinCourseBtn?.dataset.courseId === courseId) joinCourseBtn.disabled = false;
+        }
+    }
 }
 
 /**
@@ -2237,13 +2300,13 @@ async function handleJoinCourse() {
     const courseId = joinCourseBtn.dataset.courseId;
     const courseName = joinCourseBtn.dataset.courseName;
     const code = instructorCodeInput ? instructorCodeInput.value.trim().toUpperCase() : '';
-    
+
     if (!courseId) {
         showErrorMessage('No course selected');
         return;
     }
 
-    if (!canBypassInstructorCourseCodes && !code) {
+    if (selectedCourseRequiresInstructorCode && !code) {
         setJoinCourseCodeFeedback('Instructor course code is required to join this course.');
         return;
     }
@@ -2286,7 +2349,7 @@ async function handleJoinCourse() {
             loadAvailableCourses(),
             loadJoinableCourses()
         ]);
-        
+
         // Mark instructor's onboarding as complete since they joined an existing course
         if (typeof markInstructorOnboardingComplete === 'function') {
             await markInstructorOnboardingComplete(courseId);

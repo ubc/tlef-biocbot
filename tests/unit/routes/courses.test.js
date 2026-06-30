@@ -21,7 +21,7 @@ const { memoryDb } = require('../helpers/memory-db');
 const { makeRouteApp, request } = require('../helpers/route-app');
 const coursesRouter = require('../../../src/routes/courses');
 
-const instructor = { userId: 'i1', role: 'instructor' };
+const instructor = { userId: 'i1', role: 'instructor', puid: 'PUID-I1' };
 const otherInstructor = { userId: 'i2', role: 'instructor' };
 const ta = { userId: 't1', role: 'ta' };
 const student = { userId: 's1', role: 'student' };
@@ -179,6 +179,30 @@ describe('available and joinable course lists', () => {
         expect(res.body.data[0]).toMatchObject({ courseId: 'C1', isEnrolled: true, status: 'active' });
     });
 
+    test('with the academic API off, a student can browse active courses they are not enrolled in', async () => {
+        const db = memoryDb({ courses: [ // no global setting → gate off (default)
+            { courseId: 'C1', courseName: 'Bio', status: 'active', studentEnrollment: { s1: { enrolled: true } } },
+            { courseId: 'C2', courseName: 'Chem', status: 'active' },
+        ] });
+        const res = await request(app({ db, user: student })).get('/available/all');
+        expect(res.status).toBe(200);
+        expect(res.body.data.map(course => course.courseId)).toEqual(['C1', 'C2']);
+        expect(res.body.data.find(course => course.courseId === 'C2')).toMatchObject({ isEnrolled: false });
+    });
+
+    test('with the academic API on, a student only sees courses they are enrolled in', async () => {
+        const db = memoryDb({
+            settings: [{ _id: 'global', academicApiEnabled: true }],
+            courses: [
+                { courseId: 'C1', courseName: 'Bio', status: 'active', studentEnrollment: { s1: { enrolled: true } } },
+                { courseId: 'C2', courseName: 'Chem', status: 'active' },
+            ]
+        });
+        const res = await request(app({ db, user: student })).get('/available/all');
+        expect(res.status).toBe(200);
+        expect(res.body.data.map(course => course.courseId)).toEqual(['C1']);
+    });
+
     test('GET /available/all limits instructors to courses they own or co-teach', async () => {
         const db = memoryDb({ courses: [
             { courseId: 'C1', instructorId: 'i1' },
@@ -258,6 +282,77 @@ describe('joining courses', () => {
         expect(res.status).toBe(200);
         expect(res.body.data).toMatchObject({ courseId: 'C1', instructorId: 'i1', alreadyJoined: false });
         expect((await db.collection('courses').findOne({ courseId: 'C1' })).instructors).toContain('i1');
+    });
+
+    test('instructor of record joins an academically linked course without a code', async () => {
+        const db = memoryDb({
+            settings: [{ _id: 'global', academicApiEnabled: true }],
+            courses: [{
+                courseId: 'C1',
+                instructorId: 'owner',
+                instructorCourseCode: 'INST12',
+                academicSync: { academicPeriod: 'AP-2026W1', sectionIds: ['SEC-BIOC302-101'] }
+            }]
+        });
+        const academicApi = {
+            getInstructorSections: jest.fn().mockResolvedValue([
+                { courseSectionId: 'SEC-BIOC302-101' }
+            ])
+        };
+
+        const status = await request(app({ db, user: instructor, locals: { academicApi } }))
+            .get('/C1/instructor-join-status');
+        expect(status.status).toBe(200);
+        expect(status.body.data).toMatchObject({ requiresCode: false, reason: 'instructorOfRecord' });
+
+        const joined = await request(app({ db, user: instructor, locals: { academicApi } }))
+            .post('/C1/instructors').send({ instructorId: 'i1' });
+        expect(joined.status).toBe(200);
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).instructors).toContain('i1');
+        expect(academicApi.getInstructorSections).toHaveBeenCalledWith('PUID-I1', 'AP-2026W1');
+    });
+
+    test('academic verification fails closed and still requires the instructor code', async () => {
+        const db = memoryDb({
+            settings: [{ _id: 'global', academicApiEnabled: true }],
+            courses: [{
+                courseId: 'C1',
+                instructorId: 'owner',
+                instructorCourseCode: 'INST12',
+                academicSync: { academicPeriod: 'AP-2026W1', sectionIds: ['SEC-BIOC302-101'] }
+            }]
+        });
+        const academicApi = { getInstructorSections: jest.fn().mockRejectedValue(new Error('API unavailable')) };
+
+        const status = await request(app({ db, user: instructor, locals: { academicApi } }))
+            .get('/C1/instructor-join-status');
+        expect(status.status).toBe(200);
+        expect(status.body.data).toMatchObject({ requiresCode: true, reason: 'courseCode' });
+        expect(academicApi.getInstructorSections).toHaveBeenCalled();
+
+        const joined = await request(app({ db, user: instructor, locals: { academicApi } }))
+            .post('/C1/instructors').send({ instructorId: 'i1' });
+        expect(joined.status).toBe(400);
+        expect(joined.body.message).toMatch(/course code is required/i);
+    });
+
+    test('with the academic API off, instructor-of-record never verifies and a code is required', async () => {
+        const db = memoryDb({ courses: [{ // no global setting → gate off (default)
+            courseId: 'C1',
+            instructorId: 'owner',
+            instructorCourseCode: 'INST12',
+            academicSync: { academicPeriod: 'AP-2026W1', sectionIds: ['SEC-BIOC302-101'] }
+        }] });
+        const academicApi = {
+            getInstructorSections: jest.fn().mockResolvedValue([{ courseSectionId: 'SEC-BIOC302-101' }])
+        };
+
+        const status = await request(app({ db, user: instructor, locals: { academicApi } }))
+            .get('/C1/instructor-join-status');
+        expect(status.status).toBe(200);
+        expect(status.body.data).toMatchObject({ requiresCode: true, reason: 'courseCode' });
+        // Gated off: we never even reach the academic API.
+        expect(academicApi.getInstructorSections).not.toHaveBeenCalled();
     });
 });
 

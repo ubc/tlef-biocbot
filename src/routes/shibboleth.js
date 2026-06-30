@@ -43,9 +43,9 @@ router.get('/Shibboleth.sso/Login', (req, res, next) => {
  * The IdP will redirect the user's browser to this URL with a POST request
  * containing the SAML assertion after a successful login.
  */
-router.post('/Shibboleth.sso/SAML2/POST',
+const samlCallbackHandlers = [
     (req, res, next) => {
-        console.log('[SHIBBOLETH DEBUG] Received SAML callback at /Shibboleth.sso/SAML2/POST');
+        console.log(`[SHIBBOLETH DEBUG] Received SAML callback at ${req.path}`);
         console.log('[SHIBBOLETH DEBUG] Request body:', req.body);
         next();
     },
@@ -79,7 +79,14 @@ router.post('/Shibboleth.sso/SAML2/POST',
         console.log(`[SHIBBOLETH DEBUG] Redirecting user to ${redirectPath}`);
         res.redirect(redirectPath);
     }
-);
+];
+
+router.post('/Shibboleth.sso/SAML2/POST', ...samlCallbackHandlers);
+
+const localSamlAliasesEnabled = process.env.ENABLE_LOCAL_SAML_ALIASES === 'true';
+if (localSamlAliasesEnabled) {
+    router.post('/auth/saml/callback', ...samlCallbackHandlers);
+}
 
 /**
  * Single Logout Service (SLO) placeholders.
@@ -96,5 +103,10 @@ const logSLORequest = (req, res) => {
 router.get('/Shibboleth.sso/SLO/Redirect', logSLORequest);
 router.post('/Shibboleth.sso/SLO/POST', logSLORequest);
 router.post('/Shibboleth.sso/SLO/Artifact', logSLORequest);
+
+if (localSamlAliasesEnabled) {
+    router.get('/auth/logout', logSLORequest);
+    router.post('/auth/logout', logSLORequest);
+}
 
 module.exports = router;

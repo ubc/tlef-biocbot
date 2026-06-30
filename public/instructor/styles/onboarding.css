@@ -234,6 +234,83 @@
   border-color: #4caf50;
 }
 
+.academic-sync-controls {
+  align-items: end;
+}
+
+.academic-sync-action {
+  justify-content: flex-end;
+}
+
+.academic-sync-status {
+  min-height: 1.25rem;
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.92rem;
+  color: #555;
+}
+
+.academic-sync-status-success {
+  color: #2e7d32;
+}
+
+.academic-sync-status-error {
+  color: #b00020;
+}
+
+.academic-sync-status-warn {
+  color: #8a5a00;
+}
+
+.academic-sections-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.academic-section-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.75rem;
+  align-items: start;
+  padding: 0.85rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.academic-section-option:hover {
+  border-color: #4caf50;
+}
+
+.academic-section-option.is-disabled {
+  opacity: 0.6;
+  background: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.academic-section-option.is-disabled:hover {
+  border-color: #e0e0e0;
+}
+
+.academic-section-option input {
+  margin-top: 0.2rem;
+}
+
+.academic-section-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.academic-section-text strong,
+.academic-section-text small {
+  overflow-wrap: anywhere;
+}
+
+.academic-section-text small {
+  color: #666;
+}
+
 .content-types {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

@@ -26,7 +26,7 @@ beforeAll(() => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
 });
 afterAll(() => jest.restoreAllMocks());
-beforeEach(() => llmKeyStore.validateApiKey.mockResolvedValue({ ok: true }));
+beforeEach(() => llmKeyStore.validateApiKey.mockReset().mockResolvedValue({ ok: true }));
 
 describe('POST / — create course from onboarding', () => {
     const body = { courseId: 'C1', courseName: 'BIOC 202', apiKey: 'sk-test', courseStructure: { weeks: 1, lecturesPerWeek: 1 } };

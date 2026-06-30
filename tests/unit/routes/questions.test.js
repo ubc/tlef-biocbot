@@ -10,6 +10,7 @@ jest.mock('../../../src/routes/llmKeyMiddleware', () => ({
 
 const { memoryDb } = require('../helpers/memory-db');
 const { makeRouteApp, request } = require('../helpers/route-app');
+const { resolveCourseAi } = require('../../../src/routes/llmKeyMiddleware');
 const questionsRouter = require('../../../src/routes/questions');
 
 const instructor = { userId: 'i1', role: 'instructor' };
@@ -197,5 +198,130 @@ describe('POST /bulk', () => {
         expect(res.body.data).toMatchObject({ courseId: 'C1', lectureName: 'Unit 1', insertedCount: 2, autoLinkedCount: 0 });
         expect(res.body.data.insertedIds).toHaveLength(2);
         res.body.data.insertedIds.forEach(id => expect(id).toMatch(/^q_/));
+    });
+});
+
+describe('POST /auto-link-learning-objectives — mocked LLM', () => {
+    test('returns early when no objectives or questions exist', async () => {
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage: jest.fn() } });
+        let res = await request(app({ db: courseDb(), user: instructor })).post('/auto-link-learning-objectives').send({
+            courseId: 'C1', lectureName: 'Unit 1', instructorId: 'i1', learningObjectives: [], questions: [{ question: 'Q' }],
+        });
+        expect(res.body.data).toMatchObject({ updatedCount: 0, linkedCount: 0 });
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage: jest.fn() } });
+        res = await request(app({ db: courseDb(), user: instructor })).post('/auto-link-learning-objectives').send({
+            courseId: 'C1', lectureName: 'Unit 1', instructorId: 'i1', learningObjectives: ['Explain ATP'], questions: [],
+        });
+        expect(res.body.message).toMatch(/No assessment questions/);
+    });
+
+    test('matches only exact approved objectives from a mocked LLM response', async () => {
+        const sendMessage = jest.fn(async () => ({ content: 'prefix {"matches":[{"ref":"q1","learningObjective":"explain atp"},{"ref":"q2","learningObjective":"Invented objective"}]}' }));
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage } });
+        const res = await request(app({ db: courseDb(), user: instructor })).post('/auto-link-learning-objectives').send({
+            courseId: 'C1', lectureName: 'Unit 1', instructorId: 'i1',
+            learningObjectives: ['Explain ATP'],
+            questions: [{ questionId: 'q1', question: 'ATP?' }, { questionId: 'q2', question: 'Other?' }],
+        });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ linkedCount: 1, unassignedCount: 1, totalQuestions: 2 });
+        expect(res.body.data.matchedQuestions.map(q => q.learningObjective)).toEqual(['Explain ATP', '']);
+    });
+
+    test('preserves an existing objective without calling the mocked LLM', async () => {
+        const sendMessage = jest.fn();
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage } });
+        const res = await request(app({ db: courseDb(), user: instructor })).post('/auto-link-learning-objectives').send({
+            courseId: 'C1', lectureName: 'Unit 1', instructorId: 'i1',
+            learningObjectives: ['Existing objective'],
+            questions: [{ questionId: 'q1', question: 'Q?', learningObjective: 'Existing objective' }],
+        });
+        expect(res.body.data.linkedCount).toBe(1);
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+});
+
+describe('GET /course-material', () => {
+    test('validates fields, course, ownership, unit, and materials', async () => {
+        expect((await request(app({ db: courseDb() })).get('/course-material?courseId=C1')).status).toBe(400);
+        expect((await request(app({ db: memoryDb({ courses: [] }) })).get('/course-material?courseId=C1&lectureName=Unit%201&instructorId=i1')).status).toBe(404);
+        expect((await request(app({ db: courseDb() })).get('/course-material?courseId=C1&lectureName=Unit%201&instructorId=i2')).status).toBe(403);
+        expect((await request(app({ db: courseDb() })).get('/course-material?courseId=C1&lectureName=Missing&instructorId=i1')).status).toBe(404);
+        expect((await request(app({ db: courseDb({ lectures: [{ name: 'Unit 1', documents: [] }] }) })).get('/course-material?courseId=C1&lectureName=Unit%201&instructorId=i1')).status).toBe(404);
+    });
+
+    test('combines priority inline course material', async () => {
+        const db = courseDb({ lectures: [{ name: 'Unit 1', documents: [
+            { type: 'lecture_notes', originalName: 'Lecture Notes', content: 'ATP synthesis' },
+            { type: 'additional', originalName: 'Extra', content: 'extra content' },
+        ] }] });
+        const res = await request(app({ db })).get('/course-material?courseId=C1&lectureName=Unit%201&instructorId=i1');
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ hasMaterials: true, documentCount: 2 });
+        expect(res.body.data.content).toContain('ATP synthesis');
+        expect(res.body.data.content).not.toContain('extra content');
+    });
+});
+
+describe('POST /check-answer — mocked LLM', () => {
+    test('validates required fields and returns mocked evaluation', async () => {
+        expect((await request(app({})).post('/check-answer').send({ courseId: 'C1' })).status).toBe(400);
+        const evaluateStudentAnswer = jest.fn(async () => ({ correct: true, feedback: 'Mock feedback' }));
+        resolveCourseAi.mockResolvedValueOnce({ llm: { evaluateStudentAnswer } });
+        const res = await request(app({})).post('/check-answer').send({
+            courseId: 'C1', question: 'Q', studentAnswer: 'A', expectedAnswer: 'A', questionType: 'short-answer', studentName: 'Sam',
+        });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toEqual({ correct: true, feedback: 'Mock feedback' });
+        expect(evaluateStudentAnswer).toHaveBeenCalledWith('Q', 'A', 'A', 'short-answer', 'Sam');
+    });
+});
+
+describe('POST /generate-ai — mocked LLM', () => {
+    function generationDb(overrides = {}) {
+        return memoryDb({
+            courses: [{
+                courseId: 'C1', instructorId: 'i1', approvedStruggleTopics: ['ATP Synthesis'],
+                lectures: [{ name: 'Unit 1', displayName: 'Energy', documents: [{ documentId: 'd1', documentType: 'lecture-notes' }] }],
+                ...overrides,
+            }],
+            documents: [{ documentId: 'd1', courseId: 'C1', originalName: 'Lecture Notes', content: 'ATP synthesis uses a proton gradient.' }],
+        });
+    }
+
+    const payload = { courseId: 'C1', lectureName: 'Unit 1', instructorId: 'i1', questionType: 'multiple-choice', learningObjectives: ['Explain ATP'] };
+
+    test('validates fields, regeneration feedback, type, DB, and access', async () => {
+        expect((await request(app({ db: generationDb(), user: instructor })).post('/generate-ai').send({})).status).toBe(400);
+        expect((await request(app({ db: generationDb(), user: instructor })).post('/generate-ai').send({ ...payload, regenerate: true })).status).toBe(400);
+        expect((await request(app({ db: generationDb(), user: instructor })).post('/generate-ai').send({ ...payload, questionType: 'essay' })).status).toBe(400);
+        expect((await request(app({ db: null, user: instructor })).post('/generate-ai').send(payload)).status).toBe(503);
+        expect((await request(app({ db: generationDb(), user: otherInstructor })).post('/generate-ai').send(payload)).status).toBe(403);
+    });
+
+    test('generates a focused question through the mocked LLM only', async () => {
+        const generateAssessmentQuestion = jest.fn(async () => ({ question: 'Mock ATP question?', answer: 'A', options: { A: 'ATP', B: 'DNA' } }));
+        resolveCourseAi.mockResolvedValueOnce({ llm: { generateAssessmentQuestion } });
+        const res = await request(app({ db: generationDb(), user: instructor })).post('/generate-ai').send({ ...payload, struggleTopic: ' ATP   Synthesis ' });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ question: 'Mock ATP question?', answer: 'A', struggleTopic: 'ATP Synthesis', selectedLearningObjective: 'Explain ATP', aiGenerated: true });
+        expect(generateAssessmentQuestion.mock.calls[0][1]).toContain('Question focus');
+    });
+
+    test('rejects unapproved struggle topics before resolving an LLM', async () => {
+        const res = await request(app({ db: generationDb(), user: instructor })).post('/generate-ai').send({ ...payload, struggleTopic: 'History' });
+        expect(res.status).toBe(400);
+        expect(resolveCourseAi).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['timed out', 408],
+        ['Invalid JSON', 422],
+        ['not initialized', 503],
+        ['mock provider failure', 500],
+    ])('maps mocked generation error containing %s to %i', async (message, status) => {
+        resolveCourseAi.mockResolvedValueOnce({ llm: { generateAssessmentQuestion: jest.fn(async () => { throw new Error(message); }) } });
+        const res = await request(app({ db: generationDb(), user: instructor })).post('/generate-ai').send(payload);
+        expect(res.status).toBe(status);
     });
 });

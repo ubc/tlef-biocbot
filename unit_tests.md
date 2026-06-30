@@ -9,6 +9,26 @@ where the last one stopped. Background lives in project memory
 
 ## 0. Current status (2026-06-26)
 
+> **2026-06-30 coverage update:** 1,367 tests pass across 76 suites. The regenerated
+> Monocart report is 84.79% statements, 77.41% branches, 92.84% functions, and
+> 85.84% source lines overall. `src/routes/settings.js` now has 100% statements,
+> functions, and lines (92.44% branches). `src/routes/chat.js` now has 94.14%
+> statements, 86.22% branches, 91.78% functions, and 94.96% lines. No production
+> or e2e files were changed by this coverage pass.
+
+**Finding (DO NOT fix here):** `POST /api/chat` logs
+`req.body.message?.substring(...)` before validating that `message` is a string.
+A numeric message therefore returns 500 instead of the handler's intended 400.
+
+**Finding (DO NOT fix here):** The Shibboleth SAML success callback logs
+`req.user.userId` before its `if (req.user)` guard. If Passport advances without
+attaching a user, the callback throws and returns 500 instead of a controlled
+authentication failure/redirect.
+
+**LLM test boundary:** Every Jest test must mock provider-facing LLM behavior
+(including key validation). Unit tests must never make provider/network calls or
+consume API credits. Prompt-setting tests may exercise stored configuration only.
+
 - **646 unit tests passing** across 39 suites via `npm run test:unit`.
 - **Overall `src/**` statement coverage = 35.4%** (models 87.2%, services 29.3%, routes 25.0%, middleware 41.8%).
   Routes dominate the codebase (6,332 of 9,933 statements) and were 0% until this initiative — now
@@ -123,9 +143,18 @@ it throws) instead of "fixing" encrypt. That is the pattern to follow.
   - `npm run test:unit` — all unit tests
   - `npx jest tests/unit/<path>.test.js` — one file
   - `npm run test:unit:coverage` — full coverage
-  - Per-module coverage:
-    `npx jest --coverage --coverageReporters=text --collectCoverageFrom='src/models/Course.js'`
+- Per-module coverage:
+  `npx jest --coverage --coverageReporters=text --collectCoverageFrom='src/models/Course.js'`
+- Interactive Monocart unit report:
+  - Generate: `npm run test:unit:monocart`
+  - Open: `npm run test:report:unit`
+  - Output: `coverage-reports/unit-monocart/index.html`
+  - This uses the separate `jest.monocart.config.js` with native V8 coverage;
+    the regular Jest/Istanbul coverage command and percentages remain unchanged.
 - CI: `.github/workflows/unit.yml` runs these on every push/PR.
+- Jest uses `maxWorkers: 1`: the many Supertest route suites otherwise produce
+  sporadic Node 24 `ECONNRESET` / HTTP parser errors when temporary listeners run
+  concurrently. The serialized full suite remains fast (about five seconds).
 
 ---
 
@@ -238,9 +267,11 @@ mocking or aggregate support · **P3** = heavy external integration / prefer e2e
 - [x] `src/services/config.js` — env-driven `getLLMConfig`/`getServerConfig`/`getDatabaseConfig`/
   `getVectorDBConfig` + `validateConfig` provider rules + env helpers. Resets the singleton's
   `isValidated` flag and snapshots `process.env` per test.
-- [x] `src/services/authService.js` — PURE helpers only: `isValidEmail`, `hasRole`,
-  `isInstructor/isStudent/isSystemAdmin`, `getCurrentCourseId`, `createSessionUser` (session-safe
-  shaping + admin elevation). db+bcrypt methods (`loginUser`/`registerUser`/`getUserById`/SAML) left to e2e.
+- [x] `src/services/authService.js` — complete direct suite: validation, registration/login/model
+  delegation, user and preference reads/writes, SAML handling, course context, session-safe shaping,
+  academic-ID backfill, and every default-user initialization outcome. The `User` model boundary is
+  mocked here; its bcrypt/DB behavior remains covered by `models/User.test.js`. **100% statements,
+  branches, functions, and lines.**
 - [x] `src/middleware/auth.js` — `requireAuth`, `requireRole`, `requireInstructorOrTA`,
   `requireSystemAdmin`, `redirectIfAuthenticated`, `requireCourseContext`, `requireTAPermission`
   via fake req/res/next (next() vs status().json() vs redirect()).
@@ -252,12 +283,24 @@ All current `src/models/*.js` files have direct unit-test files.
 - [x] `src/services/superChatNotesService.js` — `tests/unit/services/superChatNotesService.test.js`
   (create vector-backfill, re-embed-only-when-content-changes, delete swallow-on-Qdrant-failure,
   `checkSimilar` threshold, `incrementUsage`). `notesQdrantService` mocked with shared spies; model real.
-- [ ] **P3 `src/services/llm.js`** — heavy (1070 lines). Only small pure bits worth it
-  (model/effort allow-lists, any JSON-extraction helper). Mostly NOT unit-testable.
-- [ ] **P3 `src/services/qdrantService.js`, `notesQdrantService.js`** — external vector DB;
-  low ROI for unit tests.
-- [ ] **SKIP `src/services/mongoService.js`, `gridfs.js`** — open DB connections (load-time
-  side effects). `llmStub.js`/`embeddingsStub.js` are test doubles — skip.
+- [x] `src/services/llm.js` — `tests/unit/services/llm.test.js` (20 tests;
+  provider toolkit mocked at import time; model/effort settings, option translation,
+  image/conversation orchestration, prompt builders, parsers, grading and safety analysis).
+- [x] `src/services/notesQdrantService.js` — `tests/unit/services/notesQdrantService.test.js`
+  (12 tests; 100% statements/functions/lines with mocked Qdrant, embeddings, and chunker).
+- [x] `src/services/qdrantService.js` — `tests/unit/services/qdrantService.test.js`
+  (36 tests; constructor/init/config failures, collection lifecycle, document processing,
+  embeddings, storage, query normalization and filters, per-course search, scrolling,
+  cloning, deletion, stats/status). Deterministic boundary fakes; no live Qdrant.
+- [x] `src/services/gridfs.js` — `tests/unit/services/gridfs.test.js` replaces only the Mongo
+  `GridFSBucket` boundary; covers ObjectId normalization, upload/download/copy streams, metadata,
+  missing files, stream failures, and idempotent deletion without opening a database. **100% all metrics.**
+- [x] `src/services/academicApi.js` — `tests/unit/services/academicApi.test.js` covers toolkit loading,
+  missing/invalid optional dependency behavior, environment/mock configuration, singleton injection,
+  caching, and the fail-closed feature gate. **100% all metrics.**
+- [x] `src/services/mongoService.js` — direct mocked-driver suite (no live connection).
+- [x] `src/services/llmStub.js`, `embeddingsStub.js` — counted by Jest, therefore tested
+  directly in `tests/unit/services/stubs.test.js` (100% statements/functions/lines).
 
 ### ⬜ Remaining — Middleware
 - _All middleware covered_ — `src/middleware/auth.js` is done (see ✅ Done).
@@ -271,10 +314,19 @@ happy path + the key error branches), not every handler. Seed docs with explicit
 updates by `_id` (e.g. systemAdmin revoke).
 - [x] `src/routes/superchats.js` — `tests/unit/routes/superchats.test.js` (auth gate, CRUD, LLM-key branches)
 - [x] `src/routes/students.js` — `tests/unit/routes/students.test.js` (admin gate, student-grouping/duration, rename/delete-own)
-- [x] `src/routes/settings.js` — `tests/unit/routes/settings.test.js` (can-delete-all, system-admins, ai-settings get/put/reset)
-- [x] `src/routes/courses.js` — `tests/unit/routes/courses.test.js` (40 tests: list/get,
-  approved topics, available/joinable courses, student/TA/instructor joins, TA management and
-  permissions, student enrollment/listing; 34.4% statements)
+- [x] `src/routes/settings.js` — base/deep/chat-survey suites plus
+  `settings-keys.test.js`, `settings-errors.test.js`, and `settings-academic-error.test.js`. Covers
+  all settings endpoints, ownership/admin gates, persistence and validation edges, stable exception
+  contracts, academic API gate, and both dedicated LLM-key lifecycles with provider validation mocked.
+  **100% statements/functions/lines; 92.44% branches.**
+- [x] `src/routes/courses.js` — `tests/unit/routes/courses.test.js`,
+  `courses.deep.test.js`, and `courses.coverage.test.js` (114 tests: list/get, student-safe
+  projection, statistics aggregation, approved/extracted topics, available/joinable courses,
+  student/TA/instructor joins, TA management and permissions, student enrollment/listing, create,
+  update, retrieval mode, soft-delete, unit lifecycle, content stub, API keys, material confirmation,
+  and transfer including text/inline/GridFS document cloning and warning paths). Monocart:
+  **90.62% statements, 83.88% branches, 100% functions, and 91.02% lines.** Literal
+  100% statements/branches/lines would require production test seams or coverage exclusions; see §6.
 - [x] `src/routes/quiz.js` — `tests/unit/routes/quiz.test.js` (status, objective grading, attempts, history)
 - [x] `src/routes/flags.js` — `tests/unit/routes/flags.test.js` (create, own flags, status, stats, delete)
 - [x] `src/routes/questions.js` — `tests/unit/routes/questions.test.js` (19 tests: create/read/stats,
@@ -309,19 +361,25 @@ updates by `_id` (e.g. systemAdmin revoke).
 - [x] `src/routes/instructorChat.js` — `tests/unit/routes/instructorChat.test.js` (session save/list/get/delete
   CRUD, `/pool` mapping + key gate, `POST /` validation + key gate). `superCourseService` mocked; the full
   LLM answer flow left to e2e. Added `replaceOne()` to `memory-db`.
-- [x] **Deepened `src/routes/courses.js`** — `tests/unit/routes/courses.deep.test.js` (create, update,
-  retrieval-mode, soft-delete, unit add/delete/rename). Same mock header as `courses.test.js`. **`transfer`
-  still uncovered** (heavy copy/Qdrant path — e2e).
-- [x] **Deepened `src/routes/settings.js`** — `tests/unit/routes/settings.deep.test.js` (admin-gated
-  `/global` get/post, course-scoped `/quiz` get/post round-trip, `/anonymize-students` get/post round-trip).
-  Prompt/LLM-key settings endpoints still uncovered (need llmKeyStore mock — follow-up).
+- [x] **Deepened `src/routes/courses.js`** — lifecycle coverage is in `courses.deep.test.js`; focused
+  statistics, student projection, transfer document cloning, cleanup tolerance, and catch contracts are
+  in `courses.coverage.test.js`. Provider/Qdrant/GridFS boundaries are deterministic mocks; no network calls.
+- [x] **Deepened `src/routes/settings.js`** — complete; prompt, LLM-key, global, course-scoped,
+  academic-gate, error, and reset paths are now covered (see the primary settings entry above).
 - [x] **Deepened `src/routes/students.js`** — `tests/unit/routes/students.deep.test.js` (instructor/admin
   session list/single/delete; note instructor delete only checks `role`, not systemAdmin).
 - [x] **Deepened `src/routes/quiz.js`** — `tests/unit/routes/quiz.deep.test.js` (`GET /questions` enabled
   gate + answer sanitization, `GET /materials` access gate + listing).
-- [ ] Remaining deepening (lower ROI): `courses.js` transfer; settings prompt/LLM-key endpoints; questions
+- [ ] Remaining deepening (lower ROI): `courses.js` defensive validation/catch permutations; questions
   `auto-link`/`generate-ai`/`check-answer` and documents `upload`/`cleanup-orphans` (AI/gridfs heavy).
-  **Skip/e2e:** `chat.js`, `qdrant.js`, `studentSuperCourse.js`, `shibboleth.js` (AI/vector/SAML — low unit fidelity).
+  **Skip/e2e:** `qdrant.js`, `studentSuperCourse.js`, `shibboleth.js` (vector/SAML — low unit fidelity).
+- [x] **Deepened `src/routes/chat.js`** — `chat.additional.test.js` and
+  `chat-id-fallback.test.js` augment the feedback/survey/core suites. Provider, Qdrant, GridFS, tracker,
+  and model boundaries are deterministic mocks. Coverage includes validation and error mappings,
+  retrieval/source attribution, custom modes/prompts, struggle/directive tracking, non-blocking mental
+  health analysis, summaries and continuation, downloads, feedback/survey review and CSV, service status,
+  saved sessions, and both practice-answer modes. **94.14% statements, 86.22% branches, 91.78%
+  functions, 94.96% lines; all behavior reachable through the exported router is covered.**
 
 ---
 
@@ -416,6 +474,33 @@ pass, NOT to be fixed while writing tests.
   (possibly undefined) value and throws — so a create request without `contentTypes` returns a 500 after
   the course has already been written to Mongo. Characterized in `tests/unit/routes/courses.deep.test.js`
   (the happy-path test passes `contentTypes`); not fixed.
+
+- **`chat.js` contains private retrieval-analysis code that is unreachable from the exported router.**
+  `analyzeChunkSources` and `checkLearningObjectivesMatch` (including their nested callbacks) are
+  declared but never called or exported. In addition, `canCreateFeedbackForCourse` has a non-student
+  guard that every current caller precludes with its own role guard, and the outer source-attribution
+  catch cannot run because `determineSourceAttribution` already catches and converts its own errors.
+  These account for the remaining uncovered executable lines/functions after all public router behavior
+  was exercised. Reaching literal 100% would require a deliberate production refactor (remove the dead
+  helpers, wire them into behavior, or expose an intentional test seam), so this test-only pass left them
+  unchanged. Characterized by the focused `chat*.test.js` coverage run; not fixed.
+
+- **`POST /api/chat` assumes Qdrant search returns an array.** If `searchDocuments` resolves `null`
+  instead of throwing or returning `[]`, later array operations fail and the route returns its generic
+  500 response. Characterized in `tests/unit/routes/chat.additional.test.js`; not fixed.
+
+- **The full Supertest suite has a known transient socket/parser flake.** During this pass, one complete
+  run produced `ECONNRESET` / HTTP parse failures in unrelated route suites despite `maxWorkers: 1`;
+  the immediate unchanged rerun passed all 1,346 tests across 75 suites, as did the subsequent full
+  Monocart run. No source or test change was made in response to the transient failure.
+
+- **`src/routes/courses.js` cannot faithfully reach literal 100% through its exported router alone.**
+  The expanded public-route suite invokes all 94 functions, but native V8 still reports 108 uncovered
+  lines and 186 uncovered branch outcomes. The remainder is dominated by mutually exclusive fallback
+  operands, defensive outcomes precluded by earlier successful checks (for example, an update reporting
+  no match after the same course/access was already confirmed), and catch paths inside internal helpers
+  that are neither exported nor independently injectable. Literal 100% would require production test
+  seams, impossible collaborator state, or coverage-ignore directives. This pass used none of those.
 
 *(append new findings below as you go)*
 

@@ -34,9 +34,11 @@ const struggleActivityRoutes = require('./routes/struggle-activity');
 const mentalHealthFlagsRoutes = require('./routes/mentalHealthFlags');
 const superChatNotesRoutes = require('./routes/superChatNotes');
 const superchatsRoutes = require('./routes/superchats');
+const academicSyncRoutes = require('./routes/academicSync');
 const LLMService = require('./services/llm');
 const LlmRegistry = require('./services/llmRegistry');
 const AuthService = require('./services/authService');
+const { isAcademicApiEnabled } = require('./services/academicApi');
 const createAuthMiddleware = require('./middleware/auth');
 const initializePassport = require('./config/passport');
 
@@ -389,7 +391,14 @@ function setupProtectedRoutes() {
 
             // Check if instructor has completed onboarding
             const db = req.app.locals.db;
-            if (db) {
+
+            // "Set up another section" deliberately re-enters onboarding to create
+            // a new course, so skip the completed-course redirect in that case —
+            // but only when the academic API is on. With it off (the default),
+            // restore the pre-feature behavior: a completed instructor is always
+            // redirected away and can't re-enter onboarding to add a course.
+            const addingCourse = req.query.addCourse && await isAcademicApiEnabled(db);
+            if (db && !addingCourse) {
                 const collection = db.collection('courses');
                 const existingCourse = await collection.findOne({
                     instructorId,
@@ -402,7 +411,7 @@ function setupProtectedRoutes() {
                 }
             }
 
-            // If no completed course, show onboarding
+            // If no completed course (or explicitly adding another), show onboarding
             res.sendFile(path.join(__dirname, '../public/instructor/onboarding.html'));
 
         } catch (error) {
@@ -567,6 +576,7 @@ function setupAPIRoutes() {
     app.use('/api/instructor/chat', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, instructorChatRoutes);
     app.use('/api/superchat-notes', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, superChatNotesRoutes);
     app.use('/api/superchats', authMiddleware.requireAuth, authMiddleware.populateUser, superchatsRoutes);
+    app.use('/api/academic-sync', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, academicSyncRoutes);
     app.use('/api/student/super-course', authMiddleware.requireAuth, authMiddleware.populateUser, studentSuperCourseRoutes);
     app.use('/api/students', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, studentsRoutes);
     app.use('/api/user-agreement', authMiddleware.requireAuth, userAgreementRoutes);

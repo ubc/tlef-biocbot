@@ -20,6 +20,7 @@ const {
     grantSystemAdminByEmail,
     revokeSystemAdminByEmail
 } = require('../services/systemAdmin');
+const { isAcademicApiEnabled } = require('../services/academicApi');
 
 function requireSystemAdmin(req, res) {
     if (!req.user) {
@@ -747,6 +748,23 @@ router.post('/prompts/reset', async (req, res) => {
 });
 
 /**
+ * GET /api/settings/academic-api-enabled
+ * Lightweight read of the instance-wide academic-API gate. Available to any
+ * authenticated user (not just admins) so instructor onboarding, the home page,
+ * and the student course picker can show/hide the matching UI. Returns false on
+ * any error so the UI defaults to the safe, pre-feature experience.
+ */
+router.get('/academic-api-enabled', async (req, res) => {
+    try {
+        const enabled = await isAcademicApiEnabled(req.app.locals.db);
+        res.json({ success: true, enabled });
+    } catch (error) {
+        console.error('Error reading academic API gate:', error);
+        res.json({ success: true, enabled: false });
+    }
+});
+
+/**
  * GET /api/settings/global
  * Get global settings (e.g. login restrictions)
  * Requires system admin access
@@ -767,7 +785,10 @@ router.get('/global', async (req, res) => {
 
         res.json({
             success: true,
-            settings: settings || { allowLocalLogin: true } // Default to true
+            settings: {
+                allowLocalLogin: settings ? settings.allowLocalLogin !== false : true, // Default true
+                academicApiEnabled: !!(settings && settings.academicApiEnabled) // Default off
+            }
         });
 
     } catch (error) {
@@ -792,25 +813,35 @@ router.post('/global', async (req, res) => {
             return;
         }
 
-        const { allowLocalLogin } = req.body;
+        // Only update the fields that were sent, so the login toggle and the
+        // academic-API toggle (saved from separate sections) don't clobber each
+        // other.
+        const set = {
+            updatedAt: new Date(),
+            updatedBy: normalizeEmail(req.user.email)
+        };
+        if (typeof req.body.allowLocalLogin !== 'undefined') {
+            set.allowLocalLogin = !!req.body.allowLocalLogin;
+        }
+        if (typeof req.body.academicApiEnabled !== 'undefined') {
+            set.academicApiEnabled = !!req.body.academicApiEnabled;
+        }
 
-        // Update settings
         await db.collection('settings').updateOne(
             { _id: 'global' },
-            { 
-                $set: { 
-                    allowLocalLogin: !!allowLocalLogin,
-                    updatedAt: new Date(),
-                    updatedBy: normalizeEmail(req.user.email)
-                } 
-            },
+            { $set: set },
             { upsert: true }
         );
+
+        const updated = await db.collection('settings').findOne({ _id: 'global' });
 
         res.json({
             success: true,
             message: 'Global settings updated',
-            settings: { allowLocalLogin: !!allowLocalLogin }
+            settings: {
+                allowLocalLogin: updated ? updated.allowLocalLogin !== false : true,
+                academicApiEnabled: !!(updated && updated.academicApiEnabled)
+            }
         });
 
     } catch (error) {
@@ -1264,7 +1295,9 @@ router.post('/chat-survey', async (req, res) => {
             enabled,
             triggerMessageCount,
             promptText,
-            ratingPrompt,
+            introText,
+            accuracyPrompt,
+            satisfactionPrompt,
             allowFreeText
         } = req.body;
 
@@ -1285,7 +1318,9 @@ router.post('/chat-survey', async (req, res) => {
             enabled,
             triggerMessageCount,
             promptText,
-            ratingPrompt,
+            introText,
+            accuracyPrompt,
+            satisfactionPrompt,
             allowFreeText
         }, req.user ? req.user.userId : null);
 

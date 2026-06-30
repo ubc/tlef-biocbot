@@ -11,6 +11,7 @@ jest.mock('ubc-genai-toolkit-core', () => ({ ConsoleLogger: jest.fn() }));
 jest.mock('../../../src/services/gridfs', () => ({
     deleteFile: jest.fn(async () => undefined),
     openDownloadStream: jest.fn(),
+    uploadBuffer: jest.fn(async () => 'grid-file-1'),
 }));
 jest.mock('../../../src/routes/llmKeyMiddleware', () => ({
     resolveCourseAi: jest.fn(async () => ({
@@ -59,6 +60,44 @@ beforeAll(() => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
 });
 afterAll(() => jest.restoreAllMocks());
+
+describe('POST /upload — multipart document upload', () => {
+    function upload(req, fields = {}) {
+        let chain = req
+            .field('courseId', fields.courseId || 'C1')
+            .field('lectureName', fields.lectureName || 'Unit 1')
+            .field('documentType', fields.documentType || 'lecture-notes')
+            .field('instructorId', fields.instructorId || 'i1');
+        if (fields.title) chain = chain.field('title', fields.title);
+        return chain.attach('file', Buffer.from(fields.content || 'ATP is cellular energy.'), {
+            filename: fields.filename || 'notes.txt',
+            contentType: fields.contentType || 'text/plain',
+        });
+    }
+
+    test('requires authentication and matching instructor identity', async () => {
+        expect((await upload(request(app({ db: documentsDb() })).post('/upload'))).status).toBe(401);
+        expect((await upload(request(app({ db: documentsDb(), user: otherInstructor })).post('/upload'))).status).toBe(403);
+    });
+
+    test('stores text files in mocked GridFS, Mongo, course structure, and mocked Qdrant', async () => {
+        const db = documentsDb({ documents: [] });
+        const res = await upload(request(app({ db, user: instructor })).post('/upload'), { title: 'Lecture Notes - Unit 1', content: 'ATP synthesis uses a gradient.' });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ filename: 'Lecture Notes - Unit 1', linkedToCourse: true, qdrantProcessed: true, chunksStored: 3 });
+        expect(gridfs.uploadBuffer).toHaveBeenCalledWith(db, expect.any(Buffer), 'notes.txt', expect.objectContaining({ contentType: 'text/plain' }));
+        const stored = await db.collection('documents').findOne({ documentId: res.body.data.documentId });
+        expect(stored).toMatchObject({ fileId: 'grid-file-1', contentType: 'file', content: 'ATP synthesis uses a gradient.' });
+    });
+
+    test('accepts an assigned TA but stores the owning instructor ID', async () => {
+        const db = documentsDb({ documents: [] });
+        const res = await upload(request(app({ db, user: ta })).post('/upload'), { instructorId: 'i1' });
+        expect(res.status).toBe(200);
+        const stored = await db.collection('documents').findOne({ documentId: res.body.data.documentId });
+        expect(stored.instructorId).toBe('i1');
+    });
+});
 
 describe('POST /text', () => {
     const payload = {
@@ -236,5 +275,59 @@ describe('POST /:documentId/extract-questions', () => {
         const res = await request(app({ db: documentsDb() })).post('/d1/extract-questions');
         expect(res.status).toBe(200);
         expect(res.body.data).toMatchObject({ documentId: 'd1', totalFound: 0, wasChunked: false });
+    });
+});
+
+describe('POST /cleanup-orphans', () => {
+    test('validates fields, DB, course, and ownership', async () => {
+        expect((await request(app({ db: documentsDb(), user: instructor })).post('/cleanup-orphans').send({})).status).toBe(400);
+        expect((await request(app({ db: null, user: instructor })).post('/cleanup-orphans').send({ courseId: 'C1', instructorId: 'i1' })).status).toBe(503);
+        expect((await request(app({ db: memoryDb({ courses: [] }), user: instructor })).post('/cleanup-orphans').send({ courseId: 'C1', instructorId: 'i1' })).status).toBe(404);
+        expect((await request(app({ db: documentsDb(), user: otherInstructor })).post('/cleanup-orphans').send({ courseId: 'C1', instructorId: 'i1' })).status).toBe(403);
+    });
+
+    test('removes missing references while preserving real documents', async () => {
+        const db = documentsDb({
+            documents: [{ documentId: 'valid', courseId: 'C1' }],
+            course: { lectures: [{ name: 'Unit 1', documents: [{ documentId: 'valid' }, { documentId: 'missing' }] }] },
+        });
+        const res = await request(app({ db, user: instructor })).post('/cleanup-orphans').send({ courseId: 'C1', instructorId: 'i1' });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toEqual({ totalOrphans: 1, cleanedUnits: 1 });
+    });
+});
+
+describe('question extraction with mocked LLM and vector chunks', () => {
+    test('normalizes mocked multiple-choice and true-false responses', async () => {
+        const sendMessage = jest.fn(async () => ({ content: `Here is JSON: {"questions":[
+            {"questionType":"multiple-choice","question":"ATP?","options":{"one":"ATP","two":"DNA"},"correctAnswer":" b ","explanation":"E"},
+            {"questionType":"true-false","question":"Cells?","correctAnswer":"t","explanation":"E"}
+        ]}` }));
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage }, qdrant: {} });
+        const res = await request(app({ db: documentsDb(), user: instructor })).post('/d1/extract-questions');
+        expect(res.status).toBe(200);
+        expect(res.body.data.totalFound).toBe(2);
+        expect(res.body.data.questions[0]).toMatchObject({ options: { A: 'ATP', B: 'DNA' }, correctAnswer: 'B', hasAnswer: true });
+        expect(res.body.data.questions[1].correctAnswer).toBe('True');
+    });
+
+    test('uses mocked Qdrant chunks for oversized content and batches LLM calls', async () => {
+        const longContent = 'x'.repeat(32001);
+        const db = documentsDb({ documents: [{ documentId: 'd1', courseId: 'C1', lectureName: 'Unit 1', content: longContent }] });
+        const sendMessage = jest.fn(async () => ({ content: '{"questions":[{"questionType":"short-answer","question":"Q?","correctAnswer":"A"}]}' }));
+        const getDocumentChunks = jest.fn(async () => ['chunk one', 'chunk two']);
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage }, qdrant: { getDocumentChunks } });
+        const res = await request(app({ db, user: instructor })).post('/d1/extract-questions');
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ wasChunked: true, totalFound: 1 });
+        expect(getDocumentChunks).toHaveBeenCalledWith('d1');
+    });
+
+    test('reports missing or failed chunks for oversized content', async () => {
+        const db = documentsDb({ documents: [{ documentId: 'd1', courseId: 'C1', content: 'x'.repeat(32001) }] });
+        resolveCourseAi.mockResolvedValueOnce({ llm: {}, qdrant: { getDocumentChunks: jest.fn(async () => []) } });
+        expect((await request(app({ db, user: instructor })).post('/d1/extract-questions')).status).toBe(400);
+        resolveCourseAi.mockResolvedValueOnce({ llm: {}, qdrant: { getDocumentChunks: jest.fn(async () => { throw new Error('mock vector failure'); }) } });
+        expect((await request(app({ db, user: instructor })).post('/d1/extract-questions')).status).toBe(400);
     });
 });

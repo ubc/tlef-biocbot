@@ -7,6 +7,16 @@
  * the e2e/integration layer; here we instantiate with a null db and only call the
  * synchronous helpers.
  */
+jest.mock('../../../src/models/User', () => ({
+    createUser: jest.fn(),
+    authenticateUser: jest.fn(),
+    getUserById: jest.fn(),
+    updateUserPreferences: jest.fn(),
+    createOrGetSAMLUser: jest.fn(),
+    getUsersByRole: jest.fn()
+}));
+
+const User = require('../../../src/models/User');
 const AuthService = require('../../../src/services/authService');
 
 const svc = new AuthService(null);
@@ -100,11 +110,268 @@ describe('authService.createSessionUser', () => {
             baseRole: 'student',
             displayName: undefined,
             authProvider: undefined,
+            puid: undefined,
+            academicStudentId: undefined,
             preferences: { courseId: 'C1' },
             permissions: { systemAdmin: true },
         });
         // No credential material leaks into the session object.
         expect(session).not.toHaveProperty('password');
         expect(session).not.toHaveProperty('hashedPassword');
+    });
+});
+
+describe('authService database-backed methods', () => {
+    let service;
+    let errorSpy;
+
+    beforeEach(() => {
+        service = new AuthService({ marker: 'db' });
+        errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        errorSpy.mockRestore();
+    });
+
+    test('ensureDefaultAcademicIds is a no-op without a database', async () => {
+        await expect(new AuthService(null).ensureDefaultAcademicIds()).resolves.toBeUndefined();
+    });
+
+    test('ensureDefaultAcademicIds backfills only missing instructor and student identifiers', async () => {
+        const updateOne = jest.fn().mockResolvedValue({ modifiedCount: 1 });
+        const db = { collection: jest.fn(() => ({ updateOne })) };
+
+        await new AuthService(db).ensureDefaultAcademicIds();
+
+        expect(db.collection).toHaveBeenCalledWith('users');
+        expect(updateOne).toHaveBeenCalledTimes(2);
+        expect(updateOne.mock.calls[0][0]).toEqual({
+            username: 'instructor',
+            $or: [{ puid: { $exists: false } }, { puid: null }, { puid: '' }]
+        });
+        expect(updateOne.mock.calls[0][1].$set).toEqual({
+            puid: 'PUID-E000001',
+            updatedAt: expect.any(Date)
+        });
+        expect(updateOne.mock.calls[1][0].username).toBe('student');
+        expect(updateOne.mock.calls[1][1].$set).toEqual({
+            puid: 'PUID-S000001',
+            academicStudentId: 'STU-10001',
+            updatedAt: expect.any(Date)
+        });
+    });
+
+    test.each([
+        [{ password: 'pw', role: 'student' }, 'Username, password, and role are required'],
+        [{ username: 'u', role: 'student' }, 'Username, password, and role are required'],
+        [{ username: 'u', password: 'pw' }, 'Username, password, and role are required'],
+        [{ username: 'u', password: 'pw', role: 'admin' }, 'Role must be "instructor", "student", or "ta"'],
+        [{ username: 'u', password: 'pw', role: 'student', email: 'bad' }, 'Invalid email format']
+    ])('registerUser validates input %#', async (input, error) => {
+        await expect(service.registerUser(input)).resolves.toEqual({ success: false, error });
+        expect(User.createUser).not.toHaveBeenCalled();
+    });
+
+    test.each(['instructor', 'student', 'ta'])('registerUser delegates valid %s accounts to User', async role => {
+        const input = { username: role, password: 'pw', role, email: `${role}@example.com` };
+        User.createUser.mockResolvedValue({ success: true, userId: `${role}-id` });
+
+        await expect(service.registerUser(input)).resolves.toEqual({
+            success: true,
+            userId: `${role}-id`
+        });
+        expect(User.createUser).toHaveBeenCalledWith(service.db, input);
+    });
+
+    test('registerUser converts model failures into its public error contract', async () => {
+        User.createUser.mockRejectedValue(new Error('write failed'));
+        await expect(service.registerUser({ username: 'u', password: 'pw', role: 'student' }))
+            .resolves.toEqual({ success: false, error: 'Registration failed. Please try again.' });
+        expect(errorSpy).toHaveBeenCalledWith('Error in registerUser:', expect.any(Error));
+    });
+
+    test('loginUser validates credentials, delegates, and handles failures', async () => {
+        await expect(service.loginUser('', 'pw')).resolves.toEqual({
+            success: false,
+            error: 'Username and password are required'
+        });
+        User.authenticateUser.mockResolvedValue({ success: true, user: { userId: 'u1' } });
+        await expect(service.loginUser('user', 'pw')).resolves.toEqual({
+            success: true,
+            user: { userId: 'u1' }
+        });
+        expect(User.authenticateUser).toHaveBeenCalledWith(service.db, 'user', 'pw');
+
+        User.authenticateUser.mockRejectedValue(new Error('hash failed'));
+        await expect(service.loginUser('user', 'pw')).resolves.toEqual({
+            success: false,
+            error: 'Login failed. Please try again.'
+        });
+    });
+
+    test('getUserById handles empty ids, successful reads, and failures', async () => {
+        await expect(service.getUserById()).resolves.toBeNull();
+        User.getUserById.mockResolvedValue({ userId: 'u1' });
+        await expect(service.getUserById('u1')).resolves.toEqual({ userId: 'u1' });
+        expect(User.getUserById).toHaveBeenCalledWith(service.db, 'u1');
+        User.getUserById.mockRejectedValue(new Error('read failed'));
+        await expect(service.getUserById('u2')).resolves.toBeNull();
+    });
+
+    test('updateUserPreferences validates, delegates, and handles failures', async () => {
+        await expect(service.updateUserPreferences('', {})).resolves.toEqual({
+            success: false,
+            error: 'User ID is required'
+        });
+        User.updateUserPreferences.mockResolvedValue({ success: true });
+        await expect(service.updateUserPreferences('u1', { courseId: 'C1' }))
+            .resolves.toEqual({ success: true });
+        expect(User.updateUserPreferences).toHaveBeenCalledWith(
+            service.db,
+            'u1',
+            { courseId: 'C1' }
+        );
+        User.updateUserPreferences.mockRejectedValue(new Error('write failed'));
+        await expect(service.updateUserPreferences('u1', {})).resolves.toEqual({
+            success: false,
+            error: 'Failed to update preferences'
+        });
+    });
+
+    test('handleSAMLUser validates identity fields, delegates, and handles failures', async () => {
+        await expect(service.handleSAMLUser({ email: 'u@example.com' })).resolves.toEqual({
+            success: false,
+            error: 'SAML data is incomplete'
+        });
+        const samlData = { samlId: 's1', email: 'u@example.com' };
+        User.createOrGetSAMLUser.mockResolvedValue({ success: true, userId: 'u1' });
+        await expect(service.handleSAMLUser(samlData)).resolves.toEqual({
+            success: true,
+            userId: 'u1'
+        });
+        expect(User.createOrGetSAMLUser).toHaveBeenCalledWith(service.db, samlData);
+        User.createOrGetSAMLUser.mockRejectedValue(new Error('saml failed'));
+        await expect(service.handleSAMLUser(samlData)).resolves.toEqual({
+            success: false,
+            error: 'SAML authentication failed'
+        });
+    });
+
+    test('setCurrentCourseId merges existing preferences', async () => {
+        jest.spyOn(service, 'getUserById').mockResolvedValue({
+            userId: 'u1',
+            preferences: { theme: 'dark', courseId: 'old' }
+        });
+        jest.spyOn(service, 'updateUserPreferences').mockResolvedValue({ success: true });
+
+        await expect(service.setCurrentCourseId('u1', 'C2')).resolves.toEqual({ success: true });
+        expect(service.updateUserPreferences).toHaveBeenCalledWith('u1', {
+            theme: 'dark',
+            courseId: 'C2'
+        });
+    });
+
+    test('setCurrentCourseId reports missing users and internal failures', async () => {
+        jest.spyOn(service, 'getUserById').mockResolvedValue(null);
+        await expect(service.setCurrentCourseId('missing', 'C1')).resolves.toEqual({
+            success: false,
+            error: 'User not found'
+        });
+
+        service.getUserById.mockRejectedValue(new Error('read failed'));
+        await expect(service.setCurrentCourseId('u1', 'C1')).resolves.toEqual({
+            success: false,
+            error: 'Failed to update course context'
+        });
+    });
+});
+
+describe('authService.initializeDefaultUsers', () => {
+    let service;
+    let logSpy;
+    let errorSpy;
+
+    beforeEach(() => {
+        service = new AuthService({ marker: 'db' });
+        logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+        errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        logSpy.mockRestore();
+        errorSpy.mockRestore();
+    });
+
+    test('keeps existing defaults and backfills their academic ids', async () => {
+        User.getUsersByRole.mockResolvedValue([{ userId: 'existing' }]);
+        jest.spyOn(service, 'ensureDefaultAcademicIds').mockResolvedValue();
+        jest.spyOn(service, 'registerUser');
+
+        await expect(service.initializeDefaultUsers()).resolves.toEqual({
+            success: true,
+            message: 'Default users already exist'
+        });
+        expect(User.getUsersByRole).toHaveBeenCalledWith(service.db, 'instructor');
+        expect(service.ensureDefaultAcademicIds).toHaveBeenCalledTimes(1);
+        expect(service.registerUser).not.toHaveBeenCalled();
+    });
+
+    test('creates both default users and returns their ids', async () => {
+        User.getUsersByRole.mockResolvedValue([]);
+        jest.spyOn(service, 'ensureDefaultAcademicIds').mockResolvedValue();
+        jest.spyOn(service, 'registerUser')
+            .mockResolvedValueOnce({ success: true, userId: 'instructor-id' })
+            .mockResolvedValueOnce({ success: true, userId: 'student-id' });
+
+        await expect(service.initializeDefaultUsers()).resolves.toEqual({
+            success: true,
+            message: 'Default users created successfully',
+            users: { instructor: 'instructor-id', student: 'student-id' }
+        });
+        expect(service.registerUser).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            username: 'instructor',
+            role: 'instructor',
+            puid: 'PUID-E000001'
+        }));
+        expect(service.registerUser).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            username: 'student',
+            role: 'student',
+            puid: 'PUID-S000001',
+            academicStudentId: 'STU-10001'
+        }));
+        expect(service.ensureDefaultAcademicIds).toHaveBeenCalledTimes(1);
+    });
+
+    test('stops when default instructor creation fails', async () => {
+        User.getUsersByRole.mockResolvedValue([]);
+        jest.spyOn(service, 'registerUser').mockResolvedValue({ success: false, error: 'duplicate' });
+
+        await expect(service.initializeDefaultUsers()).resolves.toEqual({
+            success: false,
+            error: 'Failed to create default instructor'
+        });
+        expect(service.registerUser).toHaveBeenCalledTimes(1);
+    });
+
+    test('reports default student creation failure', async () => {
+        User.getUsersByRole.mockResolvedValue([]);
+        jest.spyOn(service, 'registerUser')
+            .mockResolvedValueOnce({ success: true, userId: 'instructor-id' })
+            .mockResolvedValueOnce({ success: false, error: 'duplicate' });
+
+        await expect(service.initializeDefaultUsers()).resolves.toEqual({
+            success: false,
+            error: 'Failed to create default student'
+        });
+    });
+
+    test('converts unexpected initialization failures to a stable result', async () => {
+        User.getUsersByRole.mockRejectedValue(new Error('database unavailable'));
+        await expect(service.initializeDefaultUsers()).resolves.toEqual({
+            success: false,
+            error: 'Failed to initialize default users'
+        });
+        expect(errorSpy).toHaveBeenCalledWith('Error initializing default users:', expect.any(Error));
     });
 });

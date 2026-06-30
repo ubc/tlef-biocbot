@@ -23,9 +23,11 @@ const llmKeyStore = require('../../../src/services/llmKeyStore');
 const instructor = { userId: 'i1', role: 'instructor' };
 const student = { userId: 's1', role: 'student' };
 const admin = { userId: 'a1', role: 'student', permissions: { systemAdmin: true } };
+const downloadAdmin = { userId: 'a2', role: 'instructor', permissions: { systemAdmin: true } };
 
 beforeAll(() => { jest.spyOn(console, 'error').mockImplementation(() => {}); });
 afterAll(() => jest.restoreAllMocks());
+beforeEach(() => llmKeyStore.validateApiKey.mockReset().mockResolvedValue({ ok: true }));
 
 describe('superchats — auth gate', () => {
     test('401 when unauthenticated', async () => {
@@ -152,5 +154,81 @@ describe('DELETE /:id', () => {
         const res = await request(makeRouteApp(superchatsRouter, { db, user: instructor })).delete('/sc1');
         expect(res.status).toBe(200);
         expect(res.body.success).toBe(true);
+    });
+});
+
+describe('bucket LLM key management — mocked validation', () => {
+    const keyed = { superchatId: 'sc1', name: 'Bucket', llmApiKey: { ciphertext: 'encrypted', status: 'unknown' } };
+
+    test('PUT validates bucket and API key', async () => {
+        expect((await request(makeRouteApp(superchatsRouter, { db: memoryDb({ superchats: [] }), user: instructor })).put('/missing/llm-key').send({ apiKey: 'sk' })).status).toBe(404);
+        llmKeyStore.validateApiKey.mockResolvedValueOnce({ ok: false, status: 'quota_exhausted', message: 'spent' });
+        const res = await request(makeRouteApp(superchatsRouter, { db: memoryDb({ superchats: [keyed] }), user: instructor })).put('/sc1/llm-key').send({ apiKey: 'spent' });
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe('LLM_KEY_QUOTA');
+    });
+
+    test('PUT saves the key and evicts the bucket cache', async () => {
+        const db = memoryDb({ superchats: [keyed] });
+        const registry = { evictSuperchat: jest.fn() };
+        const res = await request(makeRouteApp(superchatsRouter, { db, user: instructor, locals: { llmRegistry: registry } })).put('/sc1/llm-key').send({ apiKey: 'sk-new' });
+        expect(res.status).toBe(200);
+        expect((await db.collection('superchats').findOne({ superchatId: 'sc1' })).llmApiKey).toEqual({ enc: 'stub-key' });
+        expect(registry.evictSuperchat).toHaveBeenCalledWith('sc1');
+    });
+
+    test('POST key test handles missing, valid, and invalid saved keys', async () => {
+        let res = await request(makeRouteApp(superchatsRouter, { db: memoryDb({ superchats: [{ superchatId: 'sc1' }] }), user: instructor })).post('/sc1/llm-key/test');
+        expect(res.body.code).toBe('LLM_KEY_MISSING');
+        res = await request(makeRouteApp(superchatsRouter, { db: memoryDb({ superchats: [keyed] }), user: instructor })).post('/sc1/llm-key/test');
+        expect(res).toMatchObject({ status: 200, body: expect.objectContaining({ success: true, aiAvailable: true }) });
+        llmKeyStore.validateApiKey.mockResolvedValueOnce({ ok: false, status: 'invalid', message: 'bad' });
+        res = await request(makeRouteApp(superchatsRouter, { db: memoryDb({ superchats: [keyed] }), user: instructor })).post('/sc1/llm-key/test');
+        expect(res.body).toMatchObject({ success: false, code: 'LLM_KEY_INVALID', aiAvailable: false });
+    });
+});
+
+describe('system-admin Super Chat session downloads', () => {
+    const sessionsDb = () => memoryDb({
+        superchats: [{ superchatId: 'sc1', name: 'Bucket' }],
+        student_super_course_chat_sessions: [
+            {
+                sessionId: 'sess1', superchatId: 'sc1', studentId: 's1', studentName: { displayName: 'Alice' },
+                title: 'ATP chat', savedAt: '2026-01-02T00:00:00Z', messageCount: 2, isDeleted: false,
+                chatData: { messages: [
+                    { type: 'user', timestamp: '2026-01-02T00:00:00Z' },
+                    { type: 'bot', timestamp: '2026-01-02T00:01:05Z' },
+                ] },
+            },
+            { sessionId: 'deleted', superchatId: 'sc1', studentId: 's1', savedAt: '2026-01-03T00:00:00Z', isDeleted: true },
+        ],
+    });
+
+    test('requires a system admin who is also an instructor', async () => {
+        expect((await request(makeRouteApp(superchatsRouter, { db: sessionsDb(), user: instructor })).get('/sc1/chat-sessions')).status).toBe(403);
+        expect((await request(makeRouteApp(superchatsRouter, { db: sessionsDb(), user: admin })).get('/sc1/chat-sessions')).status).toBe(403);
+    });
+
+    test('groups sessions by student and computes timestamp duration', async () => {
+        const res = await request(makeRouteApp(superchatsRouter, { db: sessionsDb(), user: downloadAdmin })).get('/sc1/chat-sessions');
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ totalStudents: 1, totalSessions: 1 });
+        expect(res.body.data.students[0]).toMatchObject({ studentId: 's1', studentName: 'Alice', totalSessions: 1 });
+        expect(res.body.data.students[0].sessions[0].duration).toBe('1m 5s');
+    });
+
+    test('bulk export can filter one student', async () => {
+        const res = await request(makeRouteApp(superchatsRouter, { db: sessionsDb(), user: downloadAdmin })).get('/sc1/chat-sessions/export?studentId=s1');
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ superchatId: 'sc1', totalStudents: 1, totalSessions: 1 });
+        expect(res.body.data.students[0].sessions[0].chatData.messages).toHaveLength(2);
+    });
+
+    test('single session returns transcript or 404', async () => {
+        let res = await request(makeRouteApp(superchatsRouter, { db: sessionsDb(), user: downloadAdmin })).get('/sc1/chat-sessions/s1/sess1');
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ sessionId: 'sess1', superchatName: 'Bucket', duration: '1m 5s' });
+        res = await request(makeRouteApp(superchatsRouter, { db: sessionsDb(), user: downloadAdmin })).get('/sc1/chat-sessions/s1/missing');
+        expect(res.status).toBe(404);
     });
 });

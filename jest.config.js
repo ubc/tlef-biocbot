@@ -11,6 +11,11 @@
 /** @type {import('jest').Config} */
 module.exports = {
     testEnvironment: 'node',
+    // Most route suites use Supertest, which opens a temporary local listener.
+    // Running dozens of those suites concurrently is flaky on Node 24
+    // (sporadic ECONNRESET / HTTP parser errors), so keep unit suites serial.
+    // The complete run remains fast (~5 seconds) and deterministic.
+    maxWorkers: 1,
     // Only files under tests/unit are unit tests. Playwright owns tests/e2e.
     testMatch: ['<rootDir>/tests/unit/**/*.test.js'],
     // Coverage reflects the backend logic these unit tests exercise.

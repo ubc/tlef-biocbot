@@ -7,7 +7,9 @@ const settings = {
     enabled: true,
     triggerMessageCount: 10,
     promptText: 'Was this useful?',
-    ratingPrompt: 'Rate the chat',
+    introText: 'Please rate your experience',
+    accuracyPrompt: 'Was the content accurate?',
+    satisfactionPrompt: 'Are you satisfied?',
     allowFreeText: true
 };
 
@@ -30,7 +32,7 @@ describe('ChatSurveyResponse model', () => {
         expect(a).not.toBe(c);
     });
 
-    test('records a submitted star rating without requiring a comment', async () => {
+    test('records submitted star ratings without requiring a comment', async () => {
         const db = memoryDb();
         const result = await ChatSurveyResponse.upsertChatSurveyEvent(db, {
             courseId: 'C1',
@@ -38,7 +40,8 @@ describe('ChatSurveyResponse model', () => {
             studentName: 'Student One',
             conversationId: 'session-1',
             eventType: 'submitted',
-            rating: 5,
+            ratingAccuracy: 5,
+            ratingSatisfaction: 4,
             comment: '',
             settings,
             messageCountAtPrompt: 10
@@ -49,7 +52,8 @@ describe('ChatSurveyResponse model', () => {
             courseId: 'C1',
             studentId: 's1',
             conversationId: 'session-1',
-            rating: 5,
+            ratingAccuracy: 5,
+            ratingSatisfaction: 4,
             comment: null,
             lastEvent: 'submitted',
             messageCountAtPrompt: 10
@@ -57,19 +61,36 @@ describe('ChatSurveyResponse model', () => {
         expect(result.response.submittedAt).toBeInstanceOf(Date);
     });
 
-    test('rejects submitted events without a valid star rating', async () => {
+    test('rejects submitted events without a valid accuracy rating', async () => {
         const result = await ChatSurveyResponse.upsertChatSurveyEvent(memoryDb(), {
             courseId: 'C1',
             studentId: 's1',
             conversationId: 'session-1',
             eventType: 'submitted',
-            rating: 6,
+            ratingAccuracy: 6,
+            ratingSatisfaction: 4,
             settings
         });
 
         expect(result).toEqual({
             success: false,
-            error: 'rating must be an integer from 1 to 5'
+            error: 'ratingAccuracy must be an integer from 1 to 5'
+        });
+    });
+
+    test('rejects submitted events without a valid satisfaction rating', async () => {
+        const result = await ChatSurveyResponse.upsertChatSurveyEvent(memoryDb(), {
+            courseId: 'C1',
+            studentId: 's1',
+            conversationId: 'session-1',
+            eventType: 'submitted',
+            ratingAccuracy: 4,
+            settings
+        });
+
+        expect(result).toEqual({
+            success: false,
+            error: 'ratingSatisfaction must be an integer from 1 to 5'
         });
     });
 
@@ -94,14 +115,16 @@ describe('ChatSurveyResponse model', () => {
         const submitted = await ChatSurveyResponse.upsertChatSurveyEvent(db, {
             ...base,
             eventType: 'submitted',
-            rating: 4,
+            ratingAccuracy: 4,
+            ratingSatisfaction: 3,
             comment: 'Useful later in the chat'
         });
 
         expect(shown.response.responseId).toBe(dismissed.response.responseId);
         expect(submitted.response.responseId).toBe(shown.response.responseId);
         expect(submitted.response.dismissedAt).toBeUndefined();
-        expect(submitted.response.rating).toBe(4);
+        expect(submitted.response.ratingAccuracy).toBe(4);
+        expect(submitted.response.ratingSatisfaction).toBe(3);
 
         const stored = await db.collection(COLL).find({}).toArray();
         expect(stored).toHaveLength(1);
@@ -116,7 +139,8 @@ describe('ChatSurveyResponse model', () => {
                     studentId: 's1',
                     studentName: 'A, Student',
                     conversationId: 'session-1',
-                    rating: 5,
+                    ratingAccuracy: 5,
+                    ratingSatisfaction: 3,
                     comment: 'Very useful',
                     shownAt: new Date('2026-01-01'),
                     submittedAt: new Date('2026-01-02'),
@@ -142,7 +166,8 @@ describe('ChatSurveyResponse model', () => {
             shown: 2,
             dismissed: 1,
             submitted: 1,
-            averageRating: 5
+            averageAccuracy: 5,
+            averageSatisfaction: 3
         });
 
         const csv = ChatSurveyResponse.surveyResponsesToCsv(submitted);

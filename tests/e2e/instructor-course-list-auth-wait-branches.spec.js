@@ -41,14 +41,14 @@ test.describe('onboarding course list and auth wait branches', () => {
     test('falls back to custom course option when joinable courses request fails', async ({ page }) => {
         await gotoOnboarding(page, { joinableStatus: 500 });
 
-        await expect(page.locator('#course-select option[value="custom"]')).toHaveText('Enter custom course name...');
+        await expect(page.locator('#course-select option[value="custom"]')).toHaveText('Create a new course...');
         await expect(page.locator('#course-select option')).toHaveCount(2);
     });
 
     test('falls back to custom course option when joinable courses response is unsuccessful', async ({ page }) => {
         await gotoOnboarding(page, { joinableSuccess: false });
 
-        await expect(page.locator('#course-select option[value="custom"]')).toHaveText('Enter custom course name...');
+        await expect(page.locator('#course-select option[value="custom"]')).toHaveText('Create a new course...');
         await expect(page.locator('#course-select option')).toHaveCount(2);
     });
 

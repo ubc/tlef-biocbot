@@ -57,7 +57,9 @@ function buildSettingsSnapshot(settings = {}) {
         enabled: settings.enabled === true,
         triggerMessageCount: Number.isInteger(triggerMessageCount) ? triggerMessageCount : null,
         promptText: normalizeText(settings.promptText, 1000),
-        ratingPrompt: normalizeText(settings.ratingPrompt, 500),
+        introText: normalizeText(settings.introText, 2000),
+        accuracyPrompt: normalizeText(settings.accuracyPrompt, 500),
+        satisfactionPrompt: normalizeText(settings.satisfactionPrompt, 500),
         allowFreeText: settings.allowFreeText === true
     };
 }
@@ -123,9 +125,17 @@ async function upsertChatSurveyEvent(db, data = {}) {
         return { success: false, error: 'settingsFingerprint is required' };
     }
 
-    const rating = eventType === 'submitted' ? normalizeStarRating(data.rating) : null;
-    if (eventType === 'submitted' && rating === undefined) {
-        return { success: false, error: 'rating must be an integer from 1 to 5' };
+    let ratingAccuracy = null;
+    let ratingSatisfaction = null;
+    if (eventType === 'submitted') {
+        ratingAccuracy = normalizeStarRating(data.ratingAccuracy);
+        ratingSatisfaction = normalizeStarRating(data.ratingSatisfaction);
+        if (ratingAccuracy === undefined) {
+            return { success: false, error: 'ratingAccuracy must be an integer from 1 to 5' };
+        }
+        if (ratingSatisfaction === undefined) {
+            return { success: false, error: 'ratingSatisfaction must be an integer from 1 to 5' };
+        }
     }
 
     const now = new Date();
@@ -158,7 +168,9 @@ async function upsertChatSurveyEvent(db, data = {}) {
             botMode: normalizeText(data.botMode, 60) || null,
             messageCountAtPrompt: normalizeMessageCount(data.messageCountAtPrompt),
             promptText: settingsSnapshot.promptText || null,
-            ratingPrompt: settingsSnapshot.ratingPrompt || null,
+            introText: settingsSnapshot.introText || null,
+            accuracyPrompt: settingsSnapshot.accuracyPrompt || null,
+            satisfactionPrompt: settingsSnapshot.satisfactionPrompt || null,
             triggerMessageCount: settingsSnapshot.triggerMessageCount,
             allowFreeText: settingsSnapshot.allowFreeText,
             settingsSnapshot,
@@ -180,7 +192,8 @@ async function upsertChatSurveyEvent(db, data = {}) {
     if (eventType === 'submitted') {
         update.$set.shownAt = existing?.shownAt || now;
         update.$set.submittedAt = now;
-        update.$set.rating = rating;
+        update.$set.ratingAccuracy = ratingAccuracy;
+        update.$set.ratingSatisfaction = ratingSatisfaction;
         update.$set.comment = settingsSnapshot.allowFreeText ? normalizeComment(data.comment) : null;
         update.$unset = { dismissedAt: '' };
     }
@@ -247,8 +260,16 @@ async function listSurveyResponsesForCourse(db, courseId, options = {}) {
 async function getSurveyStatsForCourse(db, courseId) {
     const collection = getChatSurveyResponseCollection(db);
     const responses = await collection.find({ courseId: normalizeText(courseId, 120) }).toArray();
-    const ratings = responses
-        .map(item => item.rating)
+
+    const average = (values) => values.length
+        ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2))
+        : null;
+
+    const accuracyRatings = responses
+        .map(item => item.ratingAccuracy)
+        .filter(rating => typeof rating === 'number');
+    const satisfactionRatings = responses
+        .map(item => item.ratingSatisfaction)
         .filter(rating => typeof rating === 'number');
 
     return {
@@ -256,9 +277,8 @@ async function getSurveyStatsForCourse(db, courseId) {
         shown: responses.filter(item => item.shownAt).length,
         dismissed: responses.filter(item => item.dismissedAt && !item.submittedAt).length,
         submitted: responses.filter(item => item.submittedAt).length,
-        averageRating: ratings.length
-            ? Number((ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length).toFixed(2))
-            : null
+        averageAccuracy: average(accuracyRatings),
+        averageSatisfaction: average(satisfactionRatings)
     };
 }
 
@@ -283,9 +303,12 @@ function surveyResponsesToCsv(responses) {
         'triggerMessageCount',
         'messageCountAtPrompt',
         'promptText',
-        'ratingPrompt',
+        'introText',
+        'accuracyPrompt',
+        'satisfactionPrompt',
         'allowFreeText',
-        'rating',
+        'ratingAccuracy',
+        'ratingSatisfaction',
         'comment',
         'lastEvent',
         'createdAt',

@@ -5,8 +5,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const DEFAULT_CHAT_SURVEY_SETTINGS = {
         enabled: false,
         triggerMessageCount: 10,
-        promptText: 'Was this chat helpful?',
-        ratingPrompt: 'How useful was this conversation?',
+        promptText: 'How useful is this chat so far',
+        introText: 'So BIOCBOT would like your help to improve the user and learning experience, if you are able to please rate your recent experience with BIOCBOT',
+        accuracyPrompt: 'Has BIOCBOT been presenting accurate and appropriate content?',
+        satisfactionPrompt: 'Are you satisfied with your learning experience using BIOCBOT?',
         allowFreeText: false,
         minTriggerMessageCount: 2,
         maxTriggerMessageCount: 30
@@ -418,6 +420,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const allowLocalLoginToggle = document.getElementById('allow-local-login-toggle');
                 if (allowLocalLoginToggle) {
                     allowLocalLoginToggle.checked = result.settings.allowLocalLogin !== false; // Default true
+                }
+                const academicApiToggle = document.getElementById('academic-api-enabled-toggle');
+                if (academicApiToggle) {
+                    academicApiToggle.checked = result.settings.academicApiEnabled === true; // Default off
                 }
             }
         } catch (error) {
@@ -952,7 +958,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const enabledToggle = document.getElementById('chat-survey-enabled-toggle');
         const triggerInput = document.getElementById('chat-survey-trigger-input');
         const promptInput = document.getElementById('chat-survey-prompt-input');
-        const ratingInput = document.getElementById('chat-survey-rating-input');
+        const introInput = document.getElementById('chat-survey-intro-input');
+        const accuracyInput = document.getElementById('chat-survey-accuracy-input');
+        const satisfactionInput = document.getElementById('chat-survey-satisfaction-input');
         const freeTextToggle = document.getElementById('chat-survey-free-text-toggle');
 
         if (enabledToggle) enabledToggle.checked = merged.enabled === true;
@@ -962,7 +970,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             triggerInput.value = merged.triggerMessageCount || DEFAULT_CHAT_SURVEY_SETTINGS.triggerMessageCount;
         }
         if (promptInput) promptInput.value = merged.promptText || DEFAULT_CHAT_SURVEY_SETTINGS.promptText;
-        if (ratingInput) ratingInput.value = merged.ratingPrompt || DEFAULT_CHAT_SURVEY_SETTINGS.ratingPrompt;
+        if (introInput) introInput.value = merged.introText || DEFAULT_CHAT_SURVEY_SETTINGS.introText;
+        if (accuracyInput) accuracyInput.value = merged.accuracyPrompt || DEFAULT_CHAT_SURVEY_SETTINGS.accuracyPrompt;
+        if (satisfactionInput) satisfactionInput.value = merged.satisfactionPrompt || DEFAULT_CHAT_SURVEY_SETTINGS.satisfactionPrompt;
         if (freeTextToggle) freeTextToggle.checked = merged.allowFreeText === true;
     }
 
@@ -998,7 +1008,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             enabled: document.getElementById('chat-survey-enabled-toggle')?.checked === true,
             triggerMessageCount,
             promptText: document.getElementById('chat-survey-prompt-input')?.value || DEFAULT_CHAT_SURVEY_SETTINGS.promptText,
-            ratingPrompt: document.getElementById('chat-survey-rating-input')?.value || DEFAULT_CHAT_SURVEY_SETTINGS.ratingPrompt,
+            introText: document.getElementById('chat-survey-intro-input')?.value || DEFAULT_CHAT_SURVEY_SETTINGS.introText,
+            accuracyPrompt: document.getElementById('chat-survey-accuracy-input')?.value || DEFAULT_CHAT_SURVEY_SETTINGS.accuracyPrompt,
+            satisfactionPrompt: document.getElementById('chat-survey-satisfaction-input')?.value || DEFAULT_CHAT_SURVEY_SETTINGS.satisfactionPrompt,
             allowFreeText: document.getElementById('chat-survey-free-text-toggle')?.checked === true
         };
     }
@@ -1498,6 +1510,21 @@ document.addEventListener('DOMContentLoaded', async () => {
             throw new Error(result.error || 'Failed to save login settings');
         }
         showNotification('Login settings saved', 'success');
+    }, { busyLabel: 'Saving...' });
+
+    // Admin: academic API integration gate
+    wireSectionButton('save-academic-api-settings', async () => {
+        const academicApiEnabled = document.getElementById('academic-api-enabled-toggle')?.checked;
+        const response = await fetch('/api/settings/global', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ academicApiEnabled })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || 'Failed to save academic API settings');
+        }
+        showNotification('Academic API settings saved', 'success');
     }, { busyLabel: 'Saving...' });
 
     // Admin: question generation prompts
@@ -2223,6 +2250,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const adminSectionIds = [
             'database-management-section',
             'login-restriction-section',
+            'academic-api-section',
             'question-generation-section',
             'mental-health-detection-section',
             'system-admin-section',

@@ -23,6 +23,7 @@ const { applyAccessState, normalizeEmail } = require('../services/authorization'
  *   authProvider: String,        // "basic" or "saml" (for future)
  *   samlId: String,              // SAML identifier (for future)
  *   puid: String,                // UBC Personal Unique Identifier (for CWL authentication)
+ *   academicStudentId: String,   // UBC student number from the academic API roster
  *   isActive: Boolean,           // Account status
  *   lastLogin: Date,             // Last login timestamp
  *   createdAt: Date,             // Account creation timestamp
@@ -59,6 +60,8 @@ function toSessionUser(user) {
         baseRole: resolvedUser.baseRole,
         displayName: resolvedUser.displayName,
         authProvider: resolvedUser.authProvider,
+        puid: resolvedUser.puid,
+        academicStudentId: resolvedUser.academicStudentId,
         preferences: resolvedUser.preferences,
         permissions: resolvedUser.permissions,
         invitedCourses: resolvedUser.invitedCourses || []
@@ -96,6 +99,7 @@ async function createUser(db, userData) {
         authProvider: userData.authProvider || 'basic',
         samlId: userData.samlId || null,
         puid: userData.puid || null, // UBC Personal Unique Identifier (for CWL authentication)
+        academicStudentId: userData.academicStudentId || null,
         isActive: true,
         lastLogin: null,
         createdAt: now,
@@ -241,6 +245,8 @@ async function getUserById(db, userId) {
         baseRole: resolvedUser.baseRole,
         displayName: resolvedUser.displayName,
         authProvider: resolvedUser.authProvider,
+        puid: resolvedUser.puid,
+        academicStudentId: resolvedUser.academicStudentId,
         preferences: resolvedUser.preferences,
         lastLogin: resolvedUser.lastLogin,
         struggleState: resolvedUser.struggleState,
@@ -285,6 +291,7 @@ async function getUserByPuid(db, puid) {
         preferences: resolvedUser.preferences,
         lastLogin: resolvedUser.lastLogin,
         puid: resolvedUser.puid,
+        academicStudentId: resolvedUser.academicStudentId,
         permissions: resolvedUser.permissions
     };
 }

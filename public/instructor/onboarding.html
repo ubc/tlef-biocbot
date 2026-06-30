@@ -144,7 +144,27 @@
                                 <label for="custom-course-name">Course Name</label>
                                 <input type="text" id="custom-course-name" name="customCourseName" placeholder="e.g., BIOC 401 - Special Topics">
                             </div>
+                        </div>
 
+                        <div id="academic-sync-section" class="form-section" style="display: none;">
+                            <h3>Class List Sync</h3>
+                            <div class="form-row academic-sync-controls">
+                                <div class="form-group">
+                                    <label for="academic-period-input">Session</label>
+                                    <select id="academic-period-input" name="academicPeriod">
+                                        <option value="">Loading sessions...</option>
+                                    </select>
+                                </div>
+                                <div class="form-group academic-sync-action">
+                                    <label>&nbsp;</label>
+                                    <button type="button" id="load-academic-sections-btn" class="btn-secondary">Find My Sections</button>
+                                </div>
+                            </div>
+                            <div id="academic-sync-status" class="academic-sync-status" role="status" aria-live="polite"></div>
+                            <div id="academic-sections-list" class="academic-sections-list" hidden></div>
+                        </div>
+
+                        <div id="course-api-key-section" class="form-section">
                             <div class="form-group">
                                 <label for="course-api-key">Course OpenAI API Key</label>
                                 <input type="password" id="course-api-key" name="apiKey" placeholder="sk-..." autocomplete="off">

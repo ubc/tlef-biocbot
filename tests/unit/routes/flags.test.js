@@ -126,3 +126,66 @@ describe('DELETE /:flagId', () => {
         expect(await db.collection('flaggedQuestions').findOne({ flagId: 'f1' })).toBeNull();
     });
 });
+
+describe('instructor and TA flag review readers', () => {
+    test('GET /course filters flags and enforces course access', async () => {
+        const db = memoryDb({
+            courses: [{ courseId: 'C1', instructorId: 'i1' }],
+            flaggedQuestions: [
+                { flagId: 'f1', courseId: 'C1', flagStatus: 'pending' },
+                { flagId: 'f2', courseId: 'C1', flagStatus: 'resolved' },
+            ],
+        });
+        let res = await request(app({ db, user: instructor })).get('/course/C1?status=pending');
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ courseId: 'C1', count: 1 });
+        res = await request(app({ db, user: student })).get('/course/C1');
+        expect(res.status).toBe(403);
+    });
+
+    test('GET /status scopes results to readable instructor courses', async () => {
+        const db = memoryDb({
+            courses: [{ courseId: 'C1', instructorId: 'i1' }, { courseId: 'C2', instructorId: 'other' }],
+            flaggedQuestions: [
+                { flagId: 'f1', courseId: 'C1', flagStatus: 'pending' },
+                { flagId: 'f2', courseId: 'C2', flagStatus: 'pending' },
+            ],
+        });
+        const res = await request(app({ db, user: instructor })).get('/status/pending');
+        expect(res.status).toBe(200);
+        expect(res.body.data.flags.map(flag => flag.flagId)).toEqual(['f1']);
+        expect((await request(app({ db, user: student })).get('/status/pending')).status).toBe(403);
+    });
+
+    test('GET /:flagId returns an authorized flag and hides inaccessible flags', async () => {
+        const db = memoryDb({
+            courses: [{ courseId: 'C1', instructorId: 'i1' }],
+            flaggedQuestions: [{ flagId: 'f1', courseId: 'C1', flagStatus: 'pending' }],
+        });
+        expect((await request(app({ db, user: instructor })).get('/f1')).body.data.flagId).toBe('f1');
+        expect((await request(app({ db, user: student })).get('/f1')).status).toBe(403);
+        expect((await request(app({ db, user: instructor })).get('/missing')).status).toBe(404);
+    });
+});
+
+describe('PUT /:flagId/response', () => {
+    test('validates response and access', async () => {
+        expect((await request(app({ db: memoryDb({}), user: instructor })).put('/f1/response').send({})).status).toBe(400);
+        const db = memoryDb({
+            courses: [{ courseId: 'C1', instructorId: 'other' }],
+            flaggedQuestions: [{ flagId: 'f1', courseId: 'C1' }],
+        });
+        expect((await request(app({ db, user: instructor })).put('/f1/response').send({ response: 'Reviewed' })).status).toBe(403);
+    });
+
+    test('persists the authenticated instructor response and optional status', async () => {
+        const db = memoryDb({
+            courses: [{ courseId: 'C1', instructorId: 'i1' }],
+            flaggedQuestions: [{ flagId: 'f1', courseId: 'C1', flagStatus: 'pending' }],
+        });
+        const res = await request(app({ db, user: instructor })).put('/f1/response').send({ response: 'Corrected explanation', flagStatus: 'resolved' });
+        expect(res.status).toBe(200);
+        const stored = await db.collection('flaggedQuestions').findOne({ flagId: 'f1' });
+        expect(stored).toMatchObject({ instructorResponse: 'Corrected explanation', flagStatus: 'resolved', instructorId: 'i1' });
+    });
+});

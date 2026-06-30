@@ -291,17 +291,18 @@ function showCourseSelection(courses) {
 
             if (selectedCourseId) {
                 console.log('Course selected:', selectedCourseId, 'Enrolled:', isEnrolled);
-                
+
+                // Already enrolled (e.g. via the academic roster sync when the
+                // academic API is on, or a prior join): load directly. Otherwise
+                // fall back to the course-code join flow.
                 if (isEnrolled) {
-                    // Already enrolled, load normally
                     await loadCourseData(selectedCourseId, true);
-                    // Hide the course selection after selection
                     const courseSelectionWrapper = document.getElementById('course-selection-wrapper');
                     if (courseSelectionWrapper) {
                         courseSelectionWrapper.style.display = 'none';
                     }
                 } else {
-                    // Not enrolled, prompt for code
+                    // Not enrolled, prompt for the course code provided by the instructor.
                     const code = prompt("Please enter the Course Code provided by your instructor:");
                     if (code) {
                         try {
@@ -310,7 +311,7 @@ function showCourseSelection(courses) {
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ code })
                             });
-                            
+
                             const result = await response.json();
                             if (result.success) {
                                 alert('Successfully joined the course!');

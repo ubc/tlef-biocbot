@@ -39,8 +39,10 @@ describe('settings chat survey routes', () => {
             settings: {
                 enabled: false,
                 triggerMessageCount: 10,
-                promptText: 'Was this chat helpful?',
-                ratingPrompt: 'How useful was this conversation?',
+                promptText: 'How useful is this chat so far',
+                introText: 'So BIOCBOT would like your help to improve the user and learning experience, if you are able to please rate your recent experience with BIOCBOT',
+                accuracyPrompt: 'Has BIOCBOT been presenting accurate and appropriate content?',
+                satisfactionPrompt: 'Are you satisfied with your learning experience using BIOCBOT?',
                 allowFreeText: false
             },
             defaults: {
@@ -60,7 +62,9 @@ describe('settings chat survey routes', () => {
             enabled: true,
             triggerMessageCount: 14,
             promptText: '  Did this help your studying? ',
-            ratingPrompt: '  Rate this exchange  ',
+            introText: '  Please   rate your experience  ',
+            accuracyPrompt: '  Was it accurate?  ',
+            satisfactionPrompt: '  Are you   satisfied?  ',
             allowFreeText: false
         });
 
@@ -69,7 +73,9 @@ describe('settings chat survey routes', () => {
             enabled: true,
             triggerMessageCount: 14,
             promptText: 'Did this help your studying?',
-            ratingPrompt: 'Rate this exchange',
+            introText: 'Please rate your experience',
+            accuracyPrompt: 'Was it accurate?',
+            satisfactionPrompt: 'Are you satisfied?',
             allowFreeText: false
         });
 
