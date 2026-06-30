@@ -61,16 +61,40 @@ async function revealModal(page, selector, mode) {
 /**
  * @typedef {Object} ModalCase
  * @property {string} route   Route the modal lives on.
- * @property {string} id      Modal element id (used as selector + test name).
- * @property {'show' | 'flex' | 'block'} mode  How the app reveals it.
+ * @property {string} [name]  Label used in the test title (defaults to `#id`).
+ * @property {string} [id]    Modal element id; revealed via `mode` and scanned by
+ *                            `#id` unless `include` / `setup` override it.
+ * @property {'show' | 'flex' | 'block'} [mode]  How the app reveals an `id` modal.
+ * @property {string} [include]  axe scope selector (defaults to `#id`). Use for
+ *                            dynamically-injected popups without a stable id.
+ * @property {(page: import('@playwright/test').Page) => Promise<void>} [setup]
+ *                            Custom reveal (call the app's own open API / inject a
+ *                            toast) instead of the default class/style flip.
  */
 
 /** @param {import('@playwright/test').Page} page @param {ModalCase} modal */
 async function scanModal(page, modal) {
     await page.goto(modal.route);
     await page.waitForLoadState('load');
-    await revealModal(page, `#${modal.id}`, modal.mode);
-    await expectNoA11yViolations(page, { include: `#${modal.id}` });
+
+    const include = modal.include || (modal.id ? `#${modal.id}` : undefined);
+
+    if (modal.setup) {
+        await modal.setup(page);
+        if (include) {
+            await expect(page.locator(include).first()).toBeVisible({ timeout: 10_000 });
+        }
+    } else {
+        await revealModal(page, `#${modal.id}`, /** @type {'show'|'flex'|'block'} */ (modal.mode));
+    }
+
+    await expectNoA11yViolations(page, { include });
+}
+
+/** @param {ModalCase} modal */
+function modalTitle(modal) {
+    const label = modal.name || `#${modal.id}`;
+    return `${modal.route} ${label} has no critical/serious a11y violations`;
 }
 
 // --- Instructor modals (default instructor session) ---------------------------
@@ -92,7 +116,7 @@ test.describe('Accessibility: instructor modals', () => {
     test.use({ storageState: storageStatePath('instructor') });
 
     for (const modal of INSTRUCTOR_MODALS) {
-        test(`${modal.route} #${modal.id} has no critical/serious a11y violations`, async ({ page }) => {
+        test(modalTitle(modal), async ({ page }) => {
             await scanModal(page, modal);
         });
     }
@@ -123,7 +147,7 @@ test.describe('Accessibility: instructor downloads modals', () => {
     });
 
     for (const modal of DOWNLOADS_MODALS) {
-        test(`${modal.route} #${modal.id} has no critical/serious a11y violations`, async ({ page }) => {
+        test(modalTitle(modal), async ({ page }) => {
             await scanModal(page, modal);
         });
     }
@@ -141,8 +165,165 @@ test.describe('Accessibility: student modals', () => {
     test.use({ storageState: storageStatePath('student') });
 
     for (const modal of STUDENT_MODALS) {
-        test(`${modal.route} #${modal.id} has no critical/serious a11y violations`, async ({ page }) => {
+        test(modalTitle(modal), async ({ page }) => {
             await scanModal(page, modal);
         });
     }
+});
+
+// --- Instructor onboarding modals (fresh instructor before onboarding done) ---
+// /instructor/onboarding ships its own copies of the documents modals; a
+// completed instructor is redirected away, so these use the instructor_fresh
+// session (same state the baseline /instructor/onboarding scan uses).
+
+/** @type {ModalCase[]} */
+const ONBOARDING_MODALS = [
+    { route: '/instructor/onboarding', id: 'upload-modal', mode: 'show' },
+    { route: '/instructor/onboarding', id: 'question-modal', mode: 'show' },
+    { route: '/instructor/onboarding', id: 'regenerate-modal', mode: 'show' },
+    { route: '/instructor/onboarding', id: 'auto-link-confirmation-modal', mode: 'show' },
+    { route: '/instructor/onboarding', id: 'question-learning-objective-modal', mode: 'show' },
+];
+
+test.describe('Accessibility: instructor onboarding modals', () => {
+    test.use({ storageState: storageStatePath('instructor_fresh') });
+
+    for (const modal of ONBOARDING_MODALS) {
+        test(modalTitle(modal), async ({ page }) => {
+            await scanModal(page, modal);
+        });
+    }
+});
+
+// --- Dynamically-injected popups (no static markup) ---------------------------
+// These are built at runtime, so the baseline scans never see them. We drive the
+// app's own API to create them, then scope axe to the injected container.
+
+test.describe('Accessibility: student agreement modal', () => {
+    test.use({ storageState: storageStatePath('student') });
+
+    /** @type {ModalCase[]} */
+    const cases = [
+        {
+            route: '/student',
+            name: 'agreement modal (consent mode)',
+            include: '.agreement-modal-overlay',
+            setup: async (page) => {
+                await page.waitForFunction(() => Boolean(/** @type {any} */(window).agreementModal));
+                await page.evaluate(() => /** @type {any} */(window).agreementModal.show(false));
+            },
+        },
+        {
+            route: '/student',
+            name: 'agreement modal (read-only mode)',
+            include: '.agreement-modal-overlay',
+            setup: async (page) => {
+                await page.waitForFunction(() => Boolean(/** @type {any} */(window).agreementModal));
+                await page.evaluate(() => /** @type {any} */(window).agreementModal.show(true));
+            },
+        },
+    ];
+
+    for (const modal of cases) {
+        test(modalTitle(modal), async ({ page }) => {
+            await scanModal(page, modal);
+        });
+    }
+});
+
+test.describe('Accessibility: instructor notification toasts', () => {
+    test.use({ storageState: storageStatePath('instructor') });
+
+    /** @type {ModalCase} */
+    const modal = {
+        route: '/instructor/documents',
+        name: 'notification toasts (all severities)',
+        include: '.notification-container',
+        setup: async (page) => {
+            // Seed one toast of every severity so each variant's contrast/markup is
+            // audited (the page backlog already flags `.notification > span`).
+            await page.waitForFunction(() => typeof /** @type {any} */(window).showNotification === "function");
+            await page.evaluate(() => {
+                for (const type of ['success', 'error', 'warning', 'info']) {
+                    /** @type {any} */(window).showNotification(`Sample ${type} notification`, type);
+                }
+            });
+        },
+    };
+
+    test(modalTitle(modal), async ({ page }) => {
+        await scanModal(page, modal);
+    });
+});
+
+// --- Dynamically-built instructor modals --------------------------------------
+// These have no static markup; a global builder constructs them on demand. We
+// call the builder, then reveal, then scope axe to the built node.
+
+test.describe('Accessibility: instructor dynamic modals', () => {
+    test.use({ storageState: storageStatePath('instructor') });
+
+    /** @type {ModalCase[]} */
+    const cases = [
+        {
+            // Topic-detection review popup shown during question/topic generation.
+            route: '/instructor/documents',
+            name: 'topic-review modal',
+            include: '#topic-review-modal',
+            setup: async (page) => {
+                await page.waitForFunction(
+                    () => typeof /** @type {any} */(window).ensureTopicReviewModal === 'function'
+                );
+                await page.evaluate(() => {
+                    const modal = /** @type {any} */(window).ensureTopicReviewModal();
+                    modal.classList.add('show');
+                });
+            },
+        },
+        {
+            // Assign-topic-to-unit popup on the instructor home dashboard.
+            route: '/instructor/home',
+            name: 'topic-unit assignment modal',
+            include: '#topic-unit-assignment-modal',
+            setup: async (page) => {
+                await page.waitForFunction(
+                    () => typeof /** @type {any} */(window).ensureTopicUnitAssignmentModal === 'function'
+                );
+                await page.evaluate(() => {
+                    const modal = /** @type {any} */(window).ensureTopicUnitAssignmentModal();
+                    modal.classList.add('show');
+                });
+            },
+        },
+    ];
+
+    for (const modal of cases) {
+        test(modalTitle(modal), async ({ page }) => {
+            await scanModal(page, modal);
+        });
+    }
+});
+
+// --- Dynamically-built student popups -----------------------------------------
+
+test.describe('Accessibility: student dynamic popups', () => {
+    test.use({ storageState: storageStatePath('student') });
+
+    /** @type {ModalCase} */
+    const modal = {
+        // "Why the message limit?" popup tied to the chat message-count limiter.
+        route: '/student',
+        name: 'chat-limit info modal',
+        include: '#chat-limit-modal-overlay',
+        setup: async (page) => {
+            await page.waitForFunction(
+                () => typeof /** @type {any} */(window).showChatLimitModal === 'function'
+            );
+            await page.evaluate(() => /** @type {any} */(window).showChatLimitModal());
+        },
+    };
+
+    test(modalTitle(modal), async ({ page }) => {
+        await scanModal(page, modal);
+    });
 });
