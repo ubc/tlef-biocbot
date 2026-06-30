@@ -284,47 +284,6 @@ function analyzeChunkSources(searchResults) {
     return analysis;
 }
 
-/**
- * Check if retrieved chunks match learning objectives content
- * @param {Array} searchResults - Array of search results
- * @param {string} courseId - Course ID
- * @param {string} unitName - Unit name
- * @param {Object} db - Database instance
- * @returns {Promise<boolean>} True if chunks match learning objectives
- */
-async function checkLearningObjectivesMatch(searchResults, courseId, unitName, db) {
-    try {
-        // Get learning objectives for the unit
-        const learningObjectives = await CourseModel.getLearningObjectives(db, courseId, unitName);
-
-        if (!learningObjectives || learningObjectives.length === 0) {
-            return false;
-        }
-
-        // Check if any chunk text contains learning objective keywords
-        const objectiveKeywords = learningObjectives.flatMap(obj =>
-            obj.toLowerCase().split(/\s+/).filter(word => word.length > 3)
-        );
-
-        for (const result of searchResults) {
-            const chunkText = result.chunkText.toLowerCase();
-            const matches = objectiveKeywords.filter(keyword =>
-                chunkText.includes(keyword)
-            );
-
-            // If chunk matches multiple learning objective keywords, likely from objectives
-            if (matches.length >= 2) {
-                return true;
-            }
-        }
-
-        return false;
-    } catch (error) {
-        console.error('Error checking learning objectives match:', error);
-        return false;
-    }
-}
-
 // Middleware to parse JSON bodies
 router.use(express.json());
 
@@ -1433,6 +1392,37 @@ ${conversationHistory}`;
             tutorPrompt += lockedHeader + directivePrompt;
             
             console.log(' [CHAT_API] Appended Directive Mode instructions (Header + Strategy) to TUTOR prompt');
+        }
+
+        // Inject the unit's learning objectives directly into the prompt.
+        // We read them deterministically per in-scope unit (single unit, or the
+        // additive set when additive retrieval is on) so the objectives always
+        // match the content the bot can actually retrieve — no keyword/vector
+        // matching. They are appended to basePrompt so every mode (protege/"bot"
+        // and tutor/explain/"student") sees them.
+        try {
+            const objectiveSections = [];
+            for (const ln of lectureNames) {
+                const objectives = await CourseModel.getLearningObjectives(db, courseId, ln);
+                if (!objectives || objectives.length === 0) continue;
+
+                // Shuffle so the model is not positionally biased toward the
+                // first-listed objective; the instruction below also tells it to
+                // treat them as an equally-weighted set.
+                const shuffled = [...objectives].sort(() => Math.random() - 0.5);
+                const list = shuffled.map((o, i) => `${i + 1}. ${o}`).join('\n');
+                objectiveSections.push(`Learning objectives for ${ln}:\n${list}`);
+            }
+
+            if (objectiveSections.length > 0) {
+                basePrompt += `\n\nLEARNING OBJECTIVES (the complete set of goals for the in-scope unit(s); treat every objective as equally important — do not fixate on or default to a single one, and cover the breadth of topics they span):\n\n${objectiveSections.join('\n\n')}`;
+                console.log(`🎯 [CHAT_API] Injected learning objectives for unit(s): ${lectureNames.join(', ')}`);
+            } else {
+                console.log('🎯 [CHAT_API] No learning objectives found for in-scope unit(s)');
+            }
+        } catch (err) {
+            console.error('🎯 [CHAT_API] Error injecting learning objectives:', err);
+            // Non-fatal: continue without injected objectives.
         }
 
         // Check for summary attempt via LLM if requested
