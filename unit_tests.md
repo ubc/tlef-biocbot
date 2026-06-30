@@ -9,8 +9,8 @@ where the last one stopped. Background lives in project memory
 
 ## 0. Current status (2026-06-26)
 
-> **2026-06-30 coverage update:** 1,119 tests pass across 68 suites. Overall Jest
-> coverage is 73.27% statements, 64.18% branches, 83.81% functions, and 74.16%
+> **2026-06-30 coverage update:** 1,140 tests pass across 68 suites. Overall Jest
+> coverage is 75.80% statements, 66.95% branches, 86.32% functions, and 76.77%
 > lines. `src/services/qdrantService.js` now has a direct 36-test unit suite
 > (91.64% statements, 83.73% branches, 100% functions); no e2e tests were
 > changed or removed.

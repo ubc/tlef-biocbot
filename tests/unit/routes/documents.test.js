@@ -11,6 +11,7 @@ jest.mock('ubc-genai-toolkit-core', () => ({ ConsoleLogger: jest.fn() }));
 jest.mock('../../../src/services/gridfs', () => ({
     deleteFile: jest.fn(async () => undefined),
     openDownloadStream: jest.fn(),
+    uploadBuffer: jest.fn(async () => 'grid-file-1'),
 }));
 jest.mock('../../../src/routes/llmKeyMiddleware', () => ({
     resolveCourseAi: jest.fn(async () => ({
@@ -59,6 +60,44 @@ beforeAll(() => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
 });
 afterAll(() => jest.restoreAllMocks());
+
+describe('POST /upload — multipart document upload', () => {
+    function upload(req, fields = {}) {
+        let chain = req
+            .field('courseId', fields.courseId || 'C1')
+            .field('lectureName', fields.lectureName || 'Unit 1')
+            .field('documentType', fields.documentType || 'lecture-notes')
+            .field('instructorId', fields.instructorId || 'i1');
+        if (fields.title) chain = chain.field('title', fields.title);
+        return chain.attach('file', Buffer.from(fields.content || 'ATP is cellular energy.'), {
+            filename: fields.filename || 'notes.txt',
+            contentType: fields.contentType || 'text/plain',
+        });
+    }
+
+    test('requires authentication and matching instructor identity', async () => {
+        expect((await upload(request(app({ db: documentsDb() })).post('/upload'))).status).toBe(401);
+        expect((await upload(request(app({ db: documentsDb(), user: otherInstructor })).post('/upload'))).status).toBe(403);
+    });
+
+    test('stores text files in mocked GridFS, Mongo, course structure, and mocked Qdrant', async () => {
+        const db = documentsDb({ documents: [] });
+        const res = await upload(request(app({ db, user: instructor })).post('/upload'), { title: 'Lecture Notes - Unit 1', content: 'ATP synthesis uses a gradient.' });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ filename: 'Lecture Notes - Unit 1', linkedToCourse: true, qdrantProcessed: true, chunksStored: 3 });
+        expect(gridfs.uploadBuffer).toHaveBeenCalledWith(db, expect.any(Buffer), 'notes.txt', expect.objectContaining({ contentType: 'text/plain' }));
+        const stored = await db.collection('documents').findOne({ documentId: res.body.data.documentId });
+        expect(stored).toMatchObject({ fileId: 'grid-file-1', contentType: 'file', content: 'ATP synthesis uses a gradient.' });
+    });
+
+    test('accepts an assigned TA but stores the owning instructor ID', async () => {
+        const db = documentsDb({ documents: [] });
+        const res = await upload(request(app({ db, user: ta })).post('/upload'), { instructorId: 'i1' });
+        expect(res.status).toBe(200);
+        const stored = await db.collection('documents').findOne({ documentId: res.body.data.documentId });
+        expect(stored.instructorId).toBe('i1');
+    });
+});
 
 describe('POST /text', () => {
     const payload = {

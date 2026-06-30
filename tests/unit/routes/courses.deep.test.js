@@ -208,6 +208,76 @@ describe('document removal and material confirmation', () => {
     });
 });
 
+describe('POST /:courseId/transfer', () => {
+    const sourceCourse = {
+        courseId: 'C1', courseName: 'BIOC 200', instructorId: 'i1', instructors: ['i1'],
+        tas: ['t1'], taPermissions: { t1: { courses: true } },
+        courseDescription: 'Source description', assessmentCriteria: 'Criteria',
+        approvedStruggleTopics: [{ topic: 'ATP Synthesis', unitId: 'Unit 1' }],
+        prompts: { base: 'Custom base' }, quizSettings: { enabled: true },
+        questionPrompts: { systemPrompt: 'Question system' },
+        mentalHealthDetectionPrompt: 'Safety prompt', isAdditiveRetrieval: true,
+        lectures: [{
+            name: 'Unit 1', displayName: 'Energy', isPublished: true,
+            learningObjectives: ['Explain ATP'], passThreshold: 3,
+            assessmentQuestions: [{ questionId: 'q1', question: 'ATP?' }],
+            documents: [], materialsConfirmed: true,
+        }],
+    };
+
+    test('requires authentication, instructor role, and a new course name', async () => {
+        expect((await request(app({ db: memoryDb({ courses: [sourceCourse] }) })).post('/C1/transfer').send({ newCourseName: 'New' })).status).toBe(401);
+        expect((await request(app({ db: memoryDb({ courses: [sourceCourse] }), user: student })).post('/C1/transfer').send({ newCourseName: 'New' })).status).toBe(403);
+        expect((await request(app({ db: memoryDb({ courses: [sourceCourse] }), user: instructor })).post('/C1/transfer').send({ newCourseName: '   ' })).status).toBe(400);
+    });
+
+    test('rejects missing and inaccessible source courses', async () => {
+        expect((await request(app({ db: memoryDb({ courses: [] }), user: instructor })).post('/missing/transfer').send({ newCourseName: 'New', apiKey: 'sk' })).status).toBe(404);
+        const db = memoryDb({ courses: [{ ...sourceCourse, instructorId: 'i2', instructors: ['i2'] }] });
+        expect((await request(app({ db, user: instructor })).post('/C1/transfer').send({ newCourseName: 'New', apiKey: 'sk' })).status).toBe(403);
+    });
+
+    test('maps mocked API-key quota validation', async () => {
+        llmKeyStore.validateApiKey.mockResolvedValueOnce({ ok: false, status: 'quota_exhausted', message: 'spent' });
+        const res = await request(app({ db: memoryDb({ courses: [sourceCourse] }), user: instructor })).post('/C1/transfer').send({ newCourseName: 'New', apiKey: 'spent' });
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe('LLM_KEY_QUOTA');
+    });
+
+    test('copies selected settings, TAs, objectives, and questions into an unpublished course', async () => {
+        const db = memoryDb({ courses: [sourceCourse], documents: [] });
+        const res = await request(app({ db, user: instructor })).post('/C1/transfer').send({
+            newCourseName: ' BIOC 300 ', apiKey: 'sk-new', transferSettings: true, transferTAs: true,
+        });
+        expect(res.status).toBe(200);
+        expect(res.body.data.summary).toEqual({ totalUnits: 1, documentsCopied: 0, settingsTransferred: true, tasTransferred: true });
+        const target = await db.collection('courses').findOne({ courseId: res.body.data.courseId });
+        expect(target).toMatchObject({
+            courseName: 'BIOC 300', instructorId: 'i1', tas: ['t1'], status: 'active',
+            prompts: { base: 'Custom base' }, quizSettings: { enabled: true }, isAdditiveRetrieval: true,
+            lectures: [{ name: 'Unit 1', displayName: 'Energy', isPublished: false, learningObjectives: ['Explain ATP'], passThreshold: 3 }],
+        });
+        expect(target.lectures[0].assessmentQuestions).toHaveLength(1);
+        expect(target.courseCode).not.toBe(target.instructorCourseCode);
+    });
+
+    test('honors per-unit exclusions and can deactivate the source', async () => {
+        const db = memoryDb({ courses: [sourceCourse], documents: [] });
+        const res = await request(app({ db, user: instructor })).post('/C1/transfer').send({
+            newCourseName: 'Minimal Copy', apiKey: 'sk', transferSettings: false, transferTAs: false,
+            deactivateSourceCourse: true,
+            units: [{ unitName: 'Unit 1', transferDocuments: false, transferLearningObjectives: false, transferAssessmentQuestions: false }],
+        });
+        expect(res.status).toBe(200);
+        const target = await db.collection('courses').findOne({ courseId: res.body.data.courseId });
+        expect(target.tas).toEqual([]);
+        expect(target.prompts).toBeUndefined();
+        expect(target.lectures[0].learningObjectives).toEqual([]);
+        expect(target.lectures[0].assessmentQuestions).toEqual([]);
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).status).toBe('inactive');
+    });
+});
+
 describe('POST / — create course', () => {
     // NOTE: contentTypes must be an array — the success path calls
     // generateCourseStructure(...contentTypes) which does contentTypes.includes(),

@@ -38,6 +38,7 @@ const { memoryDb } = require('../helpers/memory-db');
 const { makeRouteApp, request } = require('../helpers/route-app');
 const Course = require('../../../src/models/Course');
 const Document = require('../../../src/models/Document');
+const gridfs = require('../../../src/services/gridfs');
 const MessageFeedback = require('../../../src/models/MessageFeedback');
 const Survey = require('../../../src/models/ChatSurveyResponse');
 const { resolveCourseAi } = require('../../../src/routes/llmKeyMiddleware');
@@ -202,6 +203,51 @@ describe('summary, service utilities, and saved chats', () => {
         const res = await request(app({ db, user: student })).post('/save').send({ ...payload, studentId: 's1', studentName: 'Student One' });
         expect(res.status).toBe(200);
         expect(await db.collection('chat_sessions').findOne({ sessionId: 'v1' })).toMatchObject({ courseId: 'C1', studentId: 's1', isDeleted: false });
+    });
+});
+
+describe('source-attributed document downloads', () => {
+    function downloadDb(enabled = true) {
+        return memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1', quizSettings: { allowSourceAttributionDownloads: enabled } }] });
+    }
+
+    test('requires course, authentication, DB, course existence, and enabled downloads', async () => {
+        expect((await request(app({ user: student, db: downloadDb() })).get('/source-documents/d1/download')).status).toBe(400);
+        expect((await request(app({ db: downloadDb() })).get('/source-documents/d1/download?courseId=C1')).status).toBe(401);
+        expect((await request(app({ db: null, user: student })).get('/source-documents/d1/download?courseId=C1')).status).toBe(503);
+        expect((await request(app({ db: memoryDb({ courses: [] }), user: student })).get('/source-documents/d1/download?courseId=C1')).status).toBe(404);
+        expect((await request(app({ db: downloadDb(false), user: student })).get('/source-documents/d1/download?courseId=C1')).status).toBe(403);
+    });
+
+    test('denies unenrolled students and mismatched documents', async () => {
+        Course.getStudentEnrollment.mockResolvedValueOnce({ success: true, enrolled: false });
+        expect((await request(app({ db: downloadDb(), user: student })).get('/source-documents/d1/download?courseId=C1')).status).toBe(403);
+        Document.getDocumentById.mockResolvedValueOnce({ documentId: 'd1', courseId: 'OTHER' });
+        expect((await request(app({ db: downloadDb(), user: instructor })).get('/source-documents/d1/download?courseId=C1')).status).toBe(404);
+    });
+
+    test('downloads text with a safe inferred filename', async () => {
+        Document.getDocumentById.mockResolvedValueOnce({ documentId: 'd1', courseId: 'C1', contentType: 'text', originalName: '../Notes', mimeType: 'text/plain', content: 'ATP text' });
+        const res = await request(app({ db: downloadDb(), user: instructor })).get('/source-documents/d1/download?courseId=C1');
+        expect(res.status).toBe(200);
+        expect(res.text).toBe('ATP text');
+        expect(res.headers['content-disposition']).toContain('filename="Notes.txt"');
+    });
+
+    test('downloads legacy inline files and rejects malformed binary data', async () => {
+        Document.getDocumentById.mockResolvedValueOnce({ documentId: 'd1', courseId: 'C1', contentType: 'file', originalName: 'slides.pdf', mimeType: 'application/pdf', fileData: { buffer: [1, 2, 3] } });
+        expect((await request(app({ db: downloadDb(), user: instructor })).get('/source-documents/d1/download?courseId=C1')).status).toBe(200);
+        Document.getDocumentById.mockResolvedValueOnce({ documentId: 'd1', courseId: 'C1', contentType: 'file', originalName: 'bad.pdf', fileData: {} });
+        expect((await request(app({ db: downloadDb(), user: instructor })).get('/source-documents/d1/download?courseId=C1')).status).toBe(500);
+    });
+
+    test('streams GridFS-backed files through the mocked storage helper', async () => {
+        const { Readable } = require('stream');
+        Document.getDocumentById.mockResolvedValueOnce({ documentId: 'd1', courseId: 'C1', contentType: 'file', originalName: 'slides.pdf', mimeType: 'application/pdf', fileId: 'grid-1' });
+        gridfs.openDownloadStream.mockReturnValueOnce(Readable.from(Buffer.from('binary')));
+        const res = await request(app({ db: downloadDb(), user: instructor })).get('/source-documents/d1/download?courseId=C1');
+        expect(res.status).toBe(200);
+        expect(gridfs.openDownloadStream).toHaveBeenCalledWith(expect.anything(), 'grid-1');
     });
 });
 
