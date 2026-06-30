@@ -1,7 +1,7 @@
 // @ts-check
 const { defineConfig, devices } = require('@playwright/test');
 
-const PORT = process.env.TLEF_BIOCBOT_PORT || 8085;
+const PORT = process.env.TLEF_BIOCBOT_PORT || 8050;
 const BASE_URL = `http://localhost:${PORT}`;
 const NODE_V8_COVERAGE_DIR = 'coverage-reports/.v8-server';
 const COVERAGE_RUN_ID = process.env.BIOCBOT_COVERAGE_RUN_ID || String(Date.now());

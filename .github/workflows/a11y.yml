@@ -35,7 +35,7 @@ jobs:
     env:
       CI: true
       NODE_ENV: development
-      TLEF_BIOCBOT_PORT: 8085
+      TLEF_BIOCBOT_PORT: 8050
       MONGO_URI: mongodb://mongoadmin:secret@127.0.0.1:27017/biocbot-ci?authSource=admin
       QDRANT_URL: http://127.0.0.1:6333
       QDRANT_API_KEY: super-secret-dev-key

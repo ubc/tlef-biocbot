@@ -450,7 +450,7 @@ test.describe('onboarding.js — additional branches', () => {
         const taId = await getUserIdByUsername(TEST_USERS.ta.username);
         await seedCourse({ courseId: COURSE_A, instructorId, tas: [taId] });
         const taApi = await request.newContext({
-            baseURL: 'http://localhost:8085',
+            baseURL: 'http://localhost:8050',
             storageState: storageStatePath('ta'),
         });
         try {
