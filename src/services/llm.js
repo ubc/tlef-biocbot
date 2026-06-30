@@ -571,18 +571,24 @@ class LLMService {
             console.log('🤖 [LLM_PROMPT] Full prompt being sent:', prompt);
 
             // Create a promise that rejects after the timeout
+            let timeoutId;
             const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('LLM request timed out after 2 minutes')), 120000);
+                timeoutId = setTimeout(() => reject(new Error('LLM request timed out after 2 minutes')), 120000);
             });
 
             // Race between the LLM response and the timeout
             console.log('📝 Generating question...');
             console.log('⏳ This may take up to 2 minutes for complex questions...');
 
-            const response = await Promise.race([
-                this._sendRawMessage(prompt, generationOptions),
-                timeoutPromise
-            ]);
+            let response;
+            try {
+                response = await Promise.race([
+                    this._sendRawMessage(prompt, generationOptions),
+                    timeoutPromise
+                ]);
+            } finally {
+                clearTimeout(timeoutId);
+            }
 
             console.log('🤖 [LLM_RESPONSE] Raw response from LLM:', response);
 
@@ -775,18 +781,24 @@ Return ONLY a JSON object with the following structure:
             console.log('🔄 [LLM_REGENERATE_PROMPT] Full prompt being sent:', prompt);
 
             // Create a promise that rejects after the timeout
+            let timeoutId;
             const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('LLM regeneration request timed out after 2 minutes')), 120000);
+                timeoutId = setTimeout(() => reject(new Error('LLM regeneration request timed out after 2 minutes')), 120000);
             });
 
             // Race between the LLM response and the timeout
             console.log('🔄 Regenerating question based on feedback...');
             console.log('⏳ This may take up to 2 minutes...');
 
-            const response = await Promise.race([
-                this._sendRawMessage(prompt, generationOptions),
-                timeoutPromise
-            ]);
+            let response;
+            try {
+                response = await Promise.race([
+                    this._sendRawMessage(prompt, generationOptions),
+                    timeoutPromise
+                ]);
+            } finally {
+                clearTimeout(timeoutId);
+            }
 
             console.log('🔄 [LLM_REGENERATE_RESPONSE] Raw response from LLM:', response);
 

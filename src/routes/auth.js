@@ -279,8 +279,9 @@ router.post('/logout', (req, res) => {
                 });
 
                 // Set a timeout of 5 seconds
+                let timeoutId;
                 const timeoutPromise = new Promise((_, reject) => {
-                    setTimeout(() => reject(new Error('SAML logout timeout')), 5000);
+                    timeoutId = setTimeout(() => reject(new Error('SAML logout timeout')), 5000);
                 });
 
                 Promise.race([samlLogoutPromise, timeoutPromise])
@@ -294,6 +295,9 @@ router.post('/logout', (req, res) => {
                         debugInfo.error = err.message;
                         // Fallback to local logout
                         performLocalLogout('/login', { samlError: true });
+                    })
+                    .finally(() => {
+                        clearTimeout(timeoutId);
                     });
                     
                 return; // Wait for promise resolution
