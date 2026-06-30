@@ -49,7 +49,7 @@ function showChatLimitModal() {
                     <h2 id="limit-modal-title">Why the message limit?</h2>
                 </div>
                 
-                <div class="info-modal-body">
+                <div class="info-modal-body" tabindex="0" role="region" aria-label="Why the message limit">
                     <div class="info-section">
                         <p>We recommend starting a new session after about 15 messages for a few key reasons:</p>
                         

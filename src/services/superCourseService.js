@@ -337,7 +337,8 @@ async function searchSuperCourse(db, query, limit, options = {}) {
             if (options.qdrant) {
                 await notesQdrant.initialize(options.qdrant);
             }
-            noteResults = await notesQdrant.searchNotes(query, noteSlots, { minScore });
+            const notes = await notesQdrant.searchNotes(query, noteSlots, { minScore });
+            noteResults = Array.isArray(notes) ? notes : [];
         } catch (error) {
             if (error && error.name === 'LlmKeyError') {
                 throw error;
@@ -348,7 +349,7 @@ async function searchSuperCourse(db, query, limit, options = {}) {
     }
 
     // Donate any unfilled note slots back to lectures.
-    const usedNoteSlots = noteResults.length;
+    const usedNoteSlots = Math.min(noteSlots, noteResults.length);
     const finalLectureCount = lectureSlots + (noteSlots - usedNoteSlots);
 
     const taggedLectures = lectureResults
@@ -360,15 +361,17 @@ async function searchSuperCourse(db, query, limit, options = {}) {
     // Fire-and-forget usage counter bump for the notes we actually used.
     if (taggedNotes.length) {
         const noteIds = taggedNotes.map(note => note.noteId).filter(Boolean);
-        SuperChatNote.incrementUsage(db, noteIds).catch(error =>
-            console.error('Failed to increment note usage:', error.message)
-        );
+        if (noteIds.length) {
+            SuperChatNote.incrementUsage(db, noteIds).catch(error =>
+                console.error('Failed to increment note usage:', error.message)
+            );
+        }
     }
 
     return { pool, results: [...taggedLectures, ...taggedNotes] };
 }
 
-function buildCourseNameLookup(pool = []) {
+function buildCourseNameLookup(pool) {
     return new Map(pool.map(course => [
         course.courseId,
         course.courseName || course.courseCode || course.courseId
@@ -504,7 +507,7 @@ function buildSuperCourseSourceAttribution(searchResults = [], pool = []) {
 
     return {
         source: 'super-course',
-        description: description ? `From: ${description}` : 'From uploaded Super Course material',
+        description: `From: ${description}`,
         documents,
         poolCourses
     };

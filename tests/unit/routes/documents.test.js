@@ -25,9 +25,12 @@ jest.mock('../../../src/routes/llmKeyMiddleware', () => ({
     sendLlmKeyError: jest.fn(() => false),
 }));
 
+const { Readable } = require('stream');
+const fs = require('fs');
 const { memoryDb } = require('../helpers/memory-db');
 const { makeRouteApp, request } = require('../helpers/route-app');
 const { resolveCourseAi } = require('../../../src/routes/llmKeyMiddleware');
+const { DocumentParsingModule } = require('ubc-genai-toolkit-document-parsing');
 const gridfs = require('../../../src/services/gridfs');
 const documentsRouter = require('../../../src/routes/documents');
 
@@ -329,5 +332,392 @@ describe('question extraction with mocked LLM and vector chunks', () => {
         expect((await request(app({ db, user: instructor })).post('/d1/extract-questions')).status).toBe(400);
         resolveCourseAi.mockResolvedValueOnce({ llm: {}, qdrant: { getDocumentChunks: jest.fn(async () => { throw new Error('mock vector failure'); }) } });
         expect((await request(app({ db, user: instructor })).post('/d1/extract-questions')).status).toBe(400);
+    });
+
+    test('true-false "false" answers normalize to "False"', async () => {
+        const sendMessage = jest.fn(async () => ({ content: '{"questions":[{"questionType":"true-false","question":"Q?","correctAnswer":"f","explanation":"E"}]}' }));
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage }, qdrant: {} });
+        const res = await request(app({ db: documentsDb(), user: instructor })).post('/d1/extract-questions');
+        expect(res.body.data.questions[0].correctAnswer).toBe('False');
+    });
+
+    test('503 without a db and surfaces an LlmKeyError from extraction as the mapped status', async () => {
+        expect((await request(app({ db: null, user: instructor })).post('/d1/extract-questions')).status).toBe(503);
+
+        const { sendLlmKeyError } = require('../../../src/routes/llmKeyMiddleware');
+        sendLlmKeyError.mockImplementationOnce((res) => { res.status(402).json({ success: false, code: 'invalid' }); return true; });
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage: jest.fn(async () => { throw new Error('boom'); }) }, qdrant: {} });
+        const res = await request(app({ db: documentsDb(), user: instructor })).post('/d1/extract-questions');
+        expect(res.status).toBe(402);
+        sendLlmKeyError.mockReturnValue(false);
+    });
+});
+
+describe('POST /upload — binary parse, slides, and image description', () => {
+    // The parser, fs temp-file IO, and tokenizer are external; only the route's
+    // orchestration of them is under test. Keep fs side-effect-free.
+    let writeSpy;
+    let unlinkSpy;
+    beforeEach(() => {
+        writeSpy = jest.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
+        unlinkSpy = jest.spyOn(fs, 'unlinkSync').mockImplementation(() => {});
+        DocumentParsingModule.mockImplementation((config) => ({
+            __config: config,
+            parse: async () => ({ content: 'Extracted PDF text about ATP.' }),
+        }));
+    });
+    afterEach(() => { writeSpy.mockRestore(); unlinkSpy.mockRestore(); });
+
+    function uploadBinary(req, fields = {}) {
+        return req
+            .field('courseId', fields.courseId || 'C1')
+            .field('lectureName', fields.lectureName || 'Unit 1')
+            .field('documentType', fields.documentType || 'lecture-notes')
+            .field('instructorId', fields.instructorId || 'i1')
+            .attach('file', Buffer.from('%PDF-1.4 binary'), {
+                filename: fields.filename || 'slides.pdf',
+                contentType: fields.contentType || 'application/pdf',
+            });
+    }
+
+    test('parses a PDF via the toolkit, writes/cleans a temp file, and stores the text', async () => {
+        const db = documentsDb({ documents: [] });
+        const res = await uploadBinary(request(app({ db, user: instructor })).post('/upload'));
+        expect(res.status).toBe(200);
+        expect(writeSpy).toHaveBeenCalled();
+        expect(unlinkSpy).toHaveBeenCalled();
+        const stored = await db.collection('documents').findOne({ documentId: res.body.data.documentId });
+        expect(stored.content).toBe('Extracted PDF text about ATP.');
+    });
+
+    test('a parse failure is swallowed and the document is still stored without text', async () => {
+        DocumentParsingModule.mockImplementation(() => ({ parse: async () => ({ content: '' }) }));
+        const db = documentsDb({ documents: [] });
+        const res = await uploadBinary(request(app({ db, user: instructor })).post('/upload'));
+        expect(res.status).toBe(200);
+        expect(res.body.data.qdrantProcessed).toBe(false);
+        const stored = await db.collection('documents').findOne({ documentId: res.body.data.documentId });
+        expect(stored.content).toBe('');
+    });
+
+    test('a temp-file cleanup error is swallowed', async () => {
+        unlinkSpy.mockImplementation(() => { throw new Error('cleanup failed'); });
+        const db = documentsDb({ documents: [] });
+        const res = await uploadBinary(request(app({ db, user: instructor })).post('/upload'));
+        expect(res.status).toBe(200);
+    });
+
+    test('a PPTX upload stores slide chunks through the mocked vector store', async () => {
+        const generateEmbeddings = jest.fn(async (chunks) => chunks.map(() => [0.1, 0.2]));
+        const storeChunks = jest.fn(async (_d, chunks) => chunks.map((c, i) => ({ id: i })));
+        resolveCourseAi.mockResolvedValueOnce({
+            llm: { isReady: () => true, describeImage: jest.fn(async () => 'a chart') },
+            qdrant: { client: {}, generateEmbeddings, storeChunks },
+        });
+        DocumentParsingModule.mockImplementation((config) => ({
+            parse: async () => {
+                await config.onSlide({ text: 'Slide one text', slideNumber: 1, describedImageCount: 1 });
+                await config.onSlide({ text: '   ', slideNumber: 2 }); // blank slide ignored
+                return { content: 'full deck text' };
+            },
+        }));
+        const db = documentsDb({ documents: [] });
+        const res = await request(app({ db, user: instructor })).post('/upload')
+            .field('courseId', 'C1').field('lectureName', 'Unit 1')
+            .field('documentType', 'lecture-notes').field('instructorId', 'i1')
+            .attach('file', Buffer.from('PPTX'), { filename: 'deck.pptx', contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+        expect(res.status).toBe(200);
+        expect(generateEmbeddings).toHaveBeenCalledWith(['Slide one text']);
+        expect(storeChunks).toHaveBeenCalled();
+        expect(res.body.data.chunksStored).toBe(1);
+    });
+
+    test('imageDescriber returns a description when the LLM is ready, and null otherwise', async () => {
+        const describeImage = jest.fn(async () => 'a labelled diagram');
+        let capturedConfig;
+        DocumentParsingModule.mockImplementation((config) => { capturedConfig = config; return { parse: async () => ({ content: 'x' }) }; });
+        resolveCourseAi.mockResolvedValueOnce({
+            llm: { isReady: () => true, describeImage },
+            qdrant: { client: {}, processAndStoreDocument: jest.fn(async () => ({ success: true, chunksStored: 1 })) },
+        });
+        await uploadBinary(request(app({ db: documentsDb({ documents: [] }), user: instructor })).post('/upload'));
+
+        // Drive the captured hook directly across its branches.
+        await expect(capturedConfig.imageDescriber({ data: 'b', mimeType: 'image/png', slideNumber: 3 })).resolves.toBe('a labelled diagram');
+        expect(describeImage).toHaveBeenCalledWith('b', 'image/png', { slideNumber: 3 });
+    });
+
+    test('imageDescriber returns null when the LLM is not ready', async () => {
+        let capturedConfig;
+        DocumentParsingModule.mockImplementation((config) => { capturedConfig = config; return { parse: async () => ({ content: 'x' }) }; });
+        const describeImage = jest.fn();
+        resolveCourseAi.mockResolvedValueOnce({
+            llm: { isReady: () => false, describeImage },
+            qdrant: { client: {}, processAndStoreDocument: jest.fn(async () => ({ success: true, chunksStored: 1 })) },
+        });
+        await uploadBinary(request(app({ db: documentsDb({ documents: [] }), user: instructor })).post('/upload'));
+        await expect(capturedConfig.imageDescriber({ data: 'b', mimeType: 'image/png', slideNumber: 1 })).resolves.toBeNull();
+        expect(describeImage).not.toHaveBeenCalled();
+    });
+
+    test('imageDescriber swallows a generic describe error but rethrows an LlmKeyError', async () => {
+        let capturedConfig;
+        const describeImage = jest.fn();
+        DocumentParsingModule.mockImplementation((config) => { capturedConfig = config; return { parse: async () => ({ content: 'x' }) }; });
+        resolveCourseAi.mockResolvedValueOnce({
+            llm: { isReady: () => true, describeImage },
+            qdrant: { client: {}, processAndStoreDocument: jest.fn(async () => ({ success: true, chunksStored: 1 })) },
+        });
+        await uploadBinary(request(app({ db: documentsDb({ documents: [] }), user: instructor })).post('/upload'));
+
+        describeImage.mockRejectedValueOnce(new Error('vision down'));
+        await expect(capturedConfig.imageDescriber({ data: 'b', mimeType: 'image/png', slideNumber: 1 })).resolves.toBeNull();
+
+        const keyErr = Object.assign(new Error('bad key'), { name: 'LlmKeyError' });
+        describeImage.mockRejectedValueOnce(keyErr);
+        await expect(capturedConfig.imageDescriber({ data: 'b', mimeType: 'image/png', slideNumber: 1 })).rejects.toBe(keyErr);
+    });
+
+});
+
+describe('upload/text — metadata, link warnings, qdrant failures, and catches', () => {
+    test('upload parses comma-separated tags and learning objectives', async () => {
+        const db = documentsDb({ documents: [] });
+        const res = await request(app({ db, user: instructor })).post('/upload')
+            .field('courseId', 'C1').field('lectureName', 'Unit 1')
+            .field('documentType', 'lecture-notes').field('instructorId', 'i1')
+            .field('tags', 'a, b').field('learningObjectives', 'lo1, lo2')
+            .attach('file', Buffer.from('text body'), { filename: 'n.txt', contentType: 'text/plain' });
+        expect(res.status).toBe(200);
+        const stored = await db.collection('documents').findOne({ documentId: res.body.data.documentId });
+        expect(stored.metadata).toMatchObject({ tags: ['a', 'b'], learningObjectives: ['lo1', 'lo2'] });
+    });
+
+    test('upload warns but succeeds when the lecture link fails, and reports qdrant failure', async () => {
+        resolveCourseAi.mockResolvedValueOnce({
+            llm: { isReady: () => false },
+            qdrant: { client: {}, processAndStoreDocument: jest.fn(async () => ({ success: false, error: 'vector boom' })) },
+        });
+        const db = documentsDb({ documents: [], course: { lectures: [{ name: 'Unit 1', documents: [] }] } });
+        const res = await request(app({ db, user: instructor })).post('/upload')
+            .field('courseId', 'C1').field('lectureName', 'Nonexistent Unit')
+            .field('documentType', 'lecture-notes').field('instructorId', 'i1')
+            .attach('file', Buffer.from('text body'), { filename: 'n.txt', contentType: 'text/plain' });
+        expect(res.status).toBe(200);
+        expect(res.body.data.linkedToCourse).toBe(false);
+        expect(res.body.data.qdrantProcessed).toBe(false);
+    });
+
+    test('upload rethrows an LlmKeyError raised during qdrant processing and maps it', async () => {
+        const { sendLlmKeyError } = require('../../../src/routes/llmKeyMiddleware');
+        sendLlmKeyError.mockImplementationOnce((res) => { res.status(402).json({ success: false }); return true; });
+        resolveCourseAi.mockResolvedValueOnce({
+            llm: { isReady: () => false },
+            qdrant: { client: {}, processAndStoreDocument: jest.fn(async () => { throw Object.assign(new Error('k'), { name: 'LlmKeyError' }); }) },
+        });
+        const res = await request(app({ db: documentsDb({ documents: [] }), user: instructor })).post('/upload')
+            .field('courseId', 'C1').field('lectureName', 'Unit 1')
+            .field('documentType', 'lecture-notes').field('instructorId', 'i1')
+            .attach('file', Buffer.from('text body'), { filename: 'n.txt', contentType: 'text/plain' });
+        expect(res.status).toBe(402);
+    });
+
+    test('upload returns 500 when GridFS storage throws', async () => {
+        gridfs.uploadBuffer.mockRejectedValueOnce(new Error('gridfs down'));
+        const res = await request(app({ db: documentsDb({ documents: [] }), user: instructor })).post('/upload')
+            .field('courseId', 'C1').field('lectureName', 'Unit 1')
+            .field('documentType', 'lecture-notes').field('instructorId', 'i1')
+            .attach('file', Buffer.from('text body'), { filename: 'n.txt', contentType: 'text/plain' });
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/Internal server error/);
+    });
+
+    test('text reports a failed lecture link and a failed qdrant result', async () => {
+        resolveCourseAi.mockResolvedValueOnce({ llm: {}, qdrant: { processAndStoreDocument: jest.fn(async () => ({ success: false, error: 'x' })) } });
+        const db = documentsDb({ documents: [] });
+        const res = await request(app({ db, user: instructor })).post('/text').send({
+            courseId: 'C1', lectureName: 'Missing Unit', documentType: 'lecture-notes',
+            instructorId: 'i1', content: 'body', title: 'T',
+        });
+        expect(res.status).toBe(200);
+        expect(res.body.data.linkedToCourse).toBe(false);
+        expect(res.body.data.qdrantProcessed).toBe(false);
+    });
+
+    test('text returns 500 when the model upload throws', async () => {
+        jest.spyOn(require('../../../src/models/Document'), 'uploadDocument').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: documentsDb({ documents: [] }), user: instructor })).post('/text').send({
+            courseId: 'C1', lectureName: 'Unit 1', documentType: 'lecture-notes',
+            instructorId: 'i1', content: 'body', title: 'T',
+        });
+        expect(res.status).toBe(500);
+    });
+});
+
+describe('GET handlers — db guards and catches', () => {
+    test('lecture and stats return 503 without a db', async () => {
+        expect((await request(app({ db: null, user: instructor })).get('/lecture?courseId=C1&lectureName=Unit%201')).status).toBe(503);
+        expect((await request(app({ db: null, user: instructor })).get('/stats?courseId=C1')).status).toBe(503);
+    });
+
+    test('GET /:documentId returns 503 without a db and 404 for a missing doc', async () => {
+        expect((await request(app({ db: null, user: instructor })).get('/whatever')).status).toBe(503);
+        expect((await request(app({ db: documentsDb(), user: instructor })).get('/missing')).status).toBe(404);
+    });
+
+    test('GET /:documentId proceeds when the owning course no longer exists', async () => {
+        const db = documentsDb({ documents: [{ documentId: 'd1', courseId: 'GONE', contentType: 'text', content: 'x' }] });
+        const res = await request(app({ db, user: instructor })).get('/d1');
+        expect(res.status).toBe(200);
+        expect(res.body.data.documentId).toBe('d1');
+    });
+
+    test('lecture and stats map model errors to 500', async () => {
+        const db = documentsDb();
+        jest.spyOn(require('../../../src/models/Document'), 'getDocumentsForLecture').mockRejectedValueOnce(new Error('boom'));
+        expect((await request(app({ db, user: instructor })).get('/lecture?courseId=C1&lectureName=Unit%201')).status).toBe(500);
+        jest.spyOn(require('../../../src/models/Document'), 'getDocumentStats').mockRejectedValueOnce(new Error('boom'));
+        expect((await request(app({ db, user: instructor })).get('/stats?courseId=C1')).status).toBe(500);
+    });
+});
+
+describe('GET /:documentId/download — binary payload shapes and streaming', () => {
+    function fileDoc(fileData, extra = {}) {
+        return documentsDb({ documents: [{
+            documentId: 'd1', courseId: 'C1', contentType: 'file',
+            originalName: 'slides', mimeType: 'application/pdf', fileData, ...extra,
+        }] });
+    }
+
+    test('503 without a db and 404 for a missing document', async () => {
+        expect((await request(app({ db: null, user: instructor })).get('/d1/download')).status).toBe(503);
+        expect((await request(app({ db: documentsDb({ documents: [] }), user: instructor })).get('/missing/download')).status).toBe(404);
+    });
+
+    test('streams a GridFS-backed file and infers a .pdf extension from the mime type', async () => {
+        gridfs.openDownloadStream.mockReturnValueOnce(Readable.from([Buffer.from('PDFBYTES')]));
+        const res = await request(app({ db: fileDoc(undefined, { fileId: 'grid-1' }), user: instructor })).get('/d1/download');
+        expect(res.status).toBe(200);
+        expect(res.headers['content-disposition']).toContain('filename="slides.pdf"');
+        expect(gridfs.openDownloadStream).toHaveBeenCalledWith(expect.anything(), 'grid-1');
+    });
+
+    test('a GridFS stream error before headers yields 500', async () => {
+        // Emit the error only after the route has attached its handler and called pipe(),
+        // so it is never an unhandled stream error (which would crash the worker / hang).
+        const fakeStream = {
+            on(event, cb) { if (event === 'error') this._onError = cb; return this; },
+            pipe(res) { setImmediate(() => this._onError(new Error('read fail'))); return res; },
+        };
+        gridfs.openDownloadStream.mockReturnValueOnce(fakeStream);
+        const res = await request(app({ db: fileDoc(undefined, { fileId: 'grid-err' }), user: instructor })).get('/d1/download');
+        expect(res.status).toBe(500);
+    });
+
+    // memory-db's deep clone strips Buffer-ness, so the raw-Buffer branch (Buffer.isBuffer)
+    // can't be represented through a stored document; the other stored shapes round-trip fine.
+    test.each([
+        ['object with buffer', { buffer: [66, 85, 70] }],
+        ['object with data array', { data: [66, 85, 70] }],
+        ['base64 string', Buffer.from('BUF').toString('base64')],
+    ])('sends inline file data stored as %s', async (_label, fileData) => {
+        const res = await request(app({ db: fileDoc(fileData), user: instructor })).get('/d1/download');
+        expect(res.status).toBe(200);
+        expect(res.headers['content-type']).toContain('application/pdf');
+    });
+
+    test('500 when a file document has no usable stored bytes', async () => {
+        const res = await request(app({ db: fileDoc(undefined), user: instructor })).get('/d1/download');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toBe('Stored file data is invalid');
+    });
+
+    test('an assigned TA without the courses permission is denied', async () => {
+        const db = documentsDb({
+            documents: [{ documentId: 'd1', courseId: 'C1', contentType: 'text', content: 'x' }],
+            course: { tas: ['t1'], taPermissions: { t1: { canAccessCourses: false } } },
+        });
+        expect((await request(app({ db, user: ta })).get('/d1/download')).status).toBe(403);
+    });
+
+    test('maps a model error to 500', async () => {
+        jest.spyOn(require('../../../src/models/Document'), 'getDocumentById').mockRejectedValueOnce(new Error('boom'));
+        expect((await request(app({ db: documentsDb(), user: instructor })).get('/d1/download')).status).toBe(500);
+    });
+});
+
+describe('GET /:documentId and DELETE — remaining guards and catches', () => {
+    test('GET /:documentId maps a model error to 500', async () => {
+        jest.spyOn(require('../../../src/models/Document'), 'getDocumentById').mockRejectedValueOnce(new Error('boom'));
+        expect((await request(app({ db: documentsDb(), user: instructor })).get('/d1')).status).toBe(500);
+    });
+
+    test('DELETE returns 503 without a db', async () => {
+        expect((await request(app({ db: null, user: instructor })).delete('/d1').send({ instructorId: 'i1' })).status).toBe(503);
+    });
+
+    test('DELETE initializes Qdrant when needed and tolerates a failed chunk delete', async () => {
+        const initialize = jest.fn(async () => {});
+        resolveCourseAi.mockResolvedValueOnce({
+            llm: {},
+            qdrant: { client: null, initialize, deleteDocumentChunks: jest.fn(async () => ({ success: false, error: 'no chunks' })) },
+        });
+        const db = documentsDb();
+        const res = await request(app({ db, user: instructor })).delete('/d1').send({ instructorId: 'i1' });
+        expect(res.status).toBe(200);
+        expect(initialize).toHaveBeenCalled();
+        expect(res.body.data.removedFromQdrant).toBe(false);
+    });
+
+    test('DELETE tolerates a thrown Qdrant cleanup error', async () => {
+        resolveCourseAi.mockResolvedValueOnce({
+            llm: {},
+            qdrant: { client: {}, deleteDocumentChunks: jest.fn(async () => { throw new Error('vector boom'); }) },
+        });
+        const db = documentsDb();
+        const res = await request(app({ db, user: instructor })).delete('/d1').send({ instructorId: 'i1' });
+        expect(res.status).toBe(200);
+        expect(res.body.data.removedFromQdrant).toBe(false);
+    });
+
+    test('DELETE maps a thrown error to 500', async () => {
+        jest.spyOn(require('../../../src/models/Document'), 'getDocumentById').mockResolvedValueOnce({ documentId: 'd1', courseId: 'C1' });
+        jest.spyOn(require('../../../src/models/Document'), 'deleteDocument').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: documentsDb(), user: instructor })).delete('/d1').send({ instructorId: 'i1' });
+        expect(res.status).toBe(500);
+    });
+});
+
+describe('POST /cleanup-orphans — counting and catches', () => {
+    test('counts a document-existence check error as an orphan', async () => {
+        const db = documentsDb({
+            documents: [],
+            course: { lectures: [{ name: 'Unit 1', documents: [{ documentId: 'boom-doc' }] }] },
+        });
+        jest.spyOn(require('../../../src/models/Document'), 'getDocumentById').mockRejectedValueOnce(new Error('lookup boom'));
+        const res = await request(app({ db, user: instructor })).post('/cleanup-orphans').send({ courseId: 'C1', instructorId: 'i1' });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toEqual({ totalOrphans: 1, cleanedUnits: 1 });
+    });
+
+    test('maps a thrown error to 500', async () => {
+        jest.spyOn(require('../../../src/models/Course'), 'getCourseWithOnboarding').mockRejectedValueOnce(new Error('boom'));
+        const res = await request(app({ db: documentsDb(), user: instructor })).post('/cleanup-orphans').send({ courseId: 'C1', instructorId: 'i1' });
+        expect(res.status).toBe(500);
+    });
+});
+
+describe('chunk batching boundary', () => {
+    test('oversized content splits chunks across multiple LLM batches', async () => {
+        // Each chunk ~ the limit so the batcher must flush between chunks (covers the batch-push boundary).
+        const big = 'y'.repeat(20000);
+        const db = documentsDb({ documents: [{ documentId: 'd1', courseId: 'C1', lectureName: 'Unit 1', content: 'z'.repeat(40000) }] });
+        const sendMessage = jest.fn(async () => ({ content: '{"questions":[{"questionType":"short-answer","question":"Q?","correctAnswer":"A"}]}' }));
+        const getDocumentChunks = jest.fn(async () => [big, big, big]);
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage }, qdrant: { getDocumentChunks } });
+        const res = await request(app({ db, user: instructor })).post('/d1/extract-questions');
+        expect(res.status).toBe(200);
+        // Three ~20k chunks under a 32k limit → multiple batches → multiple LLM calls.
+        expect(sendMessage.mock.calls.length).toBeGreaterThan(1);
     });
 });

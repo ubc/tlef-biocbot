@@ -344,7 +344,7 @@ test.describe('promote-to-ta + DELETE /tas/:taId', () => {
 
     test.beforeAll(async () => {
         // Register a throwaway student to promote
-        const baseURL = `http://localhost:${process.env.TLEF_BIOCBOT_PORT || 8085}`;
+        const baseURL = `http://localhost:${process.env.TLEF_BIOCBOT_PORT || 8050}`;
         const api = await request.newContext({ baseURL });
         try {
             const username = `e2e_api_auth_promote_${crypto.randomBytes(4).toString('hex')}`;

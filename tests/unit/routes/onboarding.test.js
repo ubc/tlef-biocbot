@@ -20,6 +20,20 @@ const llmKeyStore = require('../../../src/services/llmKeyStore');
 const instructor = { userId: 'i1', role: 'instructor' };
 const student = { userId: 's1', role: 'student' };
 const app = (opts) => makeRouteApp(router, opts);
+const failingDb = () => ({
+    collection: () => new Proxy({}, { get: () => () => { throw new Error('db failed'); } }),
+});
+const callRegisteredHandler = async (path, method, params) => {
+    const layer = router.stack.find(item => item.route?.path === path && item.route.methods[method]);
+    const req = { params, app: { locals: {} } };
+    const res = {
+        statusCode: 200,
+        status: jest.fn(function status(code) { this.statusCode = code; return this; }),
+        json: jest.fn(function json(body) { this.body = body; return this; }),
+    };
+    await layer.route.stack[0].handle(req, res);
+    return res;
+};
 
 beforeAll(() => {
     jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -39,6 +53,10 @@ describe('POST / — create course from onboarding', () => {
     test('400 when courseId or courseName is missing', async () => {
         const res = await request(app({ db: memoryDb({}), user: instructor })).post('/').send({ courseId: 'C1' });
         expect(res.status).toBe(400);
+    });
+
+    test('503 when the database is unavailable', async () => {
+        expect((await request(app({ db: null, user: instructor })).post('/').send(body)).status).toBe(503);
     });
 
     test('400 LLM_KEY_INVALID when the key fails validation', async () => {
@@ -64,11 +82,34 @@ describe('POST / — create course from onboarding', () => {
         expect(saved.llmApiKey.status).toBe('valid');
     });
 
+    test('applies empty defaults when creating a minimal course', async () => {
+        const db = memoryDb({});
+        const res = await request(app({ db, user: instructor })).post('/').send({ courseId: 'C2', courseName: 'Minimal', apiKey: 'sk-test' });
+        expect(res.status).toBe(200);
+        expect(await db.collection('courses').findOne({ courseId: 'C2' })).toMatchObject({
+            courseDescription: '', assessmentCriteria: '', courseMaterials: [], courseStructure: {},
+        });
+    });
+
+    test('reports an existing course as updated although only its key changes', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1', courseName: 'Original' }] });
+        const res = await request(app({ db, user: instructor })).post('/').send({ courseId: 'C1', courseName: 'Renamed', apiKey: 'sk-test' });
+        expect(res.body).toMatchObject({ message: 'Course updated successfully from onboarding', data: { created: false, modifiedCount: 0 } });
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).courseName).toBe('Original');
+    });
+
     test('evicts the course from the LLM registry cache after a key change', async () => {
         const llmRegistry = { evictCourse: jest.fn() };
         const db = memoryDb({});
         await request(app({ db, user: instructor, locals: { llmRegistry } })).post('/').send(body);
         expect(llmRegistry.evictCourse).toHaveBeenCalledWith('C1');
+    });
+
+    test('500 when validation or persistence throws', async () => {
+        llmKeyStore.validateApiKey.mockRejectedValueOnce(new Error('provider failed'));
+        const res = await request(app({ db: memoryDb({}), user: instructor })).post('/').send(body);
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/saving onboarding data/);
     });
 });
 
@@ -88,9 +129,18 @@ describe('GET /test and GET /stats (static routes resolve before /:courseId)', (
         expect(res.status).toBe(200);
         expect(res.body.data).toMatchObject({ totalCourses: 2, totalInstructors: 2 });
     });
+
+    test('GET /stats handles unavailable and failing databases', async () => {
+        expect((await request(app({ db: null })).get('/stats')).status).toBe(503);
+        expect((await request(app({ db: failingDb() })).get('/stats')).status).toBe(500);
+    });
 });
 
 describe('GET /:courseId', () => {
+    test('503 without a database and 500 on persistence failure', async () => {
+        expect((await request(app({ db: null, user: instructor })).get('/C1')).status).toBe(503);
+        expect((await request(app({ db: failingDb(), user: instructor })).get('/C1')).status).toBe(500);
+    });
     test('404 when the course does not exist', async () => {
         const res = await request(app({ db: memoryDb({ courses: [] }), user: instructor })).get('/C1');
         expect(res.status).toBe(404);
@@ -109,6 +159,13 @@ describe('GET /:courseId', () => {
         expect(res.body.data).toMatchObject({ courseId: 'C1', aiAvailable: true });
         expect(res.body.data).not.toHaveProperty('llmApiKey'); // ciphertext never leaves the server
         expect(res.body.data.llmKey).toMatchObject({ status: 'valid' });
+    });
+
+    test('allows a listed instructor or TA, but not an anonymous caller', async () => {
+        const course = { courseId: 'C1', instructorId: 'other', instructors: ['i1'], tas: ['ta1'] };
+        expect((await request(app({ db: memoryDb({ courses: [course] }), user: instructor })).get('/C1')).status).toBe(200);
+        expect((await request(app({ db: memoryDb({ courses: [course] }), user: { userId: 'ta1', role: 'ta' } })).get('/C1')).status).toBe(200);
+        expect((await request(app({ db: memoryDb({ courses: [course] }) })).get('/C1')).status).toBe(403);
     });
 });
 
@@ -130,6 +187,23 @@ describe('GET /instructor/:instructorId', () => {
         expect(res.body.data.courses[0].courseId).toBe('C-active');
         expect(res.body.data.courses[1].courseId).toBe('C-inactive');
     });
+
+    test('includes co-instructed courses and applies date/name tie-breakers', async () => {
+        const db = memoryDb({ courses: [
+            { courseId: 'B', instructors: ['i1'], status: 'active', createdAt: '2026-01-01' },
+            { courseId: 'A', instructorId: 'i1', status: 'active', createdAt: '2026-01-01' },
+            { courseId: 'Newest', instructorId: 'i1', updatedAt: '2026-02-01' },
+        ] });
+        const res = await request(app({ db, user: instructor })).get('/instructor/i1');
+        expect(res.body.data.courses.map(course => course.courseId)).toEqual(['Newest', 'A', 'B']);
+    });
+
+    test('rejects anonymous/non-instructor callers and handles db failures', async () => {
+        expect((await request(app({ db: memoryDb({}) })).get('/instructor/i1')).status).toBe(403);
+        expect((await request(app({ db: memoryDb({}), user: student })).get('/instructor/i1')).status).toBe(403);
+        expect((await request(app({ db: null, user: instructor })).get('/instructor/i1')).status).toBe(503);
+        expect((await request(app({ db: failingDb(), user: instructor })).get('/instructor/i1')).status).toBe(500);
+    });
 });
 
 describe('PUT /:courseId — update fields', () => {
@@ -144,11 +218,31 @@ describe('PUT /:courseId — update fields', () => {
         expect(res.status).toBe(403);
     });
 
+    test('404 for a missing course and 403 for anonymous or non-instructor owners', async () => {
+        expect((await request(app({ db: memoryDb({ courses: [] }), user: instructor })).put('/C1').send({ courseDescription: 'x' })).status).toBe(404);
+        const course = { courseId: 'C1', instructorId: 'i1' };
+        expect((await request(app({ db: memoryDb({ courses: [course] }) })).put('/C1').send({ courseDescription: 'x' })).status).toBe(403);
+        expect((await request(app({ db: memoryDb({ courses: [course] }), user: { ...instructor, role: 'ta' } })).put('/C1').send({ courseDescription: 'x' })).status).toBe(403);
+    });
+
     test('200 persists the updated fields', async () => {
         const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1' }] });
         const res = await request(app({ db, user: instructor })).put('/C1').send({ courseDescription: 'Updated desc' });
         expect(res.status).toBe(200);
         expect((await db.collection('courses').findOne({ courseId: 'C1' })).courseDescription).toBe('Updated desc');
+    });
+
+    test('currently permits ownership and identifier fields to be overwritten', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1' }] });
+        const res = await request(app({ db, user: instructor })).put('/C1').send({ courseId: 'C2', instructorId: 'attacker' });
+        expect(res.status).toBe(200);
+        expect(await db.collection('courses').findOne({ courseId: 'C1' })).toBeNull();
+        expect(await db.collection('courses').findOne({ courseId: 'C2' })).toMatchObject({ instructorId: 'attacker' });
+    });
+
+    test('503 without a db and 500 on update failure', async () => {
+        expect((await request(app({ db: null, user: instructor })).put('/C1').send({ courseDescription: 'x' })).status).toBe(503);
+        expect((await request(app({ db: failingDb(), user: instructor })).put('/C1').send({ courseDescription: 'x' })).status).toBe(500);
     });
 });
 
@@ -163,6 +257,27 @@ describe('PUT /:courseId/unit-files', () => {
         const res = await request(app({ db, user: instructor })).put('/C1/unit-files').send({ unitName: 'Unit 1', files: ['a.pdf'] });
         expect(res.status).toBe(200);
         expect(res.body.data).toMatchObject({ unitName: 'Unit 1', filesCount: 1 });
+    });
+
+    test('404 for a missing course and 403 without instructor ownership', async () => {
+        const payload = { unitName: 'Unit 1', files: [] };
+        expect((await request(app({ db: memoryDb({ courses: [] }), user: instructor })).put('/C1/unit-files').send(payload)).status).toBe(404);
+        const course = { courseId: 'C1', instructorId: 'other' };
+        expect((await request(app({ db: memoryDb({ courses: [course] }), user: instructor })).put('/C1/unit-files').send(payload)).status).toBe(403);
+        expect((await request(app({ db: memoryDb({ courses: [{ ...course, instructorId: 'i1' }] }), user: student })).put('/C1/unit-files').send(payload)).status).toBe(403);
+    });
+
+    test('reports success even when the named unit does not exist', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1', lectures: [] }] });
+        const res = await request(app({ db, user: instructor })).put('/C1/unit-files').send({ unitName: 'Missing', files: ['a.pdf'] });
+        expect(res.status).toBe(200);
+        expect(res.body.data.modifiedCount).toBe(0);
+    });
+
+    test('503 without a db and 500 on update failure', async () => {
+        const payload = { unitName: 'Unit 1', files: [] };
+        expect((await request(app({ db: null, user: instructor })).put('/C1/unit-files').send(payload)).status).toBe(503);
+        expect((await request(app({ db: failingDb(), user: instructor })).put('/C1/unit-files').send(payload)).status).toBe(500);
     });
 });
 
@@ -179,6 +294,13 @@ describe('DELETE /:courseId', () => {
         expect(res.body.data.deletedCount).toBe(1);
         expect(await db.collection('courses').findOne({ courseId: 'C1' })).toBeNull();
     });
+
+    test('403 without instructor ownership, 503 without db, and 500 on failure', async () => {
+        const course = { courseId: 'C1', instructorId: 'other' };
+        expect((await request(app({ db: memoryDb({ courses: [course] }), user: instructor })).delete('/C1')).status).toBe(403);
+        expect((await request(app({ db: null, user: instructor })).delete('/C1')).status).toBe(503);
+        expect((await request(app({ db: failingDb(), user: instructor })).delete('/C1')).status).toBe(500);
+    });
 });
 
 describe('DELETE /:courseId/unit/:unitName', () => {
@@ -189,9 +311,25 @@ describe('DELETE /:courseId/unit/:unitName', () => {
         const saved = await db.collection('courses').findOne({ courseId: 'C1' });
         expect(saved.lectures.map(l => l.name)).toEqual(['Unit 2']);
     });
+
+    test('404 for a missing course and 403 without instructor ownership', async () => {
+        expect((await request(app({ db: memoryDb({ courses: [] }), user: instructor })).delete('/C1/unit/U')).status).toBe(404);
+        const course = { courseId: 'C1', instructorId: 'other' };
+        expect((await request(app({ db: memoryDb({ courses: [course] }), user: instructor })).delete('/C1/unit/U')).status).toBe(403);
+    });
+
+    test('503 without a db and 500 on deletion failure', async () => {
+        expect((await request(app({ db: null, user: instructor })).delete('/C1/unit/U')).status).toBe(503);
+        expect((await request(app({ db: failingDb(), user: instructor })).delete('/C1/unit/U')).status).toBe(500);
+    });
 });
 
 describe('POST /complete', () => {
+    test('401 without a user, 403 for a non-instructor, and 400 without required ids', async () => {
+        expect((await request(app({ db: memoryDb({}) })).post('/complete').send({ courseId: 'C1', instructorId: 'i1' })).status).toBe(401);
+        expect((await request(app({ db: memoryDb({}), user: student })).post('/complete').send({ courseId: 'C1', instructorId: 's1' })).status).toBe(403);
+        expect((await request(app({ db: memoryDb({}), user: instructor })).post('/complete').send({ courseId: 'C1' })).status).toBe(400);
+    });
     test('403 when the body instructorId does not match the session user', async () => {
         const res = await request(app({ db: memoryDb({}), user: instructor })).post('/complete').send({ courseId: 'C1', instructorId: 'other' });
         expect(res.status).toBe(403);
@@ -207,5 +345,29 @@ describe('POST /complete', () => {
         const res = await request(app({ db, user: instructor })).post('/complete').send({ courseId: 'C1', instructorId: 'i1' });
         expect(res.status).toBe(200);
         expect((await db.collection('courses').findOne({ courseId: 'C1' })).isOnboardingComplete).toBe(true);
+    });
+
+    test('403 when the instructor does not own the course', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'other' }] });
+        expect((await request(app({ db, user: instructor })).post('/complete').send({ courseId: 'C1', instructorId: 'i1' })).status).toBe(403);
+    });
+
+    test('503 without a db and 500 on persistence failure', async () => {
+        const payload = { courseId: 'C1', instructorId: 'i1' };
+        expect((await request(app({ db: null, user: instructor })).post('/complete').send(payload)).status).toBe(503);
+        expect((await request(app({ db: failingDb(), user: instructor })).post('/complete').send(payload)).status).toBe(500);
+    });
+});
+
+describe('path-parameter guards precluded by Express route matching', () => {
+    test.each([
+        ['/:courseId', 'get', {}, 'Missing required parameter: courseId'],
+        ['/instructor/:instructorId', 'get', {}, 'Missing required parameter: instructorId'],
+        ['/:courseId', 'delete', {}, 'Missing required parameter: courseId'],
+        ['/:courseId/unit/:unitName', 'delete', { courseId: 'C1' }, 'Missing required parameters: courseId, unitName'],
+    ])('%s %s retains its defensive missing-parameter response', async (path, method, params, message) => {
+        const res = await callRegisteredHandler(path, method, params);
+        expect(res.statusCode).toBe(400);
+        expect(res.body).toEqual({ success: false, message });
     });
 });

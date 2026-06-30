@@ -272,7 +272,6 @@ function normalizeTopicObjectList(topics = [], defaults = {}, existingTopics = [
         if (seen.has(key)) continue;
 
         const normalized = normalizeTopicObject(rawTopic, existingByLabel.get(key), defaults);
-        if (!normalized) continue;
 
         seen.add(key);
         output.push(normalized);

@@ -151,13 +151,9 @@ describe('POST /logout', () => {
         expect(res.body.debug.destroyError).toMatch(/disk full/);
     });
 
-    // These three drive the strategy.logout() branch, which always schedules a real
-    // 5s setTimeout as part of its Promise.race (even when the race already settled
-    // via the strategy callback) — fake timers keep that timer from dangling past the test.
+    // These three drive the strategy.logout() branch and verify both callback and
+    // synchronous failure behavior.
     describe('strategy.logout() branch (schedules a 5s timeout internally)', () => {
-        beforeEach(() => jest.useFakeTimers());
-        afterEach(() => jest.useRealTimers());
-
         test('strategy.logout succeeds and the SAML logout URL becomes the redirect', async () => {
             const user = { userId: 'cwl1', authProvider: 'saml' };
             const session = { destroy: jest.fn((cb) => cb(null)) };

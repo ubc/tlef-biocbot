@@ -2088,7 +2088,7 @@ input:checked+.toggle-slider:before {
     font-weight: 600;
     cursor: pointer;
     background: #f8f9fa;
-    color: #6c757d;
+    color: #5c636a;
     border: 2px solid #e9ecef;
     transition: all 0.2s;
 }
