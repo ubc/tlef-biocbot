@@ -52,7 +52,6 @@
     "ubc-genai-toolkit-llm": "^0.2.3"
   },
   "optionalDependencies": {
-    "//": "Private GitHub Packages module, gated behind the academicApiEnabled setting (default off). Listed as optional so `npm install` succeeds in CI and for anyone without a GitHub token: npm skips it on a fetch/auth failure, the app loads it lazily, and academicApi.js degrades cleanly when it's absent. Install it locally (with registry auth) to develop the academic API features.",
     "@ubc/ubc-genai-toolkit-course-list-sync": "^0.1.3"
   },
   "devDependencies": {
