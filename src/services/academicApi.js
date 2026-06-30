@@ -39,8 +39,34 @@ function setAcademicApiClientForTests(client) {
     academicApiClient = client;
 }
 
+/**
+ * Instance-wide product gate for every academic-API feature (Class List Sync,
+ * roster-driven student enrolment, instructor-of-record join, "set up another
+ * section"). Stored on the `global` settings doc alongside `allowLocalLogin`,
+ * and defaults OFF so staging/prod — where no academic API is wired up yet —
+ * behave exactly as they did before this feature landed.
+ *
+ * Fails closed: a missing setting, missing db, or any read error all resolve to
+ * false, so the feature can never accidentally turn itself on.
+ */
+async function isAcademicApiEnabled(db) {
+    if (!db) return false;
+
+    try {
+        const settings = await db.collection('settings').findOne(
+            { _id: 'global' },
+            { projection: { academicApiEnabled: 1 } }
+        );
+        return !!(settings && settings.academicApiEnabled);
+    } catch (error) {
+        console.error('Failed to read academicApiEnabled setting:', error.message);
+        return false;
+    }
+}
+
 module.exports = {
     createAcademicApiClient,
     getAcademicApiClient,
-    setAcademicApiClientForTests
+    setAcademicApiClientForTests,
+    isAcademicApiEnabled
 };

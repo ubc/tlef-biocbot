@@ -9,6 +9,10 @@ const instructor = {
     displayName: 'Instructor One'
 };
 
+// The academic-sync router is gated behind the instance-wide academic-API
+// setting, so every test here must seed it on.
+const GATE_ON = [{ _id: 'global', academicApiEnabled: true }];
+
 describe('academicSync routes', () => {
     test('fetches instructor sections through the injected academic API client', async () => {
         const academicApi = {
@@ -24,7 +28,7 @@ describe('academicSync routes', () => {
             }])
         };
         const app = makeRouteApp(academicSyncRouter, {
-            db: memoryDb(),
+            db: memoryDb({ settings: GATE_ON }),
             user: instructor,
             locals: { academicApi }
         });
@@ -49,7 +53,7 @@ describe('academicSync routes', () => {
 
     test('rejects instructor section lookup when the authenticated user has no PUID', async () => {
         const app = makeRouteApp(academicSyncRouter, {
-            db: memoryDb(),
+            db: memoryDb({ settings: GATE_ON }),
             user: { ...instructor, puid: null, authProvider: 'basic' },
             locals: { academicApi: { getInstructorSections: jest.fn() } }
         });
@@ -63,6 +67,7 @@ describe('academicSync routes', () => {
 
     test('links sections only for an instructor who owns the course', async () => {
         const db = memoryDb({
+            settings: GATE_ON,
             courses: [{ courseId: 'BIOC-401', instructorId: 'inst-1', instructors: ['inst-1'] }]
         });
         const app = makeRouteApp(academicSyncRouter, { db, user: instructor });
@@ -93,6 +98,7 @@ describe('academicSync routes', () => {
 
     test('rejects linking a course owned by a different instructor', async () => {
         const db = memoryDb({
+            settings: GATE_ON,
             courses: [{ courseId: 'BIOC-402', instructorId: 'someone-else', instructors: ['someone-else'] }]
         });
         const app = makeRouteApp(academicSyncRouter, { db, user: instructor });
@@ -105,6 +111,7 @@ describe('academicSync routes', () => {
 
     test('sync endpoint calls the roster service path and returns the summary', async () => {
         const db = memoryDb({
+            settings: GATE_ON,
             courses: [{
                 courseId: 'BIOC-403',
                 instructorId: 'inst-1',
@@ -136,5 +143,37 @@ describe('academicSync routes', () => {
                 removed: 0
             }
         });
+    });
+});
+
+describe('academicSync gate (academic API disabled)', () => {
+    test('GET endpoints degrade to an empty, disabled response', async () => {
+        const academicApi = { getInstructorSections: jest.fn() };
+        const app = makeRouteApp(academicSyncRouter, {
+            db: memoryDb(), // no global setting → gate off (default)
+            user: instructor,
+            locals: { academicApi }
+        });
+
+        const res = await request(app)
+            .get('/instructor-sections?academicPeriod=AP-2024W1')
+            .expect(200);
+
+        expect(res.body).toMatchObject({ success: true, disabled: true, data: [] });
+        expect(academicApi.getInstructorSections).not.toHaveBeenCalled();
+    });
+
+    test('write endpoints are refused with a clear code', async () => {
+        const db = memoryDb({
+            courses: [{ courseId: 'BIOC-401', instructorId: 'inst-1', instructors: ['inst-1'] }]
+        });
+        const app = makeRouteApp(academicSyncRouter, { db, user: instructor });
+
+        const res = await request(app)
+            .put('/courses/BIOC-401/link')
+            .send({ academicPeriod: 'AP-2024W1', sectionIds: ['SEC-1'] })
+            .expect(403);
+
+        expect(res.body).toMatchObject({ success: false, code: 'ACADEMIC_API_DISABLED' });
     });
 });

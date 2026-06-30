@@ -18,7 +18,7 @@ const {
     validateApiKey
 } = require('../services/llmKeyStore');
 const { resolveCourseAi } = require('./llmKeyMiddleware');
-const { getAcademicApiClient } = require('../services/academicApi');
+const { getAcademicApiClient, isAcademicApiEnabled } = require('../services/academicApi');
 
 // Middleware to parse JSON bodies
 router.use(express.json());
@@ -34,6 +34,12 @@ router.use(express.json());
  * normal code-based join still applies.
  */
 async function isVerifiedInstructorOfRecord(req, course, user) {
+    // Gated off by default: with no academic API, instructor-of-record can't be
+    // verified, so the normal instructor-code join applies (pre-feature behavior).
+    if (!await isAcademicApiEnabled(req.app.locals.db)) {
+        return false;
+    }
+
     const sync = course && course.academicSync;
     const linkedSectionIds = Array.isArray(sync && sync.sectionIds)
         ? sync.sectionIds.filter(Boolean)
@@ -2283,10 +2289,13 @@ router.get('/available/all', async (req, res) => {
             };
         }));
 
-        // Students only get courses they're enrolled in (via the academic roster
-        // sync or an explicit enrollment). Non-enrolled courses are not exposed,
-        // so the selector never offers a course the student can't enter.
-        const responseCourses = (user && user.role === 'student')
+        // With the academic API on, students only get courses they're enrolled in
+        // (enrolment comes from the roster sync), so the selector never offers a
+        // course they can't enter. With it off (the default), there's no roster to
+        // enrol them, so we fall back to the pre-feature behavior: list all active
+        // courses and let them join with a course code.
+        const academicEnabled = await isAcademicApiEnabled(db);
+        const responseCourses = (user && user.role === 'student' && academicEnabled)
             ? transformedCourses.filter(course => course.isEnrolled)
             : transformedCourses;
 

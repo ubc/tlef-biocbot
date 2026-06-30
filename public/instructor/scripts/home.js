@@ -1561,10 +1561,15 @@ async function initializeCourseSelection() {
         applyInstructorCodeJoinPermissions();
     }
     
+    // "Set Up Another Section" lets an instructor create more than one course,
+    // which only applies when the academic API is enabled. Hide it otherwise so
+    // onboarding stays single-course, matching the pre-feature behavior.
+    applyAcademicApiGateToHome();
+
     if (changeCourseBtn) {
         changeCourseBtn.addEventListener('click', showCourseSelector);
     }
-    
+
     if (cancelCourseSelectBtn) {
         cancelCourseSelectBtn.addEventListener('click', hideCourseSelector);
     }
@@ -1698,6 +1703,29 @@ async function checkCourseCodeBypassPermission() {
     } catch (error) {
         console.error('Error checking instructor course-code bypass permission:', error);
         return false;
+    }
+}
+
+// Hide "Set Up Another Section" unless the academic API is enabled for this
+// instance. The button is hidden by default and only revealed once we confirm
+// the feature is on, so a slow/failed check fails to the safe (hidden) state.
+async function applyAcademicApiGateToHome() {
+    const setupBtn = document.getElementById('setup-section-btn');
+    const container = setupBtn ? setupBtn.closest('div') : null;
+    const target = container || setupBtn;
+    if (!target) return;
+
+    target.style.display = 'none';
+    try {
+        const response = await fetch('/api/settings/academic-api-enabled', {
+            credentials: 'include'
+        });
+        const result = await response.json();
+        if (result && result.success && result.enabled) {
+            target.style.display = '';
+        }
+    } catch (error) {
+        console.error('Error checking academic API gate:', error);
     }
 }
 

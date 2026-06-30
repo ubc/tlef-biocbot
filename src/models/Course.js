@@ -4,6 +4,7 @@
  */
 
 const { MongoClient } = require('mongodb');
+const { isAcademicApiEnabled } = require('../services/academicApi');
 
 /**
  * Course Schema Structure:
@@ -1121,10 +1122,20 @@ async function createCourseFromOnboarding(db, onboardingData) {
     } = onboardingData;
     
     try {
-        // Only treat it as "already exists" when this exact course id is present.
-        // Matching by instructorId would block an instructor from ever creating a
-        // second course (e.g. setting up another of their sections).
-        const existingCourse = await collection.findOne({ courseId: onboardingData.courseId });
+        // With the academic API on, an instructor can set up more than one course
+        // (one per section), so we only treat it as "already exists" when this
+        // exact course id is present. With it off (the default), restore the
+        // pre-feature rule: one course per instructor — matching on instructorId
+        // blocks creating a second.
+        const academicEnabled = await isAcademicApiEnabled(db);
+        const existingCourse = academicEnabled
+            ? await collection.findOne({ courseId: onboardingData.courseId })
+            : await collection.findOne({
+                $or: [
+                    { courseId: onboardingData.courseId },
+                    { instructorId: onboardingData.instructorId }
+                ]
+            });
 
         if (existingCourse) {
             console.log(`Course already exists for instructor ${instructorId}: ${existingCourse.courseId}`);

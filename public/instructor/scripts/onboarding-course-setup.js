@@ -157,7 +157,9 @@ function updateAcademicSyncVisibility() {
 
     if (!syncSection || !courseSelect) return;
 
-    const shouldShow = isCreateModeSelection(courseSelect.value);
+    // Class List Sync only exists when the academic API is enabled for this
+    // instance; otherwise it stays hidden and onboarding is the old manual flow.
+    const shouldShow = onboardingAcademicApiEnabled && isCreateModeSelection(courseSelect.value);
     syncSection.style.display = shouldShow ? 'block' : 'none';
 
     if (shouldShow) {
@@ -378,7 +380,23 @@ async function loadAcademicSectionsForOnboarding() {
     }
 }
 
-function initializeAcademicSyncPicker() {
+async function initializeAcademicSyncPicker() {
+    // Gate the whole picker on the instance-wide academic-API setting. When off
+    // (the default), leave the section hidden and don't touch the academic API.
+    try {
+        const response = await authenticatedFetch('/api/settings/academic-api-enabled');
+        const result = await response.json();
+        onboardingAcademicApiEnabled = !!(result && result.success && result.enabled);
+    } catch (error) {
+        console.error('Error checking academic API gate:', error);
+        onboardingAcademicApiEnabled = false;
+    }
+
+    if (!onboardingAcademicApiEnabled) {
+        updateAcademicSyncVisibility();
+        return;
+    }
+
     const button = document.getElementById('load-academic-sections-btn');
     const periodSelect = document.getElementById('academic-period-input');
 
@@ -394,6 +412,9 @@ function initializeAcademicSyncPicker() {
     if (button) {
         button.addEventListener('click', loadAcademicSectionsForOnboarding);
     }
+
+    // The flag may have arrived after the initial layout ran, so reapply it now.
+    updateAcademicSyncVisibility();
 }
 
 /**

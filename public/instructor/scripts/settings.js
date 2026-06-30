@@ -419,6 +419,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (allowLocalLoginToggle) {
                     allowLocalLoginToggle.checked = result.settings.allowLocalLogin !== false; // Default true
                 }
+                const academicApiToggle = document.getElementById('academic-api-enabled-toggle');
+                if (academicApiToggle) {
+                    academicApiToggle.checked = result.settings.academicApiEnabled === true; // Default off
+                }
             }
         } catch (error) {
             console.error('Error loading admin settings:', error);
@@ -1500,6 +1504,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         showNotification('Login settings saved', 'success');
     }, { busyLabel: 'Saving...' });
 
+    // Admin: academic API integration gate
+    wireSectionButton('save-academic-api-settings', async () => {
+        const academicApiEnabled = document.getElementById('academic-api-enabled-toggle')?.checked;
+        const response = await fetch('/api/settings/global', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ academicApiEnabled })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || 'Failed to save academic API settings');
+        }
+        showNotification('Academic API settings saved', 'success');
+    }, { busyLabel: 'Saving...' });
+
     // Admin: question generation prompts
     wireSectionButton('save-question-prompts', async () => {
         const courseId = await getCurrentCourseId();
@@ -2223,6 +2242,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const adminSectionIds = [
             'database-management-section',
             'login-restriction-section',
+            'academic-api-section',
             'question-generation-section',
             'mental-health-detection-section',
             'system-admin-section',

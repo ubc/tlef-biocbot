@@ -1,10 +1,30 @@
 const express = require('express');
 const router = express.Router();
 const CourseModel = require('../models/Course');
-const { getAcademicApiClient } = require('../services/academicApi');
+const { getAcademicApiClient, isAcademicApiEnabled } = require('../services/academicApi');
 const { syncCourseRoster } = require('../services/academicRosterSync');
 
 router.use(express.json());
+
+// Product gate: when the academic API is disabled (the default), no route here
+// may reach the toolkit. Reads degrade quietly to "empty" so any stray frontend
+// call renders nothing rather than erroring; writes (link/sync) are refused.
+// The picker UI is hidden in this state, so users never hit these paths normally.
+router.use(async (req, res, next) => {
+    if (await isAcademicApiEnabled(req.app.locals.db)) {
+        return next();
+    }
+
+    if (req.method === 'GET') {
+        return res.json({ success: true, disabled: true, data: [] });
+    }
+
+    return res.status(403).json({
+        success: false,
+        code: 'ACADEMIC_API_DISABLED',
+        message: 'Academic course sync is currently disabled'
+    });
+});
 
 function getAcademicApi(req) {
     return req.app.locals.academicApi || getAcademicApiClient();

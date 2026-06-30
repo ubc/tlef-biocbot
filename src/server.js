@@ -38,6 +38,7 @@ const academicSyncRoutes = require('./routes/academicSync');
 const LLMService = require('./services/llm');
 const LlmRegistry = require('./services/llmRegistry');
 const AuthService = require('./services/authService');
+const { isAcademicApiEnabled } = require('./services/academicApi');
 const createAuthMiddleware = require('./middleware/auth');
 const initializePassport = require('./config/passport');
 
@@ -388,12 +389,15 @@ function setupProtectedRoutes() {
         try {
             const instructorId = req.user.userId; // Get from authenticated user
 
-            // "Set up another section" deliberately re-enters onboarding to create
-            // a new course, so skip the completed-course redirect in that case.
-            const addingCourse = req.query.addCourse;
-
             // Check if instructor has completed onboarding
             const db = req.app.locals.db;
+
+            // "Set up another section" deliberately re-enters onboarding to create
+            // a new course, so skip the completed-course redirect in that case —
+            // but only when the academic API is on. With it off (the default),
+            // restore the pre-feature behavior: a completed instructor is always
+            // redirected away and can't re-enter onboarding to add a course.
+            const addingCourse = req.query.addCourse && await isAcademicApiEnabled(db);
             if (db && !addingCourse) {
                 const collection = db.collection('courses');
                 const existingCourse = await collection.findOne({

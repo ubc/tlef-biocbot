@@ -336,15 +336,29 @@ describe('Course.createCourseFromOnboarding', () => {
         expect(res).toMatchObject({ success: true, created: false, modifiedCount: 0, message: 'Course already exists', totalUnits: 9 });
     });
 
-    test('creates an additional course even when the instructor already owns one', async () => {
+    test('with the academic API on, creates an additional course even when the instructor already owns one', async () => {
         // An instructor can set up more than one course (e.g. another of their
         // sections); owning a different course must not block creation.
-        const db = memoryDb({ courses: [{ courseId: 'OTHER', instructorId: 'i1' }] });
+        const db = memoryDb({
+            settings: [{ _id: 'global', academicApiEnabled: true }],
+            courses: [{ courseId: 'OTHER', instructorId: 'i1' }]
+        });
         const res = await Course.createCourseFromOnboarding(db, onboarding);
         expect(res).toMatchObject({ success: true, created: true, courseId: 'BIOC401', totalUnits: 6 });
 
         const stored = await db.collection('courses').findOne({ courseId: 'BIOC401' });
         expect(stored).not.toBeNull();
+    });
+
+    test('with the academic API off, an instructor who already owns a course cannot create a second', async () => {
+        // Pre-feature behavior: one course per instructor. Owning any course
+        // blocks creating another, so the multi-section flow stays gated off.
+        const db = memoryDb({ courses: [{ courseId: 'OTHER', instructorId: 'i1', courseStructure: { totalUnits: 4 } }] });
+        const res = await Course.createCourseFromOnboarding(db, onboarding);
+        expect(res).toMatchObject({ success: true, created: false, message: 'Course already exists', courseId: 'OTHER' });
+
+        const stored = await db.collection('courses').findOne({ courseId: 'BIOC401' });
+        expect(stored).toBeNull();
     });
 });
 

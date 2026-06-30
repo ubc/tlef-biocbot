@@ -33,6 +33,9 @@ let currentContentType = null;
 let canBypassOnboardingInstructorCourseCodes = false;
 let onboardingSelectedCourseRequiresCode = true;
 let onboardingSelectedCourseJoinReason = 'courseCode';
+// Instance-wide academic-API gate. Off by default so the Class List Sync UI
+// stays hidden until we confirm the feature is enabled for this instance.
+let onboardingAcademicApiEnabled = false;
 
 // Assessment Questions Functionality
 // Global variables for assessment questions

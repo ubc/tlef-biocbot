@@ -953,6 +953,28 @@
                                 </div>
                             </section>
 
+                            <section class="settings-section" id="academic-api-section" style="display: none;">
+                                <h3>Academic API integration</h3>
+                                <div class="settings-content">
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="academic-api-enabled-label">Enable academic API (Class List Sync)</h4>
+                                            <p id="academic-api-enabled-desc">When enabled, instructors can set up courses from their UBC sections and sync class lists, students are enrolled automatically from the roster, and instructors of record can join without a code. When disabled (the default), BiocBot uses course codes for joining and students browse and enrol with a course code. Only turn this on where the UBC academic API is available.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" id="academic-api-enabled-toggle" aria-labelledby="academic-api-enabled-label" aria-describedby="academic-api-enabled-desc">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="settings-section-actions">
+                                    <span class="settings-dirty-note" hidden>Unsaved changes</span>
+                                    <button id="save-academic-api-settings" class="primary-button">Save academic API settings</button>
+                                </div>
+                            </section>
+
                             <section class="settings-section" id="system-admin-section" style="display: none;">
                                 <h3>System admin access</h3>
                                 <p class="section-description">System admins can manage platform-wide settings, delete all data, and grant admin access to other users.</p>
