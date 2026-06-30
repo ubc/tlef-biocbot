@@ -37,13 +37,20 @@ beforeAll(() => {
 });
 afterAll(() => jest.restoreAllMocks());
 
-describe('POST /register catch block', () => {
+describe('POST /register catch block and branches', () => {
     test('500 when authService.registerUser throws', async () => {
         const authService = makeAuthService({ registerUser: jest.fn(async () => { throw new Error('db down'); }) });
         const res = await request(app({ db: memoryDb({}), locals: { authService } }))
             .post('/register').send({ username: 'a', password: 'b', role: 'student' });
         expect(res.status).toBe(500);
         expect(res.body.error).toMatch(/registration failed/i);
+    });
+
+    test('skips the allowLocalLogin check entirely when there is no db', async () => {
+        const authService = makeAuthService();
+        const res = await request(app({ db: null, locals: { authService } }))
+            .post('/register').send({ username: 'a', password: 'b', role: 'student' });
+        expect(res.status).toBe(200);
     });
 });
 
@@ -62,6 +69,11 @@ describe('GET /me fallback session path and catch block', () => {
         const authService = makeAuthService({ getUserById: jest.fn(async () => null) });
         const res = await request(app({ db: memoryDb({}), session: { userId: 'ghost' }, locals: { authService } }))
             .get('/me');
+        expect(res.status).toBe(401);
+    });
+
+    test('401 when a session userId exists but no authService is registered at all', async () => {
+        const res = await request(app({ db: memoryDb({}), session: { userId: 's1' } })).get('/me');
         expect(res.status).toBe(401);
     });
 
@@ -166,12 +178,24 @@ describe('DELETE /tas/:taId uncovered branches', () => {
     });
 });
 
-describe('GET /methods catch block', () => {
+describe('GET /methods catch block and branches', () => {
     test('500 when reading global settings throws', async () => {
         const db = throwingDb({ settings: { findOne: jest.fn(async () => { throw new Error('boom'); }) } });
         const res = await request(app({ db })).get('/methods');
         expect(res.status).toBe(500);
         expect(res.body.error).toMatch(/failed to get authentication methods/i);
+    });
+
+    test('skips the settings lookup entirely when there is no db', async () => {
+        const res = await request(app({ db: null })).get('/methods');
+        expect(res.status).toBe(200);
+        expect(res.body.methods).toMatchObject({ local: true, allowLocalLogin: true });
+    });
+
+    test('an explicit allowLocalLogin: true leaves local enabled', async () => {
+        const db = memoryDb({ settings: [{ _id: 'global', allowLocalLogin: true }] });
+        const res = await request(app({ db })).get('/methods');
+        expect(res.body.methods).toMatchObject({ local: true, allowLocalLogin: true });
     });
 });
 
