@@ -9,6 +9,20 @@ where the last one stopped. Background lives in project memory
 
 ## 0. Current status (2026-06-26)
 
+> **2026-06-30 coverage update:** 986 tests pass across 59 suites. Overall Jest
+> coverage is 58.42% statements, 51.23% branches, 66.69% functions, and 59.32%
+> lines. `src/services/qdrantService.js` now has a direct 36-test unit suite
+> (91.64% statements, 83.73% branches, 100% functions); no e2e tests were
+> changed or removed.
+
+**Finding (DO NOT fix here):** `POST /api/chat` logs
+`req.body.message?.substring(...)` before validating that `message` is a string.
+A numeric message therefore returns 500 instead of the handler's intended 400.
+
+**LLM test boundary:** Every Jest test must mock provider-facing LLM behavior
+(including key validation). Unit tests must never make provider/network calls or
+consume API credits. Prompt-setting tests may exercise stored configuration only.
+
 - **646 unit tests passing** across 39 suites via `npm run test:unit`.
 - **Overall `src/**` statement coverage = 35.4%** (models 87.2%, services 29.3%, routes 25.0%, middleware 41.8%).
   Routes dominate the codebase (6,332 of 9,933 statements) and were 0% until this initiative — now
@@ -254,8 +268,11 @@ All current `src/models/*.js` files have direct unit-test files.
   `checkSimilar` threshold, `incrementUsage`). `notesQdrantService` mocked with shared spies; model real.
 - [ ] **P3 `src/services/llm.js`** — heavy (1070 lines). Only small pure bits worth it
   (model/effort allow-lists, any JSON-extraction helper). Mostly NOT unit-testable.
-- [ ] **P3 `src/services/qdrantService.js`, `notesQdrantService.js`** — external vector DB;
-  low ROI for unit tests.
+- [ ] **P3 `src/services/notesQdrantService.js`** — external vector DB; low ROI for unit tests.
+- [x] `src/services/qdrantService.js` — `tests/unit/services/qdrantService.test.js`
+  (36 tests; constructor/init/config failures, collection lifecycle, document processing,
+  embeddings, storage, query normalization and filters, per-course search, scrolling,
+  cloning, deletion, stats/status). Deterministic boundary fakes; no live Qdrant.
 - [ ] **SKIP `src/services/mongoService.js`, `gridfs.js`** — open DB connections (load-time
   side effects). `llmStub.js`/`embeddingsStub.js` are test doubles — skip.
 

@@ -21,6 +21,7 @@ jest.mock('../../../src/routes/llmKeyMiddleware', () => ({ resolveCourseAi: jest
 const { memoryDb } = require('../helpers/memory-db');
 const { makeRouteApp, request } = require('../helpers/route-app');
 const llmKeyStore = require('../../../src/services/llmKeyStore');
+const { resolveCourseAi } = require('../../../src/routes/llmKeyMiddleware');
 const coursesRouter = require('../../../src/routes/courses');
 
 const instructor = { userId: 'i1', role: 'instructor' };
@@ -34,7 +35,178 @@ beforeAll(() => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
 });
 afterAll(() => jest.restoreAllMocks());
-beforeEach(() => llmKeyStore.validateApiKey.mockResolvedValue({ ok: true }));
+beforeEach(() => llmKeyStore.validateApiKey.mockReset().mockResolvedValue({ ok: true }));
+
+describe('course-scoped LLM keys', () => {
+    const keyedCourse = { courseId: 'C1', instructorId: 'i1', llmApiKey: { ciphertext: 'encrypted', status: 'unknown' } };
+
+    test('PUT requires DB, authentication, an existing course, and instructor access', async () => {
+        expect((await request(app({ db: null, user: instructor })).put('/C1/llm-key').send({ apiKey: 'sk' })).status).toBe(503);
+        expect((await request(app({ db: memoryDb({ courses: [keyedCourse] }) })).put('/C1/llm-key').send({ apiKey: 'sk' })).status).toBe(401);
+        expect((await request(app({ db: memoryDb({ courses: [] }), user: instructor })).put('/C1/llm-key').send({ apiKey: 'sk' })).status).toBe(404);
+        expect((await request(app({ db: memoryDb({ courses: [{ ...keyedCourse, instructorId: 'i2' }] }), user: instructor })).put('/C1/llm-key').send({ apiKey: 'sk' })).status).toBe(403);
+    });
+
+    test('PUT maps invalid and exhausted key validation results', async () => {
+        llmKeyStore.validateApiKey.mockResolvedValueOnce({ ok: false, status: 'invalid', message: 'bad key', detail: 'detail' });
+        let res = await request(app({ db: memoryDb({ courses: [keyedCourse] }), user: instructor })).put('/C1/llm-key').send({ apiKey: 'bad' });
+        expect(res.body).toMatchObject({ success: false, code: 'LLM_KEY_INVALID', message: 'bad key' });
+        llmKeyStore.validateApiKey.mockResolvedValueOnce({ ok: false, status: 'quota_exhausted', message: 'quota' });
+        res = await request(app({ db: memoryDb({ courses: [keyedCourse] }), user: instructor })).put('/C1/llm-key').send({ apiKey: 'spent' });
+        expect(res.body.code).toBe('LLM_KEY_QUOTA');
+    });
+
+    test('PUT saves the key and evicts the course service cache', async () => {
+        const db = memoryDb({ courses: [keyedCourse] });
+        const registry = { evictCourse: jest.fn() };
+        const res = await request(app({ db, user: instructor, locals: { llmRegistry: registry } })).put('/C1/llm-key').send({ apiKey: 'sk-new' });
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ success: true, aiAvailable: true });
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).llmApiKey).toEqual({ enc: 'stub' });
+        expect(registry.evictCourse).toHaveBeenCalledWith('C1');
+    });
+
+    test('POST test reports a missing saved key', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1' }] });
+        const res = await request(app({ db, user: instructor })).post('/C1/llm-key/test');
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe('LLM_KEY_MISSING');
+    });
+
+    test('POST test persists valid status and evicts the cache', async () => {
+        const db = memoryDb({ courses: [keyedCourse] });
+        const registry = { evictCourse: jest.fn() };
+        const res = await request(app({ db, user: instructor, locals: { llmRegistry: registry } })).post('/C1/llm-key/test');
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ success: true, message: 'Course API key is valid', aiAvailable: true });
+        expect(registry.evictCourse).toHaveBeenCalledWith('C1');
+    });
+
+    test('POST test maps quota and invalid statuses', async () => {
+        llmKeyStore.validateApiKey.mockResolvedValueOnce({ ok: false, status: 'quota_exhausted', message: 'spent' });
+        let res = await request(app({ db: memoryDb({ courses: [keyedCourse] }), user: instructor })).post('/C1/llm-key/test');
+        expect(res.body).toMatchObject({ success: false, code: 'LLM_KEY_QUOTA', aiAvailable: false });
+        llmKeyStore.validateApiKey.mockResolvedValueOnce({ ok: false, status: 'invalid', message: 'bad' });
+        res = await request(app({ db: memoryDb({ courses: [keyedCourse] }), user: instructor })).post('/C1/llm-key/test');
+        expect(res.body.code).toBe('LLM_KEY_INVALID');
+    });
+});
+
+describe('POST /:courseId/extract-topics — mocked LLM', () => {
+    const topicCourse = {
+        courseId: 'C1', instructorId: 'i1', tas: ['t1'],
+        additionalMaterialSecondarySearch: false,
+    };
+
+    test('requires authentication, DB, course existence, and course access', async () => {
+        expect((await request(app({ db: memoryDb({ courses: [topicCourse] }) })).post('/C1/extract-topics').send({ content: 'enzyme kinetics' })).status).toBe(401);
+        expect((await request(app({ db: null, user: instructor })).post('/C1/extract-topics').send({ content: 'enzyme kinetics' })).status).toBe(503);
+        expect((await request(app({ db: memoryDb({ courses: [] }), user: instructor })).post('/C1/extract-topics').send({ content: 'enzyme kinetics' })).status).toBe(404);
+        expect((await request(app({ db: memoryDb({ courses: [topicCourse] }), user: otherInstructor })).post('/C1/extract-topics').send({ content: 'enzyme kinetics' })).status).toBe(403);
+    });
+
+    test('filters mocked LLM suggestions to biochemical topics and clamps the limit', async () => {
+        const sendMessage = jest.fn(async () => ({
+            content: 'Result: {"topics":["Enzyme Kinetics","Protein Structure","Colonial History","ATP Synthesis","Enzyme Kinetics"]}',
+        }));
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage } });
+        const res = await request(app({ db: memoryDb({ courses: [topicCourse] }), user: instructor }))
+            .post('/C1/extract-topics').send({ content: 'A long discussion of enzymes, proteins, and ATP.', maxTopics: 2 });
+        expect(res.status).toBe(200);
+        expect(res.body.data.topics).toEqual(['Enzyme Kinetics', 'Protein Structure']);
+        expect(sendMessage).toHaveBeenCalledWith(expect.stringContaining('Return 2 or fewer'), expect.objectContaining({ temperature: 0.1 }));
+    });
+
+    test('accepts a TA assigned to the course', async () => {
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage: jest.fn(async () => ({ content: '{"topics":["DNA Replication"]}' })) } });
+        const res = await request(app({ db: memoryDb({ courses: [topicCourse] }), user: { userId: 't1', role: 'ta' } }))
+            .post('/C1/extract-topics').send({ content: 'DNA replication and nucleotides' });
+        expect(res.status).toBe(200);
+        expect(res.body.data.topics).toEqual(['DNA Replication']);
+    });
+
+    test('loads source content from a course document', async () => {
+        const db = memoryDb({
+            courses: [topicCourse],
+            documents: [{ documentId: 'd1', courseId: 'C1', content: 'Protein folding and hydrophobic interactions', documentType: 'lecture_notes' }],
+        });
+        const sendMessage = jest.fn(async () => ({ content: '{"topics":["Protein Folding","Hydrophobic Interactions"]}' }));
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage } });
+        const res = await request(app({ db, user: instructor })).post('/C1/extract-topics').send({ documentId: 'd1' });
+        expect(res.status).toBe(200);
+        expect(res.body.data.topics).toEqual(['Protein Folding', 'Hydrophobic Interactions']);
+        expect(sendMessage.mock.calls[0][0]).toContain('Protein folding');
+    });
+
+    test('skips secondary additional material without invoking an LLM', async () => {
+        const db = memoryDb({
+            courses: [{ ...topicCourse, additionalMaterialSecondarySearch: true }],
+            documents: [{ documentId: 'd1', courseId: 'C1', content: 'ATP', documentType: 'additional' }],
+        });
+        const res = await request(app({ db, user: instructor })).post('/C1/extract-topics').send({ documentId: 'd1' });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ topics: [], skippedAdditionalMaterial: true });
+        expect(resolveCourseAi).not.toHaveBeenCalled();
+    });
+
+    test('rejects missing documents and empty source content', async () => {
+        const db = memoryDb({ courses: [topicCourse], documents: [] });
+        expect((await request(app({ db, user: instructor })).post('/C1/extract-topics').send({ documentId: 'missing' })).status).toBe(404);
+        expect((await request(app({ db, user: instructor })).post('/C1/extract-topics').send({ content: '   ' })).status).toBe(400);
+    });
+
+    test('malformed or unavailable mocked LLM responses safely return no topics', async () => {
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage: jest.fn(async () => ({ content: 'not JSON' })) } });
+        let res = await request(app({ db: memoryDb({ courses: [topicCourse] }), user: instructor }))
+            .post('/C1/extract-topics').send({ content: 'enzyme kinetics' });
+        expect(res.body.data.topics).toEqual([]);
+        resolveCourseAi.mockResolvedValueOnce({ llm: null });
+        res = await request(app({ db: memoryDb({ courses: [topicCourse] }), user: instructor }))
+            .post('/C1/extract-topics').send({ content: 'enzyme kinetics' });
+        expect(res.body.data.topics).toEqual([]);
+    });
+});
+
+describe('document removal and material confirmation', () => {
+    test('remove-document validates required fields and DB availability', async () => {
+        expect((await request(app({ db: memoryDb({}), user: instructor })).post('/C1/remove-document').send({})).status).toBe(400);
+        expect((await request(app({ db: null, user: instructor })).post('/C1/remove-document').send({ documentId: 'd1', instructorId: 'i1' })).status).toBe(503);
+    });
+
+    test('remove-document enforces course access', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i2' }] });
+        const res = await request(app({ db, user: instructor })).post('/C1/remove-document').send({ documentId: 'd1', instructorId: 'i1' });
+        expect(res.status).toBe(403);
+    });
+
+    test('remove-document maps model failure and success', async () => {
+        const access = jest.spyOn(require('../../../src/models/Course'), 'userHasCourseAccess').mockResolvedValue(true);
+        const remove = jest.spyOn(require('../../../src/models/Course'), 'removeDocumentFromAnyUnit');
+        remove.mockResolvedValueOnce({ success: false, error: 'not attached' });
+        let res = await request(app({ db: memoryDb({}), user: instructor })).post('/C1/remove-document').send({ documentId: 'd1', instructorId: 'i1' });
+        expect(res.status).toBe(404);
+        expect(res.body.message).toBe('not attached');
+        remove.mockResolvedValueOnce({ success: true, removedCount: 2 });
+        res = await request(app({ db: memoryDb({}), user: instructor })).post('/C1/remove-document').send({ documentId: 'd1', instructorId: 'i1' });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toEqual({ documentId: 'd1', courseId: 'C1', removedCount: 2 });
+        access.mockRestore();
+        remove.mockRestore();
+    });
+
+    test('course-material confirmation validates fields, DB, and matching course/unit', async () => {
+        expect((await request(app({ db: memoryDb({}) })).post('/course-materials/confirm').send({})).status).toBe(400);
+        expect((await request(app({ db: null })).post('/course-materials/confirm').send({ week: 'Unit 1', instructorId: 'i1' })).status).toBe(503);
+        expect((await request(app({ db: memoryDb({ courses: [] }) })).post('/course-materials/confirm').send({ week: 'Unit 1', instructorId: 'i1' })).status).toBe(404);
+    });
+
+    test('course-material confirmation updates the matching unit', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1', lectures: [{ name: 'Unit 1' }] }] });
+        const res = await request(app({ db })).post('/course-materials/confirm').send({ week: 'Unit 1', instructorId: 'i1' });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ week: 'Unit 1', courseId: 'C1', materialsConfirmed: true });
+    });
+});
 
 describe('POST / — create course', () => {
     // NOTE: contentTypes must be an array — the success path calls
