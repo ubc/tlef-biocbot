@@ -225,6 +225,15 @@ describe('POST /logout', () => {
         expect(res.body.debug).toMatchObject({ isCWL: true, strategyFound: false, helperFound: false, localOnly: true });
     });
 
+    test('CWL user: app.locals.passport itself is missing, falls through to standard local logout', async () => {
+        const user = { userId: 'cwl1', authProvider: 'saml' };
+        const session = { destroy: jest.fn((cb) => cb(null)) };
+        const res = await request(buildApp({ user, session })).post('/logout');
+        expect(res.status).toBe(200);
+        expect(res.body.redirect).toBe('/login');
+        expect(res.body.debug).toMatchObject({ isCWL: true, strategyFound: false, helperFound: false, localOnly: true });
+    });
+
     test('500 outer catch when req.session is unavailable', async () => {
         const res = await request(buildApp({ omitSession: true })).post('/logout');
         expect(res.status).toBe(500);

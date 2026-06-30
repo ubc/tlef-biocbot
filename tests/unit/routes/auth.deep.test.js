@@ -214,4 +214,23 @@ describe('POST /promote-to-ta uncovered branches', () => {
         expect(res.status).toBe(500);
         expect(res.body.message).toMatch(/internal server error/i);
     });
+
+    test('owns the course via the instructors array even when instructorId differs', async () => {
+        const db = memoryDb({
+            users: [{ userId: 's9', role: 'student' }],
+            courses: [{ courseId: 'C1', instructorId: 'someone-else', instructors: ['i1'], status: 'active' }],
+        });
+        const res = await request(app({ db, user: instructor })).post('/promote-to-ta').send({ userId: 's9', courseId: 'C1' });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ userId: 's9', invitedToCourse: 'C1' });
+    });
+
+    test('promotes a student with no courseId: skips ownership check, invitedToCourse is null', async () => {
+        const db = memoryDb({ users: [{ userId: 's9', role: 'student' }] });
+        const res = await request(app({ db, user: instructor })).post('/promote-to-ta').send({ userId: 's9' });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ userId: 's9', role: 'ta', invitedToCourse: null });
+        const saved = await db.collection('users').findOne({ userId: 's9' });
+        expect(saved.invitedCourses).toBeUndefined();
+    });
 });
