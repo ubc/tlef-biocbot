@@ -9,9 +9,9 @@ where the last one stopped. Background lives in project memory
 
 ## 0. Current status (2026-06-26)
 
-> **2026-06-30 coverage update:** 1,346 tests pass across 75 suites. The regenerated
-> Monocart report is 81.40% statements, 73.02% branches, 89.21% functions, and
-> 75.97% source lines overall. `src/routes/settings.js` now has 100% statements,
+> **2026-06-30 coverage update:** 1,367 tests pass across 76 suites. The regenerated
+> Monocart report is 84.79% statements, 77.41% branches, 92.84% functions, and
+> 85.84% source lines overall. `src/routes/settings.js` now has 100% statements,
 > functions, and lines (92.44% branches). `src/routes/chat.js` now has 94.14%
 > statements, 86.22% branches, 91.78% functions, and 94.96% lines. No production
 > or e2e files were changed by this coverage pass.
@@ -319,9 +319,14 @@ updates by `_id` (e.g. systemAdmin revoke).
   all settings endpoints, ownership/admin gates, persistence and validation edges, stable exception
   contracts, academic API gate, and both dedicated LLM-key lifecycles with provider validation mocked.
   **100% statements/functions/lines; 92.44% branches.**
-- [x] `src/routes/courses.js` — `tests/unit/routes/courses.test.js` (40 tests: list/get,
-  approved topics, available/joinable courses, student/TA/instructor joins, TA management and
-  permissions, student enrollment/listing; 34.4% statements)
+- [x] `src/routes/courses.js` — `tests/unit/routes/courses.test.js`,
+  `courses.deep.test.js`, and `courses.coverage.test.js` (114 tests: list/get, student-safe
+  projection, statistics aggregation, approved/extracted topics, available/joinable courses,
+  student/TA/instructor joins, TA management and permissions, student enrollment/listing, create,
+  update, retrieval mode, soft-delete, unit lifecycle, content stub, API keys, material confirmation,
+  and transfer including text/inline/GridFS document cloning and warning paths). Monocart:
+  **90.62% statements, 83.88% branches, 100% functions, and 91.02% lines.** Literal
+  100% statements/branches/lines would require production test seams or coverage exclusions; see §6.
 - [x] `src/routes/quiz.js` — `tests/unit/routes/quiz.test.js` (status, objective grading, attempts, history)
 - [x] `src/routes/flags.js` — `tests/unit/routes/flags.test.js` (create, own flags, status, stats, delete)
 - [x] `src/routes/questions.js` — `tests/unit/routes/questions.test.js` (19 tests: create/read/stats,
@@ -356,16 +361,16 @@ updates by `_id` (e.g. systemAdmin revoke).
 - [x] `src/routes/instructorChat.js` — `tests/unit/routes/instructorChat.test.js` (session save/list/get/delete
   CRUD, `/pool` mapping + key gate, `POST /` validation + key gate). `superCourseService` mocked; the full
   LLM answer flow left to e2e. Added `replaceOne()` to `memory-db`.
-- [x] **Deepened `src/routes/courses.js`** — `tests/unit/routes/courses.deep.test.js` (create, update,
-  retrieval-mode, soft-delete, unit add/delete/rename). Same mock header as `courses.test.js`. **`transfer`
-  still uncovered** (heavy copy/Qdrant path — e2e).
+- [x] **Deepened `src/routes/courses.js`** — lifecycle coverage is in `courses.deep.test.js`; focused
+  statistics, student projection, transfer document cloning, cleanup tolerance, and catch contracts are
+  in `courses.coverage.test.js`. Provider/Qdrant/GridFS boundaries are deterministic mocks; no network calls.
 - [x] **Deepened `src/routes/settings.js`** — complete; prompt, LLM-key, global, course-scoped,
   academic-gate, error, and reset paths are now covered (see the primary settings entry above).
 - [x] **Deepened `src/routes/students.js`** — `tests/unit/routes/students.deep.test.js` (instructor/admin
   session list/single/delete; note instructor delete only checks `role`, not systemAdmin).
 - [x] **Deepened `src/routes/quiz.js`** — `tests/unit/routes/quiz.deep.test.js` (`GET /questions` enabled
   gate + answer sanitization, `GET /materials` access gate + listing).
-- [ ] Remaining deepening (lower ROI): `courses.js` transfer; questions
+- [ ] Remaining deepening (lower ROI): `courses.js` defensive validation/catch permutations; questions
   `auto-link`/`generate-ai`/`check-answer` and documents `upload`/`cleanup-orphans` (AI/gridfs heavy).
   **Skip/e2e:** `qdrant.js`, `studentSuperCourse.js`, `shibboleth.js` (vector/SAML — low unit fidelity).
 - [x] **Deepened `src/routes/chat.js`** — `chat.additional.test.js` and
@@ -488,6 +493,14 @@ pass, NOT to be fixed while writing tests.
   run produced `ECONNRESET` / HTTP parse failures in unrelated route suites despite `maxWorkers: 1`;
   the immediate unchanged rerun passed all 1,346 tests across 75 suites, as did the subsequent full
   Monocart run. No source or test change was made in response to the transient failure.
+
+- **`src/routes/courses.js` cannot faithfully reach literal 100% through its exported router alone.**
+  The expanded public-route suite invokes all 94 functions, but native V8 still reports 108 uncovered
+  lines and 186 uncovered branch outcomes. The remainder is dominated by mutually exclusive fallback
+  operands, defensive outcomes precluded by earlier successful checks (for example, an update reporting
+  no match after the same course/access was already confirmed), and catch paths inside internal helpers
+  that are neither exported nor independently injectable. Literal 100% would require production test
+  seams, impossible collaborator state, or coverage-ignore directives. This pass used none of those.
 
 *(append new findings below as you go)*
 
