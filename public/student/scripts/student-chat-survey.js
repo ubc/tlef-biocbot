@@ -197,7 +197,6 @@
         if (document.getElementById('chat-survey-overlay')) return;
 
         surveyRuntime.isShowing = true;
-        let selectedRating = null;
 
         const overlay = document.createElement('div');
         overlay.id = 'chat-survey-overlay';
@@ -217,16 +216,15 @@
 
         const title = document.createElement('h2');
         title.id = 'chat-survey-title';
-        title.textContent = settings.promptText || 'Was this chat helpful?';
+        title.textContent = settings.promptText || 'How useful is this chat so far';
 
-        const ratingLabel = document.createElement('p');
-        ratingLabel.className = 'chat-survey-rating-label';
-        ratingLabel.textContent = settings.ratingPrompt || 'How useful was this conversation?';
-
-        const stars = document.createElement('div');
-        stars.className = 'chat-survey-stars';
-        stars.setAttribute('role', 'radiogroup');
-        stars.setAttribute('aria-label', ratingLabel.textContent);
+        const introText = settings.introText;
+        let intro = null;
+        if (introText) {
+            intro = document.createElement('p');
+            intro.className = 'chat-survey-intro';
+            intro.textContent = introText;
+        }
 
         const status = document.createElement('div');
         status.className = 'chat-survey-status';
@@ -238,32 +236,69 @@
         submitButton.textContent = 'Submit';
         submitButton.disabled = true;
 
-        function updateStars() {
-            stars.querySelectorAll('.chat-survey-star').forEach(button => {
-                const rating = Number(button.dataset.rating);
-                const active = selectedRating && rating <= selectedRating;
-                button.classList.toggle('active', !!active);
-                button.textContent = active ? '★' : '☆';
-                button.setAttribute('aria-checked', selectedRating === rating ? 'true' : 'false');
-            });
-            submitButton.disabled = !selectedRating;
+        // Each survey question has its own independent 1-5 star rating.
+        const questions = [
+            {
+                key: 'accuracy',
+                label: settings.accuracyPrompt || 'Has BIOCBOT been presenting accurate and appropriate content?',
+                selected: null
+            },
+            {
+                key: 'satisfaction',
+                label: settings.satisfactionPrompt || 'Are you satisfied with your learning experience using BIOCBOT?',
+                selected: null
+            }
+        ];
+
+        function refreshSubmitState() {
+            submitButton.disabled = questions.some(question => !question.selected);
             status.textContent = '';
         }
 
-        for (let rating = 1; rating <= 5; rating += 1) {
-            const starButton = document.createElement('button');
-            starButton.type = 'button';
-            starButton.className = 'chat-survey-star';
-            starButton.dataset.rating = String(rating);
-            starButton.setAttribute('role', 'radio');
-            starButton.setAttribute('aria-label', `${rating} star${rating === 1 ? '' : 's'}`);
-            starButton.textContent = '☆';
-            starButton.addEventListener('click', () => {
-                selectedRating = rating;
-                updateStars();
-            });
-            stars.appendChild(starButton);
-        }
+        const questionElements = questions.map(question => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chat-survey-question';
+
+            const ratingLabel = document.createElement('p');
+            ratingLabel.className = 'chat-survey-rating-label';
+            ratingLabel.textContent = question.label;
+
+            const stars = document.createElement('div');
+            stars.className = 'chat-survey-stars';
+            stars.setAttribute('role', 'radiogroup');
+            stars.setAttribute('aria-label', question.label);
+
+            function updateStars() {
+                stars.querySelectorAll('.chat-survey-star').forEach(button => {
+                    const rating = Number(button.dataset.rating);
+                    const active = question.selected && rating <= question.selected;
+                    button.classList.toggle('active', !!active);
+                    button.textContent = active ? '★' : '☆';
+                    button.setAttribute('aria-checked', question.selected === rating ? 'true' : 'false');
+                });
+            }
+
+            for (let rating = 1; rating <= 5; rating += 1) {
+                const starButton = document.createElement('button');
+                starButton.type = 'button';
+                starButton.className = 'chat-survey-star';
+                starButton.dataset.rating = String(rating);
+                starButton.setAttribute('role', 'radio');
+                starButton.setAttribute('aria-label', `${rating} star${rating === 1 ? '' : 's'}`);
+                starButton.textContent = '☆';
+                starButton.addEventListener('click', () => {
+                    question.selected = rating;
+                    updateStars();
+                    refreshSubmitState();
+                });
+                stars.appendChild(starButton);
+            }
+
+            wrapper.appendChild(ratingLabel);
+            wrapper.appendChild(stars);
+            updateStars();
+            return wrapper;
+        });
 
         let commentInput = null;
         if (settings.allowFreeText) {
@@ -306,8 +341,8 @@
         });
 
         submitButton.addEventListener('click', async () => {
-            if (!selectedRating) {
-                status.textContent = 'Choose a star rating to submit.';
+            if (questions.some(question => !question.selected)) {
+                status.textContent = 'Choose a star rating for each question to submit.';
                 return;
             }
 
@@ -316,18 +351,22 @@
             closeButton.disabled = true;
             status.textContent = 'Saving...';
 
+            const ratingAccuracy = questions.find(question => question.key === 'accuracy').selected;
+            const ratingSatisfaction = questions.find(question => question.key === 'satisfaction').selected;
             const comment = commentInput ? commentInput.value.trim() : '';
             try {
                 await postSurveyEvent('submitted', {
                     settingsFingerprint,
-                    rating: selectedRating,
+                    ratingAccuracy,
+                    ratingSatisfaction,
                     comment,
                     messageCountAtPrompt
                 });
 
                 saveLocalSurveyState(chatData, settingsFingerprint, {
                     submittedAt: new Date().toISOString(),
-                    rating: selectedRating,
+                    ratingAccuracy,
+                    ratingSatisfaction,
                     comment: comment || null,
                     messageCountAtPrompt
                 });
@@ -346,14 +385,14 @@
 
         modal.appendChild(closeButton);
         modal.appendChild(title);
-        modal.appendChild(ratingLabel);
-        modal.appendChild(stars);
+        if (intro) modal.appendChild(intro);
+        questionElements.forEach(element => modal.appendChild(element));
         if (commentInput) modal.appendChild(commentInput);
         modal.appendChild(status);
         modal.appendChild(actions);
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
-        updateStars();
+        refreshSubmitState();
     }
 
     async function maybeShowChatSurvey() {

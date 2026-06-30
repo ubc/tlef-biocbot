@@ -22,14 +22,16 @@ test.describe('onboarding Unit 1 objectives and questions branches', () => {
             const testWindow = /** @type {any} */ (window);
             testWindow.validateCourseSetup();
         });
-        await expect(page.getByText('Please select a course')).toBeVisible();
+        // A blank selection now means "create a new course" (same as 'custom'),
+        // so validation asks for a course name rather than a dropdown pick.
+        await expect(page.getByText('Please enter a course name or pick a section above')).toBeVisible();
 
         await page.locator('#course-select').selectOption('custom');
         await page.evaluate(() => {
             const testWindow = /** @type {any} */ (window);
             testWindow.validateCourseSetup();
         });
-        await expect(page.getByText('Please enter a course name')).toBeVisible();
+        await expect(page.getByText('Please enter a course name or pick a section above')).toBeVisible();
 
         await page.locator('#custom-course-name').fill('Invalid Structure Biology');
         await page.locator('#weeks-count').fill('0');

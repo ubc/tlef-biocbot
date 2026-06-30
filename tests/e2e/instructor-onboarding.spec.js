@@ -346,7 +346,7 @@ test.describe('instructor onboarding', () => {
         await page.locator('#course-api-key').fill(VALID_API_KEY);
         await page.locator('#continue-btn').click();
         await expect(page.locator('#step-2.onboarding-step.active')).toBeVisible();
-        await expect(page.locator('#custom-course-name').locator('..').locator('.error-message')).toHaveText('Please enter a course name');
+        await expect(page.locator('#custom-course-name').locator('..').locator('.error-message')).toHaveText('Please enter a course name or pick a section above');
 
         await page.locator('#custom-course-name').fill(COURSE_NAME);
         await page.locator('#weeks-count').fill('0');

@@ -210,14 +210,20 @@ function renderSurveyStats(stats) {
     const shownEl = document.getElementById('survey-stat-shown');
     const submittedEl = document.getElementById('survey-stat-submitted');
     const dismissedEl = document.getElementById('survey-stat-dismissed');
-    const averageEl = document.getElementById('survey-stat-average');
+    const accuracyEl = document.getElementById('survey-stat-average-accuracy');
+    const satisfactionEl = document.getElementById('survey-stat-average-satisfaction');
 
     if (shownEl) shownEl.textContent = String(stats?.shown || 0);
     if (submittedEl) submittedEl.textContent = String(stats?.submitted || 0);
     if (dismissedEl) dismissedEl.textContent = String(stats?.dismissed || 0);
-    if (averageEl) {
-        averageEl.textContent = typeof stats?.averageRating === 'number'
-            ? `${stats.averageRating.toFixed(1)}/5`
+    if (accuracyEl) {
+        accuracyEl.textContent = typeof stats?.averageAccuracy === 'number'
+            ? `${stats.averageAccuracy.toFixed(1)}/5`
+            : '--';
+    }
+    if (satisfactionEl) {
+        satisfactionEl.textContent = typeof stats?.averageSatisfaction === 'number'
+            ? `${stats.averageSatisfaction.toFixed(1)}/5`
             : '--';
     }
 }
@@ -243,10 +249,13 @@ function renderSurveyResponses(responses) {
 
     container.innerHTML = responses.map(response => {
         const status = response.submittedAt ? 'Submitted' : response.dismissedAt ? 'Dismissed' : 'Shown';
-        const rating = typeof response.rating === 'number' ? `${response.rating}/5` : '--';
+        const formatRating = (value) => typeof value === 'number' ? `${value}/5` : '--';
+        const accuracyRating = formatRating(response.ratingAccuracy);
+        const satisfactionRating = formatRating(response.ratingSatisfaction);
+        const accuracyPrompt = response.accuracyPrompt || response.settingsSnapshot?.accuracyPrompt || 'Accuracy';
+        const satisfactionPrompt = response.satisfactionPrompt || response.settingsSnapshot?.satisfactionPrompt || 'Satisfaction';
         const studentName = response.studentName || response.studentId || 'Unknown student';
         const updatedAt = response.updatedAt || response.submittedAt || response.dismissedAt || response.shownAt || response.createdAt;
-        const promptText = response.promptText || response.settingsSnapshot?.promptText || '';
         const comment = response.comment || '';
 
         return `
@@ -259,14 +268,17 @@ function renderSurveyResponses(responses) {
                         </p>
                     </div>
                     <div class="survey-response-rating">
-                        <strong>${escapeHTML(rating)}</strong>
                         <span class="survey-status-pill ${status.toLowerCase()}">${escapeHTML(status)}</span>
                     </div>
                 </div>
                 <dl class="survey-response-details">
                     <div>
-                        <dt>Prompt</dt>
-                        <dd>${escapeHTML(promptText || '—')}</dd>
+                        <dt>${escapeHTML(accuracyPrompt)}</dt>
+                        <dd>${escapeHTML(accuracyRating)}</dd>
+                    </div>
+                    <div>
+                        <dt>${escapeHTML(satisfactionPrompt)}</dt>
+                        <dd>${escapeHTML(satisfactionRating)}</dd>
                     </div>
                     <div>
                         <dt>Messages at prompt</dt>

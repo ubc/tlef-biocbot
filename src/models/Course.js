@@ -322,8 +322,10 @@ const MAX_CHAT_SURVEY_TRIGGER_MESSAGES = 30;
 const DEFAULT_CHAT_SURVEY_SETTINGS = Object.freeze({
     enabled: false,
     triggerMessageCount: 10,
-    promptText: 'Was this chat helpful?',
-    ratingPrompt: 'How useful was this conversation?',
+    promptText: 'How useful is this chat so far',
+    introText: 'So BIOCBOT would like your help to improve the user and learning experience, if you are able to please rate your recent experience with BIOCBOT',
+    accuracyPrompt: 'Has BIOCBOT been presenting accurate and appropriate content?',
+    satisfactionPrompt: 'Are you satisfied with your learning experience using BIOCBOT?',
     allowFreeText: false
 });
 
@@ -376,7 +378,9 @@ function resolveChatSurveySettings(courseDoc = {}) {
         enabled: settings.enabled === true,
         triggerMessageCount: normalizeChatSurveyTriggerMessageCount(settings.triggerMessageCount),
         promptText: normalizeChatSurveyPrompt(settings.promptText, DEFAULT_CHAT_SURVEY_SETTINGS.promptText),
-        ratingPrompt: normalizeChatSurveyPrompt(settings.ratingPrompt, DEFAULT_CHAT_SURVEY_SETTINGS.ratingPrompt),
+        introText: normalizeChatSurveyPrompt(settings.introText, DEFAULT_CHAT_SURVEY_SETTINGS.introText),
+        accuracyPrompt: normalizeChatSurveyPrompt(settings.accuracyPrompt, DEFAULT_CHAT_SURVEY_SETTINGS.accuracyPrompt),
+        satisfactionPrompt: normalizeChatSurveyPrompt(settings.satisfactionPrompt, DEFAULT_CHAT_SURVEY_SETTINGS.satisfactionPrompt),
         allowFreeText: settings.allowFreeText !== undefined
             ? settings.allowFreeText === true
             : DEFAULT_CHAT_SURVEY_SETTINGS.allowFreeText
@@ -424,7 +428,9 @@ async function updateChatSurveySettings(db, courseId, settings = {}, updatedById
         enabled: settings.enabled === true,
         triggerMessageCount,
         promptText: normalizeChatSurveyPrompt(settings.promptText, DEFAULT_CHAT_SURVEY_SETTINGS.promptText),
-        ratingPrompt: normalizeChatSurveyPrompt(settings.ratingPrompt, DEFAULT_CHAT_SURVEY_SETTINGS.ratingPrompt),
+        introText: normalizeChatSurveyPrompt(settings.introText, DEFAULT_CHAT_SURVEY_SETTINGS.introText),
+        accuracyPrompt: normalizeChatSurveyPrompt(settings.accuracyPrompt, DEFAULT_CHAT_SURVEY_SETTINGS.accuracyPrompt),
+        satisfactionPrompt: normalizeChatSurveyPrompt(settings.satisfactionPrompt, DEFAULT_CHAT_SURVEY_SETTINGS.satisfactionPrompt),
         allowFreeText: settings.allowFreeText !== undefined
             ? settings.allowFreeText === true
             : DEFAULT_CHAT_SURVEY_SETTINGS.allowFreeText,

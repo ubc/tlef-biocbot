@@ -341,21 +341,11 @@ function createMessageFeedbackControls(initialRating = null) {
     upButton.setAttribute('aria-label', 'Mark response as helpful');
     upButton.onclick = () => handleMessageFeedback(upButton, 'up');
 
-    const downButton = document.createElement('button');
-    downButton.type = 'button';
-    downButton.classList.add('message-feedback-btn');
-    downButton.dataset.rating = 'down';
-    downButton.textContent = '👎';
-    downButton.title = 'This response was not helpful';
-    downButton.setAttribute('aria-label', 'Mark response as not helpful');
-    downButton.onclick = () => handleMessageFeedback(downButton, 'down');
-
     const status = document.createElement('span');
     status.classList.add('message-feedback-status');
     status.setAttribute('aria-live', 'polite');
 
     container.appendChild(upButton);
-    container.appendChild(downButton);
     container.appendChild(status);
     setFeedbackButtonsState(container, initialRating);
 

@@ -1295,7 +1295,9 @@ router.post('/chat-survey', async (req, res) => {
             enabled,
             triggerMessageCount,
             promptText,
-            ratingPrompt,
+            introText,
+            accuracyPrompt,
+            satisfactionPrompt,
             allowFreeText
         } = req.body;
 
@@ -1316,7 +1318,9 @@ router.post('/chat-survey', async (req, res) => {
             enabled,
             triggerMessageCount,
             promptText,
-            ratingPrompt,
+            introText,
+            accuracyPrompt,
+            satisfactionPrompt,
             allowFreeText
         }, req.user ? req.user.userId : null);
 
