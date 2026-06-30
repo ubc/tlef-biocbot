@@ -17,7 +17,10 @@ jest.mock('../../../src/services/config', () => ({
     getLLMConfig: jest.fn(() => ({ provider: 'openai', defaultModel: 'model' })),
 }));
 
+const originalConsoleLog = console.log;
+console.log = jest.fn();
 const QdrantService = require('../../../src/services/qdrantService');
+console.log = originalConsoleLog;
 const { QdrantClient } = require('@qdrant/js-client-rest');
 const { ChunkingModule } = require('ubc-genai-toolkit-chunking');
 const config = require('../../../src/services/config');

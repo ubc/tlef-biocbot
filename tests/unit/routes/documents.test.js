@@ -238,3 +238,57 @@ describe('POST /:documentId/extract-questions', () => {
         expect(res.body.data).toMatchObject({ documentId: 'd1', totalFound: 0, wasChunked: false });
     });
 });
+
+describe('POST /cleanup-orphans', () => {
+    test('validates fields, DB, course, and ownership', async () => {
+        expect((await request(app({ db: documentsDb(), user: instructor })).post('/cleanup-orphans').send({})).status).toBe(400);
+        expect((await request(app({ db: null, user: instructor })).post('/cleanup-orphans').send({ courseId: 'C1', instructorId: 'i1' })).status).toBe(503);
+        expect((await request(app({ db: memoryDb({ courses: [] }), user: instructor })).post('/cleanup-orphans').send({ courseId: 'C1', instructorId: 'i1' })).status).toBe(404);
+        expect((await request(app({ db: documentsDb(), user: otherInstructor })).post('/cleanup-orphans').send({ courseId: 'C1', instructorId: 'i1' })).status).toBe(403);
+    });
+
+    test('removes missing references while preserving real documents', async () => {
+        const db = documentsDb({
+            documents: [{ documentId: 'valid', courseId: 'C1' }],
+            course: { lectures: [{ name: 'Unit 1', documents: [{ documentId: 'valid' }, { documentId: 'missing' }] }] },
+        });
+        const res = await request(app({ db, user: instructor })).post('/cleanup-orphans').send({ courseId: 'C1', instructorId: 'i1' });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toEqual({ totalOrphans: 1, cleanedUnits: 1 });
+    });
+});
+
+describe('question extraction with mocked LLM and vector chunks', () => {
+    test('normalizes mocked multiple-choice and true-false responses', async () => {
+        const sendMessage = jest.fn(async () => ({ content: `Here is JSON: {"questions":[
+            {"questionType":"multiple-choice","question":"ATP?","options":{"one":"ATP","two":"DNA"},"correctAnswer":" b ","explanation":"E"},
+            {"questionType":"true-false","question":"Cells?","correctAnswer":"t","explanation":"E"}
+        ]}` }));
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage }, qdrant: {} });
+        const res = await request(app({ db: documentsDb(), user: instructor })).post('/d1/extract-questions');
+        expect(res.status).toBe(200);
+        expect(res.body.data.totalFound).toBe(2);
+        expect(res.body.data.questions[0]).toMatchObject({ options: { A: 'ATP', B: 'DNA' }, correctAnswer: 'B', hasAnswer: true });
+        expect(res.body.data.questions[1].correctAnswer).toBe('True');
+    });
+
+    test('uses mocked Qdrant chunks for oversized content and batches LLM calls', async () => {
+        const longContent = 'x'.repeat(32001);
+        const db = documentsDb({ documents: [{ documentId: 'd1', courseId: 'C1', lectureName: 'Unit 1', content: longContent }] });
+        const sendMessage = jest.fn(async () => ({ content: '{"questions":[{"questionType":"short-answer","question":"Q?","correctAnswer":"A"}]}' }));
+        const getDocumentChunks = jest.fn(async () => ['chunk one', 'chunk two']);
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage }, qdrant: { getDocumentChunks } });
+        const res = await request(app({ db, user: instructor })).post('/d1/extract-questions');
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ wasChunked: true, totalFound: 1 });
+        expect(getDocumentChunks).toHaveBeenCalledWith('d1');
+    });
+
+    test('reports missing or failed chunks for oversized content', async () => {
+        const db = documentsDb({ documents: [{ documentId: 'd1', courseId: 'C1', content: 'x'.repeat(32001) }] });
+        resolveCourseAi.mockResolvedValueOnce({ llm: {}, qdrant: { getDocumentChunks: jest.fn(async () => []) } });
+        expect((await request(app({ db, user: instructor })).post('/d1/extract-questions')).status).toBe(400);
+        resolveCourseAi.mockResolvedValueOnce({ llm: {}, qdrant: { getDocumentChunks: jest.fn(async () => { throw new Error('mock vector failure'); }) } });
+        expect((await request(app({ db, user: instructor })).post('/d1/extract-questions')).status).toBe(400);
+    });
+});

@@ -9,8 +9,8 @@ where the last one stopped. Background lives in project memory
 
 ## 0. Current status (2026-06-26)
 
-> **2026-06-30 coverage update:** 986 tests pass across 59 suites. Overall Jest
-> coverage is 58.42% statements, 51.23% branches, 66.69% functions, and 59.32%
+> **2026-06-30 coverage update:** 1,100 tests pass across 68 suites. Overall Jest
+> coverage is 70.69% statements, 61.71% branches, 81.30% functions, and 71.62%
 > lines. `src/services/qdrantService.js` now has a direct 36-test unit suite
 > (91.64% statements, 83.73% branches, 100% functions); no e2e tests were
 > changed or removed.
@@ -18,6 +18,11 @@ where the last one stopped. Background lives in project memory
 **Finding (DO NOT fix here):** `POST /api/chat` logs
 `req.body.message?.substring(...)` before validating that `message` is a string.
 A numeric message therefore returns 500 instead of the handler's intended 400.
+
+**Finding (DO NOT fix here):** The Shibboleth SAML success callback logs
+`req.user.userId` before its `if (req.user)` guard. If Passport advances without
+attaching a user, the callback throws and returns 500 instead of a controlled
+authentication failure/redirect.
 
 **LLM test boundary:** Every Jest test must mock provider-facing LLM behavior
 (including key validation). Unit tests must never make provider/network calls or
@@ -266,15 +271,19 @@ All current `src/models/*.js` files have direct unit-test files.
 - [x] `src/services/superChatNotesService.js` — `tests/unit/services/superChatNotesService.test.js`
   (create vector-backfill, re-embed-only-when-content-changes, delete swallow-on-Qdrant-failure,
   `checkSimilar` threshold, `incrementUsage`). `notesQdrantService` mocked with shared spies; model real.
-- [ ] **P3 `src/services/llm.js`** — heavy (1070 lines). Only small pure bits worth it
-  (model/effort allow-lists, any JSON-extraction helper). Mostly NOT unit-testable.
-- [ ] **P3 `src/services/notesQdrantService.js`** — external vector DB; low ROI for unit tests.
+- [x] `src/services/llm.js` — `tests/unit/services/llm.test.js` (20 tests;
+  provider toolkit mocked at import time; model/effort settings, option translation,
+  image/conversation orchestration, prompt builders, parsers, grading and safety analysis).
+- [x] `src/services/notesQdrantService.js` — `tests/unit/services/notesQdrantService.test.js`
+  (12 tests; 100% statements/functions/lines with mocked Qdrant, embeddings, and chunker).
 - [x] `src/services/qdrantService.js` — `tests/unit/services/qdrantService.test.js`
   (36 tests; constructor/init/config failures, collection lifecycle, document processing,
   embeddings, storage, query normalization and filters, per-course search, scrolling,
   cloning, deletion, stats/status). Deterministic boundary fakes; no live Qdrant.
 - [ ] **SKIP `src/services/mongoService.js`, `gridfs.js`** — open DB connections (load-time
-  side effects). `llmStub.js`/`embeddingsStub.js` are test doubles — skip.
+  side effects).
+- [x] `src/services/llmStub.js`, `embeddingsStub.js` — counted by Jest, therefore tested
+  directly in `tests/unit/services/stubs.test.js` (100% statements/functions/lines).
 
 ### ⬜ Remaining — Middleware
 - _All middleware covered_ — `src/middleware/auth.js` is done (see ✅ Done).
