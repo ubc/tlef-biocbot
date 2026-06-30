@@ -69,9 +69,45 @@ describe('GET /:courseId — instructor-admin student list', () => {
         // Sorted by last activity: Alice (Feb) before Bob (Jan).
         expect(res.body.data.students[0].studentId).toBe('s1');
     });
+
+    test('covers malformed names and duration fallbacks without trusting stored duration', async () => {
+        const at = (seconds) => `2026-01-01T00:${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}Z`;
+        const db = memoryDb({
+            courses: [{ courseId: 'C1', instructorId: 'i1' }],
+            chat_sessions: [
+                { sessionId: 'no-user', courseId: 'C1', studentId: 'a', studentName: { displayName: 42 }, savedAt: 1, chatData: { messages: [{ type: 'bot', timestamp: at(1) }] } },
+                { sessionId: 'no-last-time', courseId: 'C1', studentId: 'b', savedAt: 2, chatData: { messages: [{ type: 'user', timestamp: at(0) }, { type: 'note' }] } },
+                { sessionId: 'fallback-seconds', courseId: 'C1', studentId: 'c', savedAt: 3, chatData: { messages: [{ type: 'user', timestamp: at(0) }, { type: 'note', timestamp: at(8) }] } },
+                { sessionId: 'fallback-minutes', courseId: 'C1', studentId: 'd', savedAt: 4, chatData: { messages: [{ type: 'user', timestamp: at(0) }, { type: 'note', timestamp: at(62) }] } },
+                { sessionId: 'fallback-hours', courseId: 'C1', studentId: 'e', savedAt: 5, chatData: { messages: [{ type: 'user', timestamp: '2026-01-01T00:00:00Z' }, { type: 'note', timestamp: '2026-01-01T01:02:03Z' }] } },
+            ],
+        });
+        const res = await request(makeRouteApp(studentsRouter, { db, user: adminInstructor })).get('/C1');
+        const byId = Object.fromEntries(res.body.data.students.map(s => [s.studentId, s]));
+        expect(byId.a.studentName).toBe('Unknown Student');
+        expect(byId.a.sessions[0].duration).toBe('0s');
+        expect(byId.b.sessions[0].duration).toBe('0s');
+        expect(byId.c.sessions[0].duration).toBe('8s');
+        expect(byId.d.sessions[0].duration).toBe('1m 2s');
+        expect(byId.e.sessions[0].duration).toBe('1h 2m 3s');
+    });
+
+    test('500 when a database read fails', async () => {
+        const db = { collection: () => ({ findOne: async () => { throw new Error('db down'); } }) };
+        const res = await request(makeRouteApp(studentsRouter, { db, user: adminInstructor })).get('/C1');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/fetching students/i);
+    });
 });
 
 describe('GET /:courseId/:studentId/sessions/own — student access', () => {
+    test('401 without a user', async () => {
+        const res = await request(makeRouteApp(studentsRouter, { db: memoryDb({}) }))
+            .get('/C1/s1/sessions/own');
+        expect(res.status).toBe(401);
+        expect(res.body).toEqual({ success: false, message: 'Authentication required' });
+    });
+
     test('403 when a student requests another student\'s sessions', async () => {
         const res = await request(makeRouteApp(studentsRouter, { db: memoryDb({}), user: student('s1') }))
             .get('/C1/s2/sessions/own');
@@ -85,12 +121,82 @@ describe('GET /:courseId/:studentId/sessions/own — student access', () => {
         expect(res.status).toBe(403);
     });
 
+    test('403 for an unsupported role', async () => {
+        const res = await request(makeRouteApp(studentsRouter, {
+            db: memoryDb({}), user: { userId: 'x1', role: 'ta' },
+        })).get('/C1/x1/sessions/own');
+        expect(res.status).toBe(403);
+        expect(res.body.message).toBe('Access denied');
+    });
+
+    test('503 when the db is unavailable', async () => {
+        const res = await request(makeRouteApp(studentsRouter, { db: null, user: student('s1') }))
+            .get('/C1/s1/sessions/own');
+        expect(res.status).toBe(503);
+    });
+
+    test('404 when the requested course does not exist', async () => {
+        const res = await request(makeRouteApp(studentsRouter, {
+            db: memoryDb({ courses: [] }), user: student('s1'),
+        })).get('/missing/s1/sessions/own');
+        expect(res.status).toBe(404);
+        expect(res.body.message).toBe('Course not found');
+    });
+
     test('200 when a student requests their own sessions in an existing course', async () => {
         const db = memoryDb({ courses: [{ courseId: 'C1' }], chat_sessions: [] });
         const res = await request(makeRouteApp(studentsRouter, { db, user: student('s1') }))
             .get('/C1/s1/sessions/own');
         expect(res.status).toBe(200);
         expect(res.body.success).toBe(true);
+        expect(res.body.data).toEqual({
+            courseId: 'C1', studentId: 's1', studentName: 'Unknown Student', sessions: [],
+        });
+    });
+
+    test('filters both deletion modes, sorts newest first, and recalculates duration', async () => {
+        const messages = (end) => ({ messages: [
+            { type: 'user', timestamp: '2026-01-01T00:00:00Z' },
+            { type: 'bot', timestamp: end },
+        ] });
+        const db = memoryDb({
+            courses: [{ courseId: 'C1' }],
+            chat_sessions: [
+                { sessionId: 'new', courseId: 'C1', studentId: 's1', studentName: 'Alice', savedAt: new Date('2026-02-01'), chatData: messages('2026-01-01T02:03:04Z') },
+                { sessionId: 'old', courseId: 'C1', studentId: 's1', studentName: 'Alice', savedAt: new Date('2026-01-01'), chatData: messages('2026-01-01T00:00:09Z') },
+                { sessionId: 'student-hidden', courseId: 'C1', studentId: 's1', studentDeleted: true },
+                { sessionId: 'globally-hidden', courseId: 'C1', studentId: 's1', isDeleted: true },
+                { sessionId: 'other-student', courseId: 'C1', studentId: 's2' },
+            ],
+        });
+        const res = await request(makeRouteApp(studentsRouter, { db, user: student('s1') }))
+            .get('/C1/s1/sessions/own');
+        expect(res.status).toBe(200);
+        expect(res.body.data.studentName).toBe('Alice');
+        expect(res.body.data.sessions.map(({ sessionId, duration }) => ({ sessionId, duration }))).toEqual([
+            { sessionId: 'new', duration: '2h 3m 4s' },
+            { sessionId: 'old', duration: '9s' },
+        ]);
+    });
+
+    test('allows a system admin only when they own the course', async () => {
+        const denied = await request(makeRouteApp(studentsRouter, {
+            db: memoryDb({ courses: [{ courseId: 'C1', instructorId: 'other' }] }), user: adminInstructor,
+        })).get('/C1/s1/sessions/own');
+        expect(denied.status).toBe(404);
+
+        const allowed = await request(makeRouteApp(studentsRouter, {
+            db: memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1' }], chat_sessions: [] }), user: adminInstructor,
+        })).get('/C1/s1/sessions/own');
+        expect(allowed.status).toBe(200);
+    });
+
+    test('500 when a database read fails', async () => {
+        const db = { collection: () => ({ findOne: async () => { throw new Error('db down'); } }) };
+        const res = await request(makeRouteApp(studentsRouter, { db, user: student('s1') }))
+            .get('/C1/s1/sessions/own');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/fetching student sessions/i);
     });
 });
 
@@ -107,6 +213,21 @@ describe('PUT /:courseId/:studentId/sessions/:sessionId/title — rename', () =>
         expect(res.status).toBe(403);
     });
 
+    test('401 without a user and 403 for an unsupported role', async () => {
+        const db = memoryDb({});
+        expect((await request(makeRouteApp(studentsRouter, { db }))
+            .put('/C1/s1/sessions/sess1/title').send({ title: 'x' })).status).toBe(401);
+        expect((await request(makeRouteApp(studentsRouter, { db, user: { userId: 'x', role: 'ta' } }))
+            .put('/C1/s1/sessions/sess1/title').send({ title: 'x' })).status).toBe(403);
+    });
+
+    test('500 when the db is unavailable', async () => {
+        const res = await request(makeRouteApp(studentsRouter, { db: null, user: student('s1') }))
+            .put('/C1/s1/sessions/sess1/title').send({ title: 'x' });
+        expect(res.status).toBe(500);
+        expect(res.body.error).toMatch(/database connection/i);
+    });
+
     test('404 when the session does not exist', async () => {
         const db = memoryDb({ chat_sessions: [] });
         const res = await request(makeRouteApp(studentsRouter, { db, user: student('s1') }))
@@ -119,7 +240,26 @@ describe('PUT /:courseId/:studentId/sessions/:sessionId/title — rename', () =>
         const res = await request(makeRouteApp(studentsRouter, { db, user: student('s1') }))
             .put('/C1/s1/sessions/sess1/title').send({ title: 'Renamed' });
         expect(res.status).toBe(200);
+        expect(res.body.data).toEqual({ sessionId: 'sess1', title: 'Renamed' });
         expect((await db.collection('chat_sessions').findOne({ sessionId: 'sess1' })).title).toBe('Renamed');
+    });
+
+    test('500 when the session lookup fails', async () => {
+        const db = { collection: () => ({ findOne: async () => { throw new Error('db down'); } }) };
+        const res = await request(makeRouteApp(studentsRouter, { db, user: student('s1') }))
+            .put('/C1/s1/sessions/sess1/title').send({ title: 'x' });
+        expect(res.status).toBe(500);
+        expect(res.body.error).toBe('Failed to update chat session title');
+    });
+
+    test('404 when the session disappears between lookup and update', async () => {
+        const db = { collection: () => ({
+            findOne: async () => ({ sessionId: 'sess1' }),
+            updateOne: async () => ({ matchedCount: 0 }),
+        }) };
+        const res = await request(makeRouteApp(studentsRouter, { db, user: student('s1') }))
+            .put('/C1/s1/sessions/sess1/title').send({ title: 'x' });
+        expect(res.status).toBe(404);
     });
 });
 
@@ -128,6 +268,20 @@ describe('DELETE /:courseId/:studentId/sessions/:sessionId/own — student soft-
         const res = await request(makeRouteApp(studentsRouter, { db: memoryDb({}), user: student('s1') }))
             .delete('/C1/s2/sessions/sess1/own');
         expect(res.status).toBe(403);
+    });
+
+    test('401 without a user and 403 for an unsupported role', async () => {
+        const db = memoryDb({});
+        expect((await request(makeRouteApp(studentsRouter, { db }))
+            .delete('/C1/s1/sessions/sess1/own')).status).toBe(401);
+        expect((await request(makeRouteApp(studentsRouter, { db, user: { userId: 'x', role: 'ta' } }))
+            .delete('/C1/s1/sessions/sess1/own')).status).toBe(403);
+    });
+
+    test('500 when the db is unavailable', async () => {
+        const res = await request(makeRouteApp(studentsRouter, { db: null, user: student('s1') }))
+            .delete('/C1/s1/sessions/sess1/own');
+        expect(res.status).toBe(500);
     });
 
     test('404 when the session does not exist', async () => {
@@ -144,6 +298,25 @@ describe('DELETE /:courseId/:studentId/sessions/:sessionId/own — student soft-
         expect(res.status).toBe(200);
         const stored = await db.collection('chat_sessions').findOne({ sessionId: 'sess1' });
         expect(stored.studentDeleted).toBe(true);
+        expect(stored.studentDeletedAt).toBeDefined();
         expect(stored.isDeleted).toBeUndefined(); // not hidden from instructors
+    });
+
+    test('500 when the session lookup fails', async () => {
+        const db = { collection: () => ({ findOne: async () => { throw new Error('db down'); } }) };
+        const res = await request(makeRouteApp(studentsRouter, { db, user: student('s1') }))
+            .delete('/C1/s1/sessions/sess1/own');
+        expect(res.status).toBe(500);
+        expect(res.body.error).toBe('Failed to delete chat session');
+    });
+
+    test('404 when the session disappears between lookup and update', async () => {
+        const db = { collection: () => ({
+            findOne: async () => ({ sessionId: 'sess1' }),
+            updateOne: async () => ({ matchedCount: 0 }),
+        }) };
+        const res = await request(makeRouteApp(studentsRouter, { db, user: student('s1') }))
+            .delete('/C1/s1/sessions/sess1/own');
+        expect(res.status).toBe(404);
     });
 });
