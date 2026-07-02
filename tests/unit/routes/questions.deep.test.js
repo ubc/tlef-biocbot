@@ -543,3 +543,24 @@ describe('POST /generate-ai — remaining access, content, and regenerate branch
         expect(res.body.data.selectedLearningObjective).toBe('');
     });
 });
+
+describe('coverage: missing-user access arms and the post-match race 404', () => {
+    test('unauthenticated reads and writes get the wrapper\'s 401 (helpers\' !user arms are dead)', async () => {
+        // requireCourseQuestionAccess 401s before canRead/canMutateCourseQuestions
+        // ever run, so those helpers' own missing-user arms are unreachable.
+        expect((await request(app({ db: courseDb() })).get('/q1')).status).toBe(401);
+        const body = { courseId: 'C1', lectureName: 'Unit 1', instructorId: 'i1', question: 'Updated?' };
+        expect((await request(app({ db: courseDb() })).put('/q1').send(body)).status).toBe(401);
+    });
+
+    test('GET /:questionId returns 404 when the question disappears between match and scan', async () => {
+        // Simulates a concurrent edit: the course-level dotted query matches, but
+        // the returned document no longer contains the question.
+        const racingDb = { collection: () => ({
+            findOne: async () => ({ courseId: 'C1', lectures: [{ name: 'Unit 1', assessmentQuestions: [{ questionId: 'other' }] }] }),
+        }) };
+        const res = await request(app({ db: racingDb, user: systemAdmin })).get('/q1');
+        expect(res.status).toBe(404);
+        expect(res.body.message).toBe('Question not found');
+    });
+});

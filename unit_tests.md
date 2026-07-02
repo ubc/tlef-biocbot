@@ -42,7 +42,7 @@ consume API credits. Prompt-setting tests may exercise stored configuration only
 | Module | Test file | Notes |
 |---|---|---|
 | `src/services/authorization.js` | `tests/unit/services/authorization.test.js` | pre-existing (copy its style) |
-| `src/services/llmKeyStore.js` | `tests/unit/services/llmKeyStore.test.js` | network `fetch` paths intentionally NOT covered |
+| `src/services/llmKeyStore.js` | `tests/unit/services/llmKeyStore.test.js` | validateApiKey provider paths now covered via `jest.mock('node-fetch')` — see §6 node-fetch pitfall |
 | `src/services/prompts.js` | `tests/unit/services/prompts.test.js` | 100% |
 | `src/services/superCourseService.js` | `tests/unit/services/superCourseService.test.js` | settings, enrollment, pool helpers, balanced Qdrant + notes retrieval, formatting/attribution, collaborator failures; **100% statements/branches/functions/lines** |
 | `src/services/tracker.js` | `tests/unit/services/tracker.test.js` | 100% |
@@ -658,10 +658,37 @@ pass, NOT to be fixed while writing tests.
   effect on the router. Catch-path tests for such routers must inject the failure a level down
   (e.g. a db whose `collection()` throws). Testability note, not a bug.
 
+- **⚠️ `llmKeyStore` binds `require('node-fetch')` at load — mocking `global.fetch` silently makes
+  REAL network calls.** A first attempt at covering `validateApiKey`'s provider paths replaced
+  `global.fetch` with a jest mock; the module ignored it and the tests hit `api.openai.com` for real
+  (the failures echoed OpenAI's genuine 401 body). Any test touching `validateApiKey`/`openaiPost`
+  MUST `jest.mock('node-fetch', () => jest.fn())` before requiring the module (now done in
+  `llmKeyStore.test.js`). Rule of thumb for this codebase: check whether the module imports
+  `node-fetch` before assuming the global-fetch seam works. Testing note, not a source bug.
+
 - **`Onboarding.js` computes the collection handle before each `try` block**, so a failing
   `db.collection()` rejects the promise without ever reaching the model's catch/log/rethrow paths.
   The catch blocks are only reachable when the collection *operation* fails (covered that way in
   `Onboarding.test.js`). Behavior note, not a bug.
+
+- **`src/routes/testLlmStub.js` line 55 (addRule catch) is unreachable.** The route already 400s
+  when both matchers are missing, and `LLMStub.addRule` throws only for exactly that condition, so
+  the route-level try/catch around `addRule` can never fire. The single uncovered line in the file;
+  a production edit would be required for literal 100%. Not fixed.
+
+- **`src/routes/academicSync.js`'s db-missing 503 (lines 97-99) is unreachable through the mounted
+  router.** The router-level academic-API gate runs first and `isAcademicApiEnabled(null)` fails
+  closed, so a request with no db is answered by the gate (`disabled` read / 403 write) before
+  `requireInstructorCourse` can produce its 503. Not fixed.
+
+- **Five spots in `src/routes/questions.js` are unreachable through the exported router.**
+  (a) `canReadCourseQuestions`/`canMutateCourseQuestions` missing-user arms and the mutate
+  fallthrough (lines 97, 113, 128): `requireCourseQuestionAccess` 401s unauthenticated requests and
+  403s non-staff roles before either helper runs, and it only calls `canMutate` for roles that match
+  one of its arms. (b) `linkQuestionsToLearningObjectives`'s empty-input early return (199-201):
+  both callers (auto-link and bulk) pre-guard empty objectives/questions with their own responses.
+  (c) The empty-`questionId` guard at 847 (Express path-parameter pattern). These keep the file at
+  ~98.6% lines; literal 100% would need production edits or coverage-ignore directives. Not fixed.
 
 - **Several Course positional-update helpers can report false success during a race.** Helpers such as
   `updateLecturePublishStatus`, `updateLearningObjectives`, `updatePassThreshold`,

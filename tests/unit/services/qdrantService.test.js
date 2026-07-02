@@ -332,3 +332,160 @@ describe('QdrantService', () => {
         await expect(service.testLLMConnection()).resolves.toBe(false);
     });
 });
+
+describe('QdrantService coverage: stub embeddings, probe warnings, key failures, filter defaults, loop breaks, lazy init', () => {
+    const originalEnv = process.env;
+
+    beforeAll(() => {
+        jest.spyOn(console, 'log').mockImplementation(() => {});
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+    });
+    beforeEach(() => {
+        process.env = { ...originalEnv };
+        delete process.env.BIOCBOT_TEST_LLM_STUB;
+        delete process.env.LLM_EMBEDDING_MODEL;
+        config.getVectorDBConfig.mockReturnValue({ host: 'localhost', port: 6333 });
+        config.getLLMConfig.mockReturnValue({ provider: 'openai', defaultModel: 'model' });
+    });
+    afterAll(() => {
+        process.env = originalEnv;
+        jest.restoreAllMocks();
+    });
+
+    test('initialize uses the local embeddings stub under BIOCBOT_TEST_LLM_STUB=1 (no provider creation)', async () => {
+        process.env.BIOCBOT_TEST_LLM_STUB = '1';
+        process.env.LLM_EMBEDDING_MODEL = 'text-embedding-3-small';
+        const client = {
+            getCollections: jest.fn(async () => ({ collections: [{ name: 'biocbot_documents_stub' }] })),
+            getCollection: jest.fn(async () => ({ config: { params: { vectors: { size: 1536 } } } })),
+        };
+        QdrantClient.mockImplementation(() => client);
+        ChunkingModule.mockImplementation(() => ({ getDefaultStrategyName: () => 'recursiveCharacter' }));
+        mockCreateEmbeddings.mockClear();
+        const service = new QdrantService();
+        await service.initialize();
+        expect(mockCreateEmbeddings).not.toHaveBeenCalled();
+        // The stub produces deterministic vectors of the configured size.
+        const probe = await service.embed('hello');
+        expect(probe[0]).toHaveLength(1536);
+    });
+
+    test('initialize warns on the [1] fallback probe and on an unexpected probe shape', async () => {
+        const client = {
+            getCollections: jest.fn(async () => ({ collections: [{ name: 'biocbot_documents' }] })),
+            getCollection: jest.fn(async () => ({ config: { params: { vectors: { size: 768 } } } })),
+        };
+        QdrantClient.mockImplementation(() => client);
+        ChunkingModule.mockImplementation(() => ({ getDefaultStrategyName: () => 'recursiveCharacter' }));
+
+        // [1] fallback (nested, then flattened) — indicates silent embedding failure.
+        await new QdrantService({ embeddings: { embed: jest.fn(async () => [[1]]) } }).initialize();
+        expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('fallback value [1]'));
+
+        // Empty result — unexpected shape, still continues on model-based size.
+        await new QdrantService({ embeddings: { embed: jest.fn(async () => []) } }).initialize();
+        expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('unexpected result'));
+    });
+
+    test('generateEmbeddings warns (but keeps) a vector whose size mismatches the collection', async () => {
+        const service = makeService({ embeddings: { embed: jest.fn(async () => [[1, 2]]) } });
+        await expect(service.generateEmbeddings(['text'])).resolves.toEqual([[1, 2]]);
+        expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("doesn't match expected size"));
+    });
+
+    test('storeChunks rethrows an upsert failure', async () => {
+        const service = makeService({ client: { upsert: jest.fn(async () => { throw new Error('qdrant write failed'); }) } });
+        await expect(service.storeChunks({ documentId: 'D', fileName: 'f' }, ['hello'], [[1, 2, 3]]))
+            .rejects.toThrow('qdrant write failed');
+    });
+
+    test('generateQueryVector uses the first vector of an unexpected batch and warns', async () => {
+        const service = makeService({ embeddings: { embed: jest.fn(async () => [[1, 2, 3], [4, 5, 6]]) } });
+        await expect(service.generateQueryVector('q')).resolves.toEqual([1, 2, 3]);
+        expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('vectors for a single query'));
+    });
+
+    test('generateQueryVector warns when the query vector size mismatches the collection', async () => {
+        const service = makeService({ embeddings: { embed: jest.fn(async () => [[1, 2]]) } });
+        await expect(service.generateQueryVector('q')).resolves.toEqual([1, 2]);
+        expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('does not match expected collection size'));
+    });
+
+    test('embed maps provider key failures to LlmKeyError and notifies the scope handler', async () => {
+        const keyError = Object.assign(new Error('Incorrect API key'), { status: 401 });
+        const onProviderKeyFailure = jest.fn(async () => {});
+        const service = makeService({
+            embeddings: { embed: jest.fn(async () => { throw keyError; }) },
+            onProviderKeyFailure,
+        });
+        service.onProviderKeyFailure = onProviderKeyFailure;
+        await expect(service.embed('q')).rejects.toMatchObject({ code: 'LLM_KEY_INVALID' });
+        expect(onProviderKeyFailure).toHaveBeenCalledWith('invalid', keyError);
+
+        // A throwing handler is swallowed; the LlmKeyError still propagates.
+        service.onProviderKeyFailure = jest.fn(async () => { throw new Error('handler broke'); });
+        await expect(service.embed('q')).rejects.toMatchObject({ code: 'LLM_KEY_INVALID' });
+    });
+
+    test('searchDocuments initializes the filter for each filter type used alone', async () => {
+        const filterFor = async (filters) => {
+            const service = makeService();
+            await service.searchDocuments('q', filters);
+            return service.client.search.mock.calls[0][1].filter;
+        };
+        expect(await filterFor({ lectureName: 'U1' })).toEqual({ must: [{ key: 'lectureName', match: { value: 'U1' } }] });
+        expect(await filterFor({ lectureNames: ['U1', 'U2'] })).toEqual({ must: [{ key: 'lectureName', match: { any: ['U1', 'U2'] } }] });
+        expect(await filterFor({ excludeAdditionalMaterials: true })).toMatchObject({ must: [], must_not: expect.any(Array) });
+        expect((await filterFor({ additionalMaterialsOnly: true })).must[0].should).toHaveLength(2);
+    });
+
+    test('searchDocuments and getDocumentChunks rethrow client failures', async () => {
+        const searchFail = makeService({ client: { search: jest.fn(async () => { throw new Error('search down'); }) } });
+        await expect(searchFail.searchDocuments('q', {})).rejects.toThrow('search down');
+        const scrollFail = makeService({ client: { scroll: jest.fn(async () => { throw new Error('scroll down'); }) } });
+        await expect(scrollFail.getDocumentChunks('D')).rejects.toThrow('scroll down');
+    });
+
+    test('deleteDocumentChunks stops on a later empty page and on the safety break', async () => {
+        // First page has points and promises more; second page is empty → break (not the "no chunks" return).
+        const service = makeService();
+        service.client.scroll
+            .mockResolvedValueOnce({ points: [{ id: '1' }], next_page_offset: 'more' })
+            .mockResolvedValueOnce({ points: [], next_page_offset: 'more' });
+        await expect(service.deleteDocumentChunks('D')).resolves.toMatchObject({ success: true, deletedCount: 1 });
+
+        // A scroll that always reports more pages trips the MAX_LOOPS safety break.
+        const runaway = makeService();
+        runaway.client.scroll.mockResolvedValue({ points: [{ id: 'x' }], next_page_offset: 'forever' });
+        const result = await runaway.deleteDocumentChunks('D');
+        expect(result.success).toBe(true);
+        expect(result.deletedCount).toBe(100); // one point per loop × MAX_LOOPS
+        expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Safety break'));
+    });
+
+    test('stats, collection deletion, and the LLM probe lazily initialize when needed', async () => {
+        const stats = makeService();
+        const statsClient = stats.client;
+        stats.client = null;
+        stats.initialize = jest.fn(async () => { stats.client = statsClient; });
+        await expect(stats.getCollectionStats()).resolves.toMatchObject({ pointsCount: 4 });
+        expect(stats.initialize).toHaveBeenCalled();
+
+        const del = makeService();
+        const delClient = del.client;
+        del.client = null;
+        del.initialize = jest.fn(async () => { del.client = delClient; });
+        await expect(del.deleteCollection()).resolves.toMatchObject({ success: true });
+
+        const probe = makeService();
+        const probeEmbeddings = probe.embeddings;
+        probe.embeddings = null;
+        probe.initialize = jest.fn(async () => { probe.embeddings = probeEmbeddings; });
+        await expect(probe.testLLMConnection()).resolves.toBe(true);
+
+        // getCollectionStats rethrows an underlying failure.
+        const failing = makeService({ client: { getCollection: jest.fn(async () => { throw new Error('stats down'); }) } });
+        await expect(failing.getCollectionStats()).rejects.toThrow('stats down');
+    });
+});
