@@ -196,3 +196,74 @@ describe('GET /published-with-questions', () => {
         });
     });
 });
+
+describe('db guards (503) and model failure paths (500)', () => {
+    const CourseModel = require('../../../src/models/Course');
+
+    test('every endpoint returns 503 when the db is unavailable', async () => {
+        const noDb = app({ db: null, user: instructor });
+        expect((await request(noDb).post('/publish').send({ lectureName: 'Unit 1', isPublished: false, courseId: 'C1' })).status).toBe(503);
+        expect((await request(noDb).get('/publish-status?instructorId=i1&courseId=C1')).status).toBe(503);
+        expect((await request(noDb).get('/student-visible?courseId=C1')).status).toBe(503);
+        expect((await request(noDb).post('/pass-threshold').send({ courseId: 'C1', lectureName: 'Unit 1', passThreshold: 50, instructorId: 'i1' })).status).toBe(503);
+        expect((await request(noDb).get('/pass-threshold?courseId=C1&lectureName=Unit 1')).status).toBe(503);
+        expect((await request(noDb).get('/published-with-questions?courseId=C1')).status).toBe(503);
+    });
+
+    test('POST /publish 500 when the model throws', async () => {
+        const spy = jest.spyOn(CourseModel, 'updateLecturePublishStatus').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: memoryDb({ courses: [course()] }), user: instructor }))
+            .post('/publish').send({ lectureName: 'Unit 1', isPublished: false, courseId: 'C1' });
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/updating publish status/i);
+        spy.mockRestore();
+    });
+
+    test('GET /publish-status 500 when the course lookup throws', async () => {
+        const spy = jest.spyOn(CourseModel, 'getCourseById').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: memoryDb({}), user: instructor }))
+            .get('/publish-status?instructorId=i1&courseId=C1');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/fetching publish status/i);
+        spy.mockRestore();
+    });
+
+    test('GET /student-visible 500 when the model throws', async () => {
+        const spy = jest.spyOn(CourseModel, 'getPublishedLectures').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: memoryDb({}), user: instructor })).get('/student-visible?courseId=C1');
+        expect(res.status).toBe(500);
+        spy.mockRestore();
+    });
+
+    test('POST /pass-threshold 500 when the model throws', async () => {
+        const spy = jest.spyOn(CourseModel, 'updatePassThreshold').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: memoryDb({}), user: instructor }))
+            .post('/pass-threshold').send({ courseId: 'C1', lectureName: 'Unit 1', passThreshold: 60, instructorId: 'i1' });
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/updating pass threshold/i);
+        spy.mockRestore();
+    });
+
+    test('GET /pass-threshold 500 when the model throws', async () => {
+        const spy = jest.spyOn(CourseModel, 'getPassThreshold').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: memoryDb({}), user: instructor })).get('/pass-threshold?courseId=C1&lectureName=Unit 1');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/fetching pass threshold/i);
+        spy.mockRestore();
+    });
+
+    test('GET /published-with-questions 500 when the collection read throws', async () => {
+        const throwingDb = { collection: () => ({ findOne: async () => { throw new Error('mongo down'); } }) };
+        const res = await request(app({ db: throwingDb, user: instructor })).get('/published-with-questions?courseId=C1');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/fetching published lectures/i);
+    });
+});
+
+describe('publish-status auth gate', () => {
+    test('401 when there is no authenticated user', async () => {
+        const res = await request(app({ db: memoryDb({ courses: [course()] }) }))
+            .get('/publish-status?instructorId=i1&courseId=C1');
+        expect(res.status).toBe(401);
+    });
+});

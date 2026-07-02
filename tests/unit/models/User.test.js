@@ -620,3 +620,27 @@ describe('User.resetUserStruggleState', () => {
         });
     });
 });
+
+describe('User coverage: SAML PUID backfill and persistence failure tolerance', () => {
+    test('createOrGetSAMLUser backfills a missing PUID on an existing user', async () => {
+        const db = memoryDb({ users: [{
+            userId: 'u-saml', username: 'old', email: 'saml@ubc.ca', role: 'student',
+            authProvider: 'saml', samlId: 'saml-1', isActive: true,
+        }] });
+        const result = await User.createOrGetSAMLUser(db, { samlId: 'saml-1', puid: 'PUID-9', email: 'saml@ubc.ca' });
+        expect(result.success).toBe(true);
+        const stored = await db.collection('users').findOne({ userId: 'u-saml' });
+        expect(stored.puid).toBe('PUID-9');
+    });
+
+    test('updateUserStruggleState swallows persistence-topic failures once Directive Mode activates', async () => {
+        PersistenceTopic.incrementStudentCount.mockRejectedValueOnce(new Error('persistence down'));
+        const db = memoryDb({ users: [{
+            userId: 'u1', username: 'stu', role: 'student', isActive: true,
+            struggleState: { topics: [{ topic: 'atp', courseId: 'C1', count: 2, isActive: false }] },
+        }] });
+        const result = await User.updateUserStruggleState(db, 'u1', { topic: 'ATP', isStruggling: true }, 'C1');
+        expect(result.success).toBe(true);
+        expect(result.state.isActive).toBe(true);
+    });
+});

@@ -180,3 +180,78 @@ describe('ChatSurveyResponse model', () => {
         await expect(ChatSurveyResponse.ensureIndexes(memoryDb({}))).resolves.toBeUndefined();
     });
 });
+
+describe('ChatSurveyResponse validation and filter coverage', () => {
+    const base = { courseId: 'C1', studentId: 's1', conversationId: 'conv1', settings };
+
+    test('generateSurveyResponseId falls back to a timestamp id without crypto.randomUUID', () => {
+        const crypto = require('crypto');
+        const original = crypto.randomUUID;
+        // Simulate an older runtime with no crypto.randomUUID.
+        crypto.randomUUID = undefined;
+        try {
+            expect(ChatSurveyResponse.generateSurveyResponseId()).toMatch(/^survey_\d+_[a-z0-9]+$/);
+        } finally {
+            crypto.randomUUID = original;
+        }
+    });
+
+    test('upsert rejects missing identifiers, bad event types, and blank fingerprints', async () => {
+        const db = memoryDb({});
+        expect(await ChatSurveyResponse.upsertChatSurveyEvent(db, { ...base, courseId: '  ' }))
+            .toEqual({ success: false, error: 'courseId is required' });
+        expect(await ChatSurveyResponse.upsertChatSurveyEvent(db, { ...base, eventType: 'poked' }))
+            .toEqual({ success: false, error: 'eventType must be "shown", "dismissed", or "submitted"' });
+        expect(await ChatSurveyResponse.upsertChatSurveyEvent(db, { ...base, eventType: 'shown', settingsFingerprint: '   ' }))
+            .toEqual({ success: false, error: 'settingsFingerprint is required' });
+    });
+
+    test('later non-submit events are ignored once a session has submitted', async () => {
+        const db = memoryDb({});
+        const submitted = await ChatSurveyResponse.upsertChatSurveyEvent(db, {
+            ...base, eventType: 'submitted', ratingAccuracy: 5, ratingSatisfaction: 4,
+        });
+        expect(submitted.success).toBe(true);
+
+        const shownAgain = await ChatSurveyResponse.upsertChatSurveyEvent(db, { ...base, eventType: 'shown' });
+        expect(shownAgain).toMatchObject({ success: true, ignored: true });
+        expect(shownAgain.response.ratingAccuracy).toBe(5);
+    });
+
+    test('listSurveyResponsesForCourse filters by student, conversation, and status', async () => {
+        const db = memoryDb({});
+        await ChatSurveyResponse.upsertChatSurveyEvent(db, { ...base, eventType: 'shown' });
+        await ChatSurveyResponse.upsertChatSurveyEvent(db, { ...base, studentId: 's2', conversationId: 'conv2', eventType: 'dismissed' });
+        await ChatSurveyResponse.upsertChatSurveyEvent(db, { ...base, studentId: 's3', eventType: 'submitted', ratingAccuracy: 3, ratingSatisfaction: 3 });
+
+        const s2 = await ChatSurveyResponse.listSurveyResponsesForCourse(db, 'C1', { studentId: 's2', conversationId: 'conv2' });
+        expect(s2.map(r => r.studentId)).toEqual(['s2']);
+
+        const dismissed = await ChatSurveyResponse.listSurveyResponsesForCourse(db, 'C1', { status: 'dismissed' });
+        expect(dismissed.map(r => r.studentId)).toEqual(['s2']);
+
+        const shown = await ChatSurveyResponse.listSurveyResponsesForCourse(db, 'C1', { status: 'shown' });
+        expect(shown.length).toBeGreaterThanOrEqual(1);
+
+        const submitted = await ChatSurveyResponse.listSurveyResponsesForCourse(db, 'C1', { status: 'submitted' });
+        expect(submitted.map(r => r.studentId)).toEqual(['s3']);
+    });
+});
+
+describe('ChatSurveyResponse.getSurveyResponseForSession', () => {
+    const base = { courseId: 'C1', studentId: 's1', conversationId: 'conv1', settings };
+
+    test('returns null for invalid keys or a blank fingerprint, else the stored response', async () => {
+        const db = memoryDb({});
+        expect(await ChatSurveyResponse.getSurveyResponseForSession(db, { ...base, courseId: '' })).toBeNull();
+        expect(await ChatSurveyResponse.getSurveyResponseForSession(db, { ...base })).toBeNull(); // no fingerprint
+
+        const saved = await ChatSurveyResponse.upsertChatSurveyEvent(db, { ...base, eventType: 'shown' });
+        const fingerprint = saved.response.settingsFingerprint;
+        const found = await ChatSurveyResponse.getSurveyResponseForSession(db, { ...base, settingsFingerprint: fingerprint });
+        expect(found).toMatchObject({ courseId: 'C1', studentId: 's1', settingsFingerprint: fingerprint });
+        expect(found).not.toHaveProperty('_id');
+
+        expect(await ChatSurveyResponse.getSurveyResponseForSession(db, { ...base, settingsFingerprint: 'nope' })).toBeNull();
+    });
+});

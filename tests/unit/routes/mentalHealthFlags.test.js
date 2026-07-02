@@ -118,3 +118,38 @@ describe('PUT /:flagId/disregard — admin only', () => {
         expect((await db.collection('mentalHealthFlags').findOne({ flagId: 'mhf_1' })).resolvedBy).toBe('a1');
     });
 });
+
+describe('model failure paths (500)', () => {
+    const MentalHealthFlag = require('../../../src/models/MentalHealthFlag');
+
+    test('GET /course/:courseId 500 when the model throws', async () => {
+        const spy = jest.spyOn(MentalHealthFlag, 'getMentalHealthFlagsForCourse').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: memoryDb({}), user: instructor })).get('/course/C1');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/Failed to fetch/i);
+        spy.mockRestore();
+    });
+
+    test.each([
+        ['escalate', instructor, /Failed to escalate/i],
+        ['dismiss', instructor, /Failed to dismiss/i],
+        ['resolve', { userId: 'a1', role: 'instructor', permissions: { systemAdmin: true } }, /Failed to resolve/i],
+        ['disregard', { userId: 'a1', role: 'instructor', permissions: { systemAdmin: true } }, /Failed to disregard/i],
+    ])('PUT /:flagId/%s 500 when the model throws', async (action, user, message) => {
+        const spy = jest.spyOn(MentalHealthFlag, 'updateFlagStatus').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: memoryDb({}), user })).put(`/mhf_1/${action}`);
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(message);
+        spy.mockRestore();
+    });
+});
+
+describe('db guards on the status transitions', () => {
+    test('escalate/dismiss/resolve/disregard each return 503 without a db', async () => {
+        const admin2 = { userId: 'a1', role: 'instructor', permissions: { systemAdmin: true } };
+        for (const action of ['escalate', 'dismiss', 'resolve', 'disregard']) {
+            const res = await request(app({ db: null, user: admin2 })).put(`/mhf_1/${action}`);
+            expect(res.status).toBe(503);
+        }
+    });
+});

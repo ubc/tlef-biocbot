@@ -174,3 +174,110 @@ describe('student Super Course chat with mocked LLM', () => {
         expect(res.body.message).toBe('Failed to process chat message');
     });
 });
+
+describe('coverage: resolver guards, list tiebreak, struggle tracker branches, failure paths', () => {
+    const User = require('../../../src/models/User');
+
+    test('resolver: 503 without a db and 401 without a user', async () => {
+        expect((await request(app({ db: null, user: student })).get('/pool?superchatId=sc1')).status).toBe(503);
+        expect((await request(app({ db: memoryDb({}) })).get('/pool?superchatId=sc1')).status).toBe(401);
+    });
+
+    test('list breaks year-level ties alphabetically by name', async () => {
+        services.getStudentAccessibleSuperchatIds.mockResolvedValueOnce(new Set(['b1', 'b2']));
+        services.listSuperchats.mockResolvedValueOnce([
+            { ...superchat, superchatId: 'b2', name: 'Zeta', yearLevel: 4 },
+            { ...superchat, superchatId: 'b1', name: 'Alpha', yearLevel: 4 },
+        ]);
+        const res = await request(app({ db: memoryDb({}), user: student })).get('/list');
+        expect(res.status).toBe(200);
+        expect(res.body.superchats.map(b => b.name)).toEqual(['Alpha', 'Zeta']);
+    });
+
+    test('status and list return 500 when the accessibility lookup throws', async () => {
+        services.getStudentAccessibleSuperchatIds.mockRejectedValueOnce(new Error('mongo down'));
+        expect((await request(app({ db: memoryDb({}), user: student })).get('/status')).status).toBe(500);
+        expect((await request(app({ db: null, user: student })).get('/list')).status).toBe(503);
+        services.getStudentAccessibleSuperchatIds.mockRejectedValueOnce(new Error('mongo down'));
+        expect((await request(app({ db: memoryDb({}), user: student })).get('/list')).status).toBe(500);
+    });
+
+    test('pool returns 500 when the retrieval pool lookup throws', async () => {
+        services.getSuperCourseRetrievalPool.mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: memoryDb({}), user: student })).get('/pool?superchatId=sc1');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/source pool/i);
+    });
+
+    test('session persistence routes return 500 when the collection operations throw', async () => {
+        const throwingDb = { collection: () => ({
+            replaceOne: async () => { throw new Error('mongo down'); },
+            updateOne: async () => { throw new Error('mongo down'); },
+            findOne: async () => { throw new Error('mongo down'); },
+            find: () => { throw new Error('mongo down'); },
+        }) };
+        const save = await request(app({ db: throwingDb, user: student }))
+            .post('/save').send({ superchatId: 'sc1', sessionId: 'x', chatData: {} });
+        expect(save.status).toBe(500);
+        expect((await request(app({ db: throwingDb, user: student })).get('/sessions?superchatId=sc1')).status).toBe(500);
+        expect((await request(app({ db: throwingDb, user: student })).get('/sessions/x?superchatId=sc1')).status).toBe(500);
+        expect((await request(app({ db: throwingDb, user: student })).delete('/sessions/x?superchatId=sc1')).status).toBe(500);
+    });
+
+    test('trackSuperCourseStruggle stops after analysis when the student is not struggling', async () => {
+        services.getSuperCourseApprovedTopics.mockResolvedValueOnce([{ courseId: 'C1', topics: ['atp'] }]);
+        await router.trackSuperCourseStruggle({
+            db: memoryDb({}), llmService: {}, user: student, message: 'what is ATP?', superchatId: 'sc1',
+        });
+        expect(User.updateUserStruggleState).not.toHaveBeenCalled();
+    });
+
+    test('trackSuperCourseStruggle swallows internal failures', async () => {
+        services.getSuperCourseApprovedTopics.mockRejectedValueOnce(new Error('mongo down'));
+        await expect(router.trackSuperCourseStruggle({
+            db: memoryDb({}), llmService: {}, user: student, message: 'help', superchatId: 'sc1',
+        })).resolves.toBeUndefined();
+    });
+});
+
+describe('coverage: struggle tracking success paths', () => {
+    const TrackerService = require('../../../src/services/tracker');
+    const User = require('../../../src/models/User');
+    const StruggleActivity = require('../../../src/models/StruggleActivity');
+
+    const strugglingAnalysis = { isStruggling: true, isMapped: true, courseId: 'C1', topic: 'ATP', matchConfidence: 0.9 };
+
+    test('records an Inactive event when the topic is below the activation threshold', async () => {
+        TrackerService.mockImplementationOnce(() => ({
+            analyzeMessageAcrossCourses: jest.fn(async () => strugglingAnalysis),
+        }));
+        services.getSuperCourseApprovedTopics.mockResolvedValueOnce([{ courseId: 'C1', topics: ['atp'] }]);
+        User.updateUserStruggleState.mockResolvedValueOnce({ success: true, state: { isActive: false } });
+
+        const db = memoryDb({});
+        await router.trackSuperCourseStruggle({ db, llmService: {}, user: student, message: 'I am lost on ATP', superchatId: 'sc1' });
+
+        expect(User.updateUserStruggleState).toHaveBeenCalledWith(
+            db, 's1', { topic: 'ATP', isStruggling: true }, 'C1', { source: 'superCourse', skipActivityLog: true }
+        );
+        expect(StruggleActivity.createActivityEntry).toHaveBeenCalledWith(db, expect.objectContaining({
+            userId: 's1', courseId: 'C1', topic: 'ATP', state: 'Inactive', source: 'superCourse', superchatId: 'sc1',
+        }));
+    });
+
+    test('records an Active event once the struggle state reports activation', async () => {
+        TrackerService.mockImplementationOnce(() => ({
+            analyzeMessageAcrossCourses: jest.fn(async () => strugglingAnalysis),
+        }));
+        services.getSuperCourseApprovedTopics.mockResolvedValueOnce([{ courseId: 'C1', topics: ['atp'] }]);
+        User.updateUserStruggleState.mockResolvedValueOnce({ success: true, state: { isActive: true } });
+
+        // No displayName/username → the entry falls back to the email, then 'Unknown Student'.
+        const bareUser = { userId: 's1' };
+        await router.trackSuperCourseStruggle({ db: memoryDb({}), llmService: {}, user: bareUser, message: 'stuck', superchatId: null });
+
+        expect(StruggleActivity.createActivityEntry).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+            state: 'Active', studentName: 'Unknown Student', superchatId: null,
+        }));
+    });
+});

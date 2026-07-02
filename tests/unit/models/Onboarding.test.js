@@ -241,3 +241,23 @@ describe('Onboarding.getOnboardingStats', () => {
         expect(Number.isNaN(Date.parse(stats.lastUpdated))).toBe(false);
     });
 });
+
+describe('Onboarding error propagation', () => {
+    // The collection lookup happens before each try block, so the failure must
+    // come from the collection operations themselves.
+    const reject = async () => { throw new Error('mongo down'); };
+    const throwingDb = { collection: () => ({
+        updateOne: reject, findOne: reject, find: () => { throw new Error('mongo down'); }, deleteOne: reject,
+        countDocuments: reject, distinct: reject, aggregate: () => { throw new Error('mongo down'); },
+    }) };
+
+    test('every helper logs and rethrows when the collection is unavailable', async () => {
+        await expect(Onboarding.upsertOnboarding(throwingDb, { courseId: 'C1' })).rejects.toThrow('mongo down');
+        await expect(Onboarding.getOnboardingByCourseId(throwingDb, 'C1')).rejects.toThrow('mongo down');
+        await expect(Onboarding.getOnboardingByInstructor(throwingDb, 'i1')).rejects.toThrow('mongo down');
+        await expect(Onboarding.updateOnboardingFields(throwingDb, 'C1', { x: 1 })).rejects.toThrow('mongo down');
+        await expect(Onboarding.updateUnitFiles(throwingDb, 'C1', 'Unit 1', [])).rejects.toThrow('mongo down');
+        await expect(Onboarding.deleteOnboarding(throwingDb, 'C1')).rejects.toThrow('mongo down');
+        await expect(Onboarding.getOnboardingStats(throwingDb)).rejects.toThrow('mongo down');
+    });
+});
