@@ -1,5 +1,12 @@
 const crypto = require('crypto');
 
+// llmKeyStore performs OpenAI key validation through `require('node-fetch')`.
+// Mock that module so validateApiKey's provider paths are testable WITHOUT any
+// real network call (mocking global.fetch is NOT enough — the module binds the
+// node-fetch import at load time).
+jest.mock('node-fetch', () => jest.fn());
+const fetchMock = require('node-fetch');
+
 const {
     CONTACT_EMAIL,
     ERROR_CODES,
@@ -388,49 +395,47 @@ describe('llmKeyStore.updateOwnerKeyStatus', () => {
 describe('llmKeyStore.validateApiKey — OpenAI provider with a mocked fetch (no network)', () => {
     const okResponse = () => ({ ok: true, status: 200, json: async () => ({ ok: true }) });
     const errorResponse = (status, error) => ({ ok: false, status, json: async () => ({ error }) });
-    const ORIGINAL_FETCH = global.fetch;
-
+    
     beforeEach(() => {
         process.env.LLM_PROVIDER = 'openai';
         delete process.env.BIOCBOT_TEST_LLM_STUB;
         delete process.env.OPENAI_MODEL;
-        global.fetch = jest.fn();
+        fetchMock.mockReset();
     });
-    afterAll(() => { global.fetch = ORIGINAL_FETCH; });
 
     test('valid key: probes embeddings then chat with the bearer key and returns valid', async () => {
-        global.fetch.mockResolvedValue(okResponse());
+        fetchMock.mockResolvedValue(okResponse());
         const result = await validateApiKey(' sk-real ');
         expect(result).toEqual({ ok: true, status: 'valid' });
 
-        expect(global.fetch).toHaveBeenCalledTimes(2);
-        const [embedUrl, embedInit] = global.fetch.mock.calls[0];
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        const [embedUrl, embedInit] = fetchMock.mock.calls[0];
         expect(embedUrl).toBe('https://api.openai.com/v1/embeddings');
         expect(embedInit.headers.Authorization).toBe('Bearer sk-real');
-        const [chatUrl, chatInit] = global.fetch.mock.calls[1];
+        const [chatUrl, chatInit] = fetchMock.mock.calls[1];
         expect(chatUrl).toBe('https://api.openai.com/v1/chat/completions');
         // Default (non gpt-5) model probes with a single-token completion.
         expect(JSON.parse(chatInit.body)).toMatchObject({ model: 'gpt-4.1-mini', max_tokens: 1 });
     });
 
     test('gpt-5 models use max_completion_tokens with a model-specific reasoning effort', async () => {
-        global.fetch.mockResolvedValue(okResponse());
+        fetchMock.mockResolvedValue(okResponse());
         process.env.OPENAI_MODEL = 'gpt-5.4-nano';
         await validateApiKey('sk-real');
-        expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toMatchObject({
+        expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
             model: 'gpt-5.4-nano', max_completion_tokens: 16, reasoning_effort: 'low',
         });
 
-        global.fetch.mockClear();
+        fetchMock.mockClear();
         process.env.OPENAI_MODEL = 'gpt-5.2';
         await validateApiKey('sk-real');
-        expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toMatchObject({
+        expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
             model: 'gpt-5.2', reasoning_effort: 'minimal',
         });
     });
 
     test('a 401 with invalid_api_key maps to the invalid status with the provider detail', async () => {
-        global.fetch.mockResolvedValue(errorResponse(401, { message: 'Incorrect API key provided', code: 'invalid_api_key' }));
+        fetchMock.mockResolvedValue(errorResponse(401, { message: 'Incorrect API key provided', code: 'invalid_api_key' }));
         const result = await validateApiKey('sk-bad');
         expect(result.ok).toBe(false);
         expect(result.status).toBe(KEY_STATUSES.INVALID);
@@ -439,7 +444,7 @@ describe('llmKeyStore.validateApiKey — OpenAI provider with a mocked fetch (no
     });
 
     test('a 429 insufficient_quota maps to quota_exhausted', async () => {
-        global.fetch.mockResolvedValue(errorResponse(429, { message: 'You exceeded your current quota', code: 'insufficient_quota' }));
+        fetchMock.mockResolvedValue(errorResponse(429, { message: 'You exceeded your current quota', code: 'insufficient_quota' }));
         const result = await validateApiKey('sk-broke');
         expect(result.ok).toBe(false);
         expect(result.status).toBe(KEY_STATUSES.QUOTA_EXHAUSTED);
@@ -447,7 +452,7 @@ describe('llmKeyStore.validateApiKey — OpenAI provider with a mocked fetch (no
     });
 
     test('an unparseable error body falls back to an HTTP-status message and invalid', async () => {
-        global.fetch.mockResolvedValue({ ok: false, status: 500, json: async () => { throw new Error('bad json'); } });
+        fetchMock.mockResolvedValue({ ok: false, status: 500, json: async () => { throw new Error('bad json'); } });
         const result = await validateApiKey('sk-mystery');
         expect(result.ok).toBe(false);
         expect(result.status).toBe(KEY_STATUSES.INVALID);
@@ -455,7 +460,7 @@ describe('llmKeyStore.validateApiKey — OpenAI provider with a mocked fetch (no
     });
 
     test('a failure on the chat probe (after embeddings succeeds) still fails validation', async () => {
-        global.fetch
+        fetchMock
             .mockResolvedValueOnce(okResponse())
             .mockResolvedValueOnce(errorResponse(401, { message: 'invalid api key', code: 'invalid_api_key' }));
         const result = await validateApiKey('sk-half');
