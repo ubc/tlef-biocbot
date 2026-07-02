@@ -116,3 +116,23 @@ describe('POST /reset', () => {
         expect(res.status).toBe(500);
     });
 });
+
+describe('model failure paths (500)', () => {
+    const User = require('../../../src/models/User');
+
+    test('GET / 500 when the user lookup throws', async () => {
+        const spy = jest.spyOn(User, 'getUserById').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: memoryDb({}), user: student })).get('/');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toBe('Internal server error');
+        spy.mockRestore();
+    });
+
+    test('POST /reset 500 when the reset throws', async () => {
+        const spy = jest.spyOn(User, 'resetUserStruggleState').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: memoryDb({}), user: student })).post('/reset').send({ topic: 'ALL' });
+        expect(res.status).toBe(500);
+        expect(res.body.message).toBe('Internal server error');
+        spy.mockRestore();
+    });
+});

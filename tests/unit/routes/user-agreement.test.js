@@ -72,3 +72,14 @@ describe('POST /agree', () => {
         expect(res.body.data.agreementVersion).toBe('1.0');
     });
 });
+
+describe('model failure path', () => {
+    test('POST /agree 500 with the error message when the write throws', async () => {
+        // The route destructures createOrUpdateUserAgreement at require time, so
+        // the failure is injected one level down: a db whose collection() throws.
+        const throwingDb = { collection: () => { throw new Error('mongo down'); } };
+        const res = await request(app({ db: throwingDb, user: student })).post('/agree').send({});
+        expect(res.status).toBe(500);
+        expect(res.body).toMatchObject({ success: false, message: 'Failed to record agreement', error: 'mongo down' });
+    });
+});

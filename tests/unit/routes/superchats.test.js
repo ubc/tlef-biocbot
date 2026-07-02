@@ -232,3 +232,128 @@ describe('system-admin Super Chat session downloads', () => {
         expect(res.status).toBe(404);
     });
 });
+
+describe('coverage: download-admin gate, duration/name fallbacks, registry eviction, failure paths', () => {
+    const SuperchatModel = require('../../../src/models/Superchat');
+
+    const bucketDb = (extra = {}) => memoryDb({
+        superchats: [{ superchatId: 'sc1', name: 'Bucket', isDeleted: false, llmApiKey: { ciphertext: 'enc', status: 'valid' } }],
+        ...extra,
+    });
+
+    test('401 for the chat-session routes when unauthenticated', async () => {
+        const res = await request(makeRouteApp(superchatsRouter, { db: bucketDb() })).get('/sc1/chat-sessions');
+        expect(res.status).toBe(401);
+        expect(res.body.message).toBe('Authentication required');
+    });
+
+    test('sub-minute sessions render a seconds-only duration; non-string/non-object student names fall back', async () => {
+        const db = bucketDb({
+            student_super_course_chat_sessions: [{
+                sessionId: 'sess-short', studentId: 's9', studentName: 12345, superchatId: 'sc1',
+                savedAt: '2026-06-20T10:01:00Z',
+                chatData: { messages: [
+                    { type: 'user', timestamp: '2026-06-20T10:00:00Z' },
+                    { type: 'bot', timestamp: '2026-06-20T10:00:45Z' },
+                ] },
+            }],
+        });
+        const res = await request(makeRouteApp(superchatsRouter, { db, user: downloadAdmin })).get('/sc1/chat-sessions');
+        expect(res.status).toBe(200);
+        const student9 = res.body.data.students.find(s => s.studentId === 's9');
+        expect(student9.studentName).toBe('Unknown Student');
+        expect(student9.sessions[0].duration).toBe('45s');
+    });
+
+    test('POST /:id/llm-key/test evicts the bucket from the llmRegistry when present', async () => {
+        const llmRegistry = { evictSuperchat: jest.fn() };
+        const res = await request(makeRouteApp(superchatsRouter, { db: bucketDb(), user: instructor, locals: { llmRegistry } }))
+            .post('/sc1/llm-key/test');
+        expect(res.status).toBe(200);
+        expect(llmRegistry.evictSuperchat).toHaveBeenCalledWith('sc1');
+    });
+
+    test('GET / 500 when listing throws', async () => {
+        const spy = jest.spyOn(SuperchatModel, 'listSuperchats').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(makeRouteApp(superchatsRouter, { db: bucketDb(), user: instructor })).get('/');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toBe('Failed to list superchats');
+        spy.mockRestore();
+    });
+
+    test('GET /:id 500 when the lookup throws', async () => {
+        const spy = jest.spyOn(SuperchatModel, 'getSuperchatById').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(makeRouteApp(superchatsRouter, { db: bucketDb(), user: instructor })).get('/sc1');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toBe('Failed to fetch superchat');
+        spy.mockRestore();
+    });
+
+    test('POST / 500 when creation throws', async () => {
+        const spy = jest.spyOn(SuperchatModel, 'createSuperchat').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(makeRouteApp(superchatsRouter, { db: bucketDb(), user: instructor }))
+            .post('/').send({ name: 'New bucket', apiKey: 'sk-x' });
+        expect(res.status).toBe(500);
+        expect(res.body.message).toBe('Failed to create superchat');
+        spy.mockRestore();
+    });
+
+    test('PUT /:id 500 when the update throws', async () => {
+        const spy = jest.spyOn(SuperchatModel, 'updateSuperchat').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(makeRouteApp(superchatsRouter, { db: bucketDb(), user: instructor })).put('/sc1').send({ name: 'X' });
+        expect(res.status).toBe(500);
+        expect(res.body.message).toBe('Failed to update superchat');
+        spy.mockRestore();
+    });
+
+    test('PUT /:id/llm-key 500 when the lookup throws', async () => {
+        const spy = jest.spyOn(SuperchatModel, 'getSuperchatById').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(makeRouteApp(superchatsRouter, { db: bucketDb(), user: instructor }))
+            .put('/sc1/llm-key').send({ apiKey: 'sk-x' });
+        expect(res.status).toBe(500);
+        expect(res.body.message).toBe('Failed to save bucket API key');
+        spy.mockRestore();
+    });
+
+    test('POST /:id/llm-key/test 500 when the lookup throws', async () => {
+        const spy = jest.spyOn(SuperchatModel, 'getSuperchatById').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(makeRouteApp(superchatsRouter, { db: bucketDb(), user: instructor })).post('/sc1/llm-key/test');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toBe('Failed to test bucket API key');
+        spy.mockRestore();
+    });
+
+    test('DELETE /:id 500 when the soft delete throws', async () => {
+        const spy = jest.spyOn(SuperchatModel, 'softDeleteSuperchat').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(makeRouteApp(superchatsRouter, { db: bucketDb(), user: instructor })).delete('/sc1');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toBe('Failed to delete superchat');
+        spy.mockRestore();
+    });
+
+    test('chat-session list/export/single each 500 when the bucket lookup throws', async () => {
+        const spy = jest.spyOn(SuperchatModel, 'getSuperchatById').mockRejectedValue(new Error('mongo down'));
+        expect((await request(makeRouteApp(superchatsRouter, { db: bucketDb(), user: downloadAdmin })).get('/sc1/chat-sessions')).status).toBe(500);
+        expect((await request(makeRouteApp(superchatsRouter, { db: bucketDb(), user: downloadAdmin })).get('/sc1/chat-sessions/export')).status).toBe(500);
+        expect((await request(makeRouteApp(superchatsRouter, { db: bucketDb(), user: downloadAdmin })).get('/sc1/chat-sessions/s1/sess1')).status).toBe(500);
+        spy.mockRestore();
+    });
+});
+
+describe('coverage: multi-student session grouping', () => {
+    test('students are ordered by most recent activity across two students', async () => {
+        const msg = (t) => ({ type: 'user', timestamp: t });
+        const db = memoryDb({
+            superchats: [{ superchatId: 'sc1', name: 'Bucket', isDeleted: false }],
+            student_super_course_chat_sessions: [
+                { sessionId: 'a1', studentId: 'sA', studentName: 'Alice', superchatId: 'sc1', savedAt: '2026-06-20T10:00:00Z', chatData: { messages: [msg('2026-06-20T09:00:00Z')] } },
+                { sessionId: 'b1', studentId: 'sB', studentName: 'Bob', superchatId: 'sc1', savedAt: '2026-06-21T10:00:00Z', chatData: { messages: [] } },
+                { sessionId: 'a2', studentId: 'sA', studentName: 'Alice', superchatId: 'sc1', savedAt: '2026-06-19T10:00:00Z', chatData: { messages: [] } },
+            ],
+        });
+        const res = await request(makeRouteApp(superchatsRouter, { db, user: downloadAdmin })).get('/sc1/chat-sessions');
+        expect(res.status).toBe(200);
+        expect(res.body.data.students.map(s => s.studentId)).toEqual(['sB', 'sA']);
+        expect(res.body.data.students[1].totalSessions).toBe(2);
+    });
+});

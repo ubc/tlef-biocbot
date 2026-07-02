@@ -155,3 +155,56 @@ describe('GET /:courseId (catch-all)', () => {
         expect(res.body).toMatchObject({ success: true, count: 0, data: [] });
     });
 });
+
+describe('model failure paths (500 with the error message)', () => {
+    const StruggleActivity = require('../../../src/models/StruggleActivity');
+    const PersistenceTopic = require('../../../src/models/PersistenceTopic');
+
+    test('GET /student/:userId 500 when the model throws', async () => {
+        const spy = jest.spyOn(StruggleActivity, 'getActivityByStudent').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: memoryDb({}), user: instructor })).get('/student/s1');
+        expect(res.status).toBe(500);
+        expect(res.body).toMatchObject({ success: false, error: 'mongo down' });
+        spy.mockRestore();
+    });
+
+    test('GET /persistence/:courseId 500 when the model throws', async () => {
+        const spy = jest.spyOn(PersistenceTopic, 'getPersistenceTopics').mockRejectedValueOnce(new Error('agg failed'));
+        const res = await request(app({ db: memoryDb({}), user: instructor })).get('/persistence/C1');
+        expect(res.status).toBe(500);
+        expect(res.body.error).toBe('agg failed');
+        spy.mockRestore();
+    });
+
+    test('GET /weekly/:courseId 500 when the model throws', async () => {
+        const spy = jest.spyOn(StruggleActivity, 'getWeeklyActiveTopics').mockRejectedValueOnce(new Error('agg failed'));
+        const res = await request(app({ db: memoryDb({}), user: instructor })).get('/weekly/C1');
+        expect(res.status).toBe(500);
+        expect(res.body.error).toBe('agg failed');
+        spy.mockRestore();
+    });
+
+    test('GET /super-course/weekly 500 when the model throws', async () => {
+        const spy = jest.spyOn(StruggleActivity, 'getWeeklyActiveTopics').mockRejectedValueOnce(new Error('agg failed'));
+        const res = await request(app({ db: memoryDb({}), user: instructor })).get('/super-course/weekly');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/weekly Super Chat/i);
+        spy.mockRestore();
+    });
+
+    test('GET /super-course 500 when the model throws', async () => {
+        const spy = jest.spyOn(StruggleActivity, 'getSuperCourseActivity').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: memoryDb({}), user: instructor })).get('/super-course');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/Super Chat struggle activity/i);
+        spy.mockRestore();
+    });
+
+    test('GET /:courseId 500 when the model throws', async () => {
+        const spy = jest.spyOn(StruggleActivity, 'getActivityByCourse').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: memoryDb({}), user: instructor })).get('/C1');
+        expect(res.status).toBe(500);
+        expect(res.body.error).toBe('mongo down');
+        spy.mockRestore();
+    });
+});

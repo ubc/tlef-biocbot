@@ -635,6 +635,34 @@ pass, NOT to be fixed while writing tests.
   The loop is now covered through `upsertCourse`; changing the failure contract requires a product-level
   decision (throw, retry longer, or enforce/retry a database uniqueness constraint).
 
+- **Four empty-path-parameter guards in `src/routes/struggle-activity.js` are unreachable through the
+  exported router.** The `if (!userId)` / `if (!courseId)` 400 branches in `/student/:userId`,
+  `/persistence/:courseId`, `/weekly/:courseId`, and `/:courseId` can never run: Express only matches
+  those routes when the segment is present and non-empty. Same pattern already logged for
+  `students.js`/`flags.js`. These are the only uncovered lines left in the file (29, 73, 112, 232);
+  literal 100% would need a production edit or coverage-ignore directives. Not fixed.
+
+- **Three 401 guards in `src/routes/studentSuperCourse.js` are unreachable.** `/save`, `/sessions`,
+  and `DELETE /sessions/:sessionId` re-check `req.user.userId` after `resolveStudentSuperchat` has
+  already returned 401 for a missing student, so their `Authentication required` arms (lines 316,
+  358, 426) can never execute. Only these dead guards keep the file from 100% line coverage. Not fixed.
+
+- **`User.toSessionUser`'s null branch is unreachable through the model's exports.** The helper is
+  private, and every call site (`authenticateUser`, `createOrGetSAMLUser`) only reaches it with a
+  non-null user, while `applyAccessState` returns null solely for falsy input. Line 52 is therefore
+  dead through the public API — the last uncovered line in `User.js`. Not fixed.
+
+- **`user-agreement.js` and route modules that destructure model functions at require time cannot be
+  failure-injected with `jest.spyOn` on the model module.** `const { createOrUpdateUserAgreement } =
+  require(...)` binds the function reference at load, so spying on the module object later has no
+  effect on the router. Catch-path tests for such routers must inject the failure a level down
+  (e.g. a db whose `collection()` throws). Testability note, not a bug.
+
+- **`Onboarding.js` computes the collection handle before each `try` block**, so a failing
+  `db.collection()` rejects the promise without ever reaching the model's catch/log/rethrow paths.
+  The catch blocks are only reachable when the collection *operation* fails (covered that way in
+  `Onboarding.test.js`). Behavior note, not a bug.
+
 - **Several Course positional-update helpers can report false success during a race.** Helpers such as
   `updateLecturePublishStatus`, `updateLearningObjectives`, `updatePassThreshold`,
   `updateUnitDisplayName`, and `addDocumentToUnit` first read the course/unit and then perform a separate

@@ -197,3 +197,20 @@ describe('LlmRegistry provider bypass', () => {
         expect(LLMService.create).toHaveBeenCalledTimes(1);
     });
 });
+
+describe('onProviderKeyFailure callback', () => {
+    test('marks the owner key status in Mongo and evicts the cached scope', async () => {
+        const reg = new LlmRegistry();
+        const db = memoryDb({ courses: [{ courseId: 'C1', llmApiKey: { status: 'valid' } }] });
+
+        await reg.forCourse(db, 'C1');
+        const { onProviderKeyFailure } = LLMService.create.mock.calls.at(-1)[0];
+        await onProviderKeyFailure('invalid');
+
+        // The stored key status flips, and the next lookup rebuilds the services.
+        const stored = await db.collection('courses').findOne({ courseId: 'C1' });
+        expect(stored.llmApiKey.status).toBe('invalid');
+        await reg.forCourse(db, 'C1');
+        expect(LLMService.create).toHaveBeenCalledTimes(2);
+    });
+});

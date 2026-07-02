@@ -79,3 +79,30 @@ describe('GET /', () => {
         expect(res.body.data.objectives).toEqual([]);
     });
 });
+
+describe('db guard and model failure paths', () => {
+    const CourseModel = require('../../../src/models/Course');
+
+    test('503 on POST and GET when the db is unavailable', async () => {
+        const body = { lectureName: 'Unit 1', objectives: ['LO1'], instructorId: 'i1', courseId: 'C1' };
+        expect((await request(app({ db: null })).post('/').send(body)).status).toBe(503);
+        expect((await request(app({ db: null })).get('/?courseId=C1&lectureName=Unit 1')).status).toBe(503);
+    });
+
+    test('POST 500 when the model throws', async () => {
+        const spy = jest.spyOn(CourseModel, 'updateLearningObjectives').mockRejectedValueOnce(new Error('mongo down'));
+        const body = { lectureName: 'Unit 1', objectives: ['LO1'], instructorId: 'i1', courseId: 'C1' };
+        const res = await request(app({ db: memoryDb({}) })).post('/').send(body);
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/saving learning objectives/i);
+        spy.mockRestore();
+    });
+
+    test('GET 500 when the model throws', async () => {
+        const spy = jest.spyOn(CourseModel, 'getLearningObjectives').mockRejectedValueOnce(new Error('mongo down'));
+        const res = await request(app({ db: memoryDb({}) })).get('/?courseId=C1&lectureName=Unit 1');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toMatch(/fetching learning objectives/i);
+        spy.mockRestore();
+    });
+});

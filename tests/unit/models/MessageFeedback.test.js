@@ -122,3 +122,57 @@ describe('MessageFeedback model', () => {
         await expect(MessageFeedback.ensureIndexes(memoryDb({}))).resolves.toBeUndefined();
     });
 });
+
+describe('MessageFeedback validation and lookup coverage', () => {
+    const validKeys = { courseId: 'C1', studentId: 's1', conversationId: 'conv1', messageId: 'm1' };
+
+    test('upsert rejects records missing a required identifier', async () => {
+        const result = await MessageFeedback.upsertMessageFeedback(memoryDb({}), { ...validKeys, courseId: '   ' });
+        expect(result).toEqual({ success: false, error: 'courseId is required' });
+    });
+
+    test('upsert rejects unsupported rating values', async () => {
+        const result = await MessageFeedback.upsertMessageFeedback(memoryDb({}), { ...validKeys, rating: 'banana' });
+        expect(result).toEqual({ success: false, error: 'rating must be "up", "down", or null' });
+    });
+
+    test('getFeedbackForMessage returns null for invalid keys and the stored record otherwise', async () => {
+        const db = memoryDb({});
+        expect(await MessageFeedback.getFeedbackForMessage(db, { ...validKeys, messageId: '' })).toBeNull();
+        expect(await MessageFeedback.getFeedbackForMessage(db, validKeys)).toBeNull();
+
+        await MessageFeedback.upsertMessageFeedback(db, { ...validKeys, rating: 'up' });
+        const found = await MessageFeedback.getFeedbackForMessage(db, validKeys);
+        expect(found).toMatchObject({ ...validKeys, rating: 'up', isActive: true });
+        expect(found).not.toHaveProperty('_id');
+    });
+
+    test('listFeedbackForCourse applies rating/student/conversation filters (invalid rating is ignored)', async () => {
+        const db = memoryDb({});
+        await MessageFeedback.upsertMessageFeedback(db, { ...validKeys, rating: 'up' });
+        await MessageFeedback.upsertMessageFeedback(db, { ...validKeys, studentId: 's2', messageId: 'm2', rating: 'down' });
+
+        const ups = await MessageFeedback.listFeedbackForCourse(db, 'C1', { rating: 'up' });
+        expect(ups.map(f => f.rating)).toEqual(['up']);
+
+        const s2Only = await MessageFeedback.listFeedbackForCourse(db, 'C1', { studentId: 's2', conversationId: 'conv1' });
+        expect(s2Only.map(f => f.studentId)).toEqual(['s2']);
+
+        // An unsupported rating option adds no rating filter — both records return.
+        const all = await MessageFeedback.listFeedbackForCourse(db, 'C1', { rating: 'banana' });
+        expect(all).toHaveLength(2);
+    });
+});
+
+describe('MessageFeedback.normalizeSourceAttribution via upsert', () => {
+    test('a valid attribution object is normalized field-by-field', async () => {
+        const db = memoryDb({});
+        const result = await MessageFeedback.upsertMessageFeedback(db, {
+            courseId: 'C1', studentId: 's1', conversationId: 'conv1', messageId: 'm1', rating: 'up',
+            sourceAttribution: { source: ' course material ', description: '', unitName: 'Unit 1', documentType: undefined },
+        });
+        expect(result.feedback.sourceAttribution).toEqual({
+            source: 'course material', description: null, unitName: 'Unit 1', documentType: null,
+        });
+    });
+});

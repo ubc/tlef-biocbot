@@ -110,4 +110,37 @@ describe('the other resolvers delegate to the matching registry method', () => {
         expect(await resolveSuperchatAi(fakeReq(undefined), fakeRes(), 'sc1')).toBeNull();
         expect(await resolveSuperCourseChatAi(fakeReq(undefined), fakeRes())).toBeNull();
     });
+
+    test('resolveSuperchatAi converts an LlmKeyError and rethrows anything else', async () => {
+        const keyRegistry = { forSuperchat: jest.fn(async () => { throw new LlmKeyError('invalid'); }) };
+        const res = fakeRes();
+        expect(await resolveSuperchatAi(fakeReq(keyRegistry), res, 'sc1')).toBeNull();
+        expect(res.statusCode).toBe(403);
+        expect(res.body.code).toBe('LLM_KEY_INVALID');
+
+        const badRegistry = { forSuperchat: jest.fn(async () => { throw new Error('mongo down'); }) };
+        await expect(resolveSuperchatAi(fakeReq(badRegistry), fakeRes(), 'sc1')).rejects.toThrow('mongo down');
+    });
+
+    test('resolveNotesAi converts an LlmKeyError and rethrows anything else', async () => {
+        const keyRegistry = { forNotes: jest.fn(async () => { throw new LlmKeyError('quota_exhausted'); }) };
+        const res = fakeRes();
+        expect(await resolveNotesAi(fakeReq(keyRegistry), res)).toBeNull();
+        expect(res.statusCode).toBe(403);
+        expect(res.body.code).toBe('LLM_KEY_QUOTA');
+
+        const badRegistry = { forNotes: jest.fn(async () => { throw new Error('db exploded'); }) };
+        await expect(resolveNotesAi(fakeReq(badRegistry), fakeRes())).rejects.toThrow('db exploded');
+    });
+
+    test('resolveSuperCourseChatAi converts an LlmKeyError and rethrows anything else', async () => {
+        const keyRegistry = { forSuperCourseChat: jest.fn(async () => { throw new LlmKeyError('missing'); }) };
+        const res = fakeRes();
+        expect(await resolveSuperCourseChatAi(fakeReq(keyRegistry), res)).toBeNull();
+        expect(res.statusCode).toBe(403);
+        expect(res.body.code).toBe('LLM_KEY_MISSING');
+
+        const badRegistry = { forSuperCourseChat: jest.fn(async () => { throw new Error('db exploded'); }) };
+        await expect(resolveSuperCourseChatAi(fakeReq(badRegistry), fakeRes())).rejects.toThrow('db exploded');
+    });
 });
