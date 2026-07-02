@@ -2,10 +2,15 @@ const captured = { strategies: {}, serialize: null, deserialize: null };
 
 class mockStrategyClass {
     constructor(options, verify) {
+        if (mockStrategyClass.failWhen && mockStrategyClass.failWhen(options)) {
+            throw new Error('strategy constructor failed');
+        }
         this.options = options;
         this.verify = verify;
     }
 }
+// Optional per-test predicate: throw for matching options (reset in beforeEach).
+mockStrategyClass.failWhen = null;
 
 const mockPassport = {
     use: jest.fn((name, strategy) => { captured.strategies[name] = strategy; }),
@@ -66,6 +71,7 @@ describe('Passport configuration', () => {
         User.createOrGetSAMLUser.mockReset();
         User.getUserById.mockReset();
         fs.readFileSync.mockReset().mockReturnValue('MOCK CERTIFICATE');
+        mockStrategyClass.failWhen = null;
     });
 
     afterAll(() => {
@@ -150,5 +156,35 @@ describe('Passport configuration', () => {
         initializePassport(db);
         // The certificate is read independently for generic SAML and UBC; this mock fails only the first read.
         expect(Object.keys(captured.strategies)).toEqual(['local', 'ubcshib']);
+    });
+
+    test('a certificate unreadable for BOTH reads also drops the UBC strategy', () => {
+        fs.readFileSync.mockImplementation(() => { throw new Error('unreadable'); });
+        initializePassport(db);
+        expect(Object.keys(captured.strategies)).toEqual(['local']);
+    });
+
+    test('generic SAML verify converts an unexpected model failure into done(error)', async () => {
+        initializePassport(db);
+        User.createOrGetSAMLUser.mockRejectedValueOnce(new Error('mongo down'));
+        const [err] = await callVerify(captured.strategies.saml, { nameID: 'id1', email: 's@test.ca' });
+        expect(err.message).toBe('mongo down');
+    });
+
+    test('UBC verify surfaces model rejection and unexpected failures', async () => {
+        initializePassport(db);
+        const profile = { attributes: { ubcEduCwlPuid: 'P9', mail: 'p@ubc.ca', eduPersonAffiliation: ['staff'] } };
+        User.createOrGetSAMLUser.mockResolvedValueOnce({ success: false, error: 'blocked' });
+        expect(await callVerify(captured.strategies.ubcshib, profile)).toEqual([null, false, { message: 'blocked' }]);
+        User.createOrGetSAMLUser.mockRejectedValueOnce(new Error('mongo down'));
+        expect((await callVerify(captured.strategies.ubcshib, profile))[0].message).toBe('mongo down');
+    });
+
+    test('strategy constructor failures are caught per-strategy, keeping local usable', () => {
+        // The local strategy is constructed with usernameField options; fail the
+        // SAML-style constructions (entryPoint / issuer options) only.
+        mockStrategyClass.failWhen = options => !!(options && (options.entryPoint || options.enableSLO !== undefined));
+        initializePassport(db);
+        expect(Object.keys(captured.strategies)).toEqual(['local']);
     });
 });

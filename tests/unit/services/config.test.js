@@ -94,6 +94,26 @@ describe('config.validateConfig', () => {
         process.env.LLM_PROVIDER = 'something-else';
         expect(() => config.validateConfig()).not.toThrow();
     });
+
+    test('ollama requires OLLAMA_MODEL once the endpoint is present', () => {
+        process.env.LLM_PROVIDER = 'ollama';
+        process.env.OLLAMA_ENDPOINT = 'http://localhost:11434';
+        expect(() => config.validateConfig()).toThrow('OLLAMA_MODEL is required for Ollama provider');
+    });
+
+    test('openai requires LLM_EMBEDDING_MODEL once the model is present', () => {
+        process.env.LLM_PROVIDER = 'openai';
+        process.env.OPENAI_MODEL = 'gpt-test';
+        expect(() => config.validateConfig()).toThrow('LLM_EMBEDDING_MODEL is required for OpenAI provider');
+    });
+
+    test('ubc-llm-sandbox requires LLM_ENDPOINT then LLM_EMBEDDING_MODEL', () => {
+        process.env.LLM_PROVIDER = 'ubc-llm-sandbox';
+        process.env.LLM_API_KEY = 'k';
+        expect(() => config.validateConfig()).toThrow('LLM_ENDPOINT is required for UBC LLM Sandbox provider');
+        process.env.LLM_ENDPOINT = 'http://sandbox';
+        expect(() => config.validateConfig()).toThrow('LLM_EMBEDDING_MODEL is required for UBC LLM Sandbox provider');
+    });
 });
 
 describe('config.getServerConfig', () => {

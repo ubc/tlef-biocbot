@@ -142,3 +142,29 @@ describe('academicRosterSync', () => {
         expect(course.studentEnrollment.managed_student).toMatchObject({ enrolled: true });
     });
 });
+
+describe('academicRosterSync coverage: missing course and identifier-less students', () => {
+    test('syncCourseRoster reports Course not found for an unknown course id', async () => {
+        const db = memoryDb({ courses: [] });
+        expect(await syncCourseRoster(db, 'nope')).toEqual({ success: false, error: 'Course not found' });
+    });
+
+    test('upsertAcademicStudent creates a fresh user when the student carries no identifiers', async () => {
+        const { upsertAcademicStudent } = require('../../../src/services/academicRosterSync');
+        const db = memoryDb({ users: [] });
+        const user = await upsertAcademicStudent(db, { puid: '', studentId: '', email: '', preferredName: 'Mystery Student' }, 'C1');
+        // No puid/email/studentId → the existing-user lookup cannot match; a new
+        // user is created with a generated username and the course preference set.
+        expect(user.created).toBe(true);
+        expect(user.username).toMatch(/^user_\d+_/);
+        expect(user).toMatchObject({ displayName: 'Mystery Student', role: 'student', preferences: expect.objectContaining({ courseId: 'C1' }) });
+    });
+
+    test('syncCourseRoster refuses a course with no linked academic sections', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C-unlinked' }] });
+        expect(await syncCourseRoster(db, 'C-unlinked')).toEqual({
+            success: false,
+            error: 'Course is not linked to academic sections'
+        });
+    });
+});

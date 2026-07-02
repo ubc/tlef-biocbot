@@ -106,4 +106,19 @@ describe('MongoService with mocked MongoClient', () => {
         await service.close();
         expect(mockClient.close).toHaveBeenCalled();
     });
+
+    test('getDatabaseStats lazily initializes the connection when none exists yet', async () => {
+        const service = new MongoService();
+        mockClient.db.mockReturnValue(fakeDb({ names: ['courses'], stats: { courses: { count: 2, size: 10 } } }));
+        const result = await service.getDatabaseStats();
+        expect(mockClient.connect).toHaveBeenCalledTimes(1);
+        expect(result.success).toBe(true);
+        expect(result.data.courses).toEqual({ exists: true, documentCount: 2, size: 10 });
+    });
+
+    test('getDatabaseStats returns success:false with the message when initialization fails', async () => {
+        const service = new MongoService();
+        mockClient.connect.mockRejectedValueOnce(new Error('no mongo'));
+        expect(await service.getDatabaseStats()).toEqual({ success: false, error: 'no mongo' });
+    });
 });

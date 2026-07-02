@@ -55,3 +55,27 @@ describe('Shibboleth routes with mocked Passport', () => {
         expect(res.headers.location).toBe('/login?logout=slo_success');
     });
 });
+
+describe('local SAML alias routes (ENABLE_LOCAL_SAML_ALIASES=true at load)', () => {
+    test('registers /auth/saml/callback and /auth/logout aliases', async () => {
+        const previous = process.env.ENABLE_LOCAL_SAML_ALIASES;
+        process.env.ENABLE_LOCAL_SAML_ALIASES = 'true';
+        let aliasRouter;
+        jest.isolateModules(() => { aliasRouter = require('../../../src/routes/shibboleth'); });
+        if (previous === undefined) delete process.env.ENABLE_LOCAL_SAML_ALIASES;
+        else process.env.ENABLE_LOCAL_SAML_ALIASES = previous;
+
+        const session = {};
+        const user = { userId: 'u1', role: 'student', displayName: 'User' };
+        const cb = await request(makeRouteApp(aliasRouter, { user, session }))
+            .post('/auth/saml/callback').type('form').send({ SAMLResponse: 'mock' });
+        expect(cb.status).toBe(302);
+        expect(cb.headers.location).toBe('/student');
+
+        const logoutGet = await request(makeRouteApp(aliasRouter, {})).get('/auth/logout');
+        expect(logoutGet.status).toBe(302);
+        expect(logoutGet.headers.location).toBe('/login?logout=slo_success');
+        const logoutPost = await request(makeRouteApp(aliasRouter, {})).post('/auth/logout');
+        expect(logoutPost.headers.location).toBe('/login?logout=slo_success');
+    });
+});
