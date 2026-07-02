@@ -137,6 +137,16 @@ describe('Course.normalizeTopicObjectList', () => {
     test('returns [] for non-array input', () => {
         expect(Course.normalizeTopicObjectList('nope')).toEqual([]);
     });
+
+    test('drops malformed topic objects in both new and existing lists', () => {
+        expect(Course.normalizeTopicObjectList([
+            { topic: 123 },
+            { topic: '   ' },
+            { topic: 'Valid', unitId: '   ' },
+        ], {}, [{ topic: null }, { bogus: true }])).toEqual([
+            expect.objectContaining({ topic: 'Valid', unitId: null }),
+        ]);
+    });
 });
 
 describe('Course.normalizeRagTopK', () => {

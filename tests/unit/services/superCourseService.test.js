@@ -20,6 +20,9 @@ jest.mock('../../../src/models/SuperChatNote', () => ({
 
 const superCourse = require('../../../src/services/superCourseService');
 const prompts = require('../../../src/services/prompts');
+const QdrantService = require('../../../src/services/qdrantService');
+const NotesQdrantService = require('../../../src/services/notesQdrantService');
+const SuperChatNote = require('../../../src/models/SuperChatNote');
 const { memoryDb } = require('../helpers/memory-db');
 
 const DEFAULTS = prompts.DEFAULT_SUPER_COURSE_CHAT_SETTINGS;
@@ -82,6 +85,18 @@ describe('superCourseService.resolveSuperCourseChatSettings', () => {
         expect(resolved.studentLevelModifiers.undergraduate).toBe(DEFAULTS.studentLevelModifiers.undergraduate);
         expect(Object.keys(resolved.studentLevelModifiers)).toEqual(prompts.STUDENT_LEVEL_KEYS);
     });
+
+    test('supports the no-argument defaults and valid student prompt/modifier overrides', () => {
+        expect(superCourse.resolveSuperCourseChatSettings()).toMatchObject({
+            studentPrompt: DEFAULTS.studentPrompt,
+        });
+        const resolved = superCourse.resolveSuperCourseChatSettings({
+            studentPrompt: 'Custom student prompt',
+            instructorLevelModifiers: { overview: 'Be terse' },
+        });
+        expect(resolved.studentPrompt).toBe('Custom student prompt');
+        expect(resolved.instructorLevelModifiers.overview).toBe('Be terse');
+    });
 });
 
 describe('superCourseService.buildSuperCoursePoolQuery', () => {
@@ -130,6 +145,186 @@ describe('superCourseService.mergeBalancedCourseResults', () => {
         expect(ids).toContain('a2');
         expect(new Set(ids).size).toBe(ids.length); // no duplicates
     });
+
+    test('uses zero for missing scores and enforces the target after guarantees', () => {
+        const map = new Map([
+            ['A', [{ id: 'a1' }, { id: 'a2', score: 0.2 }]],
+            ['B', [{ id: 'b1', score: 0.4 }, { id: 'b2' }]],
+        ]);
+        expect(superCourse.mergeBalancedCourseResults(map, 3).map(item => item.id))
+            .toEqual(['a1', 'b1', 'a2']);
+    });
+
+    test('handles missing scores on either side of the remainder comparator', () => {
+        const map = new Map([
+            ['A', [{ id: 'a1', score: 1 }, { id: 'a2' }, { id: 'a3', score: 0.2 }]],
+            ['B', [{ id: 'b1', score: 1 }, { id: 'b2', score: 0.3 }, { id: 'b3' }]],
+        ]);
+        expect(superCourse.mergeBalancedCourseResults(map, 5).map(item => item.id))
+            .toEqual(['a1', 'b1', 'a2', 'b2', 'a3']);
+
+        const missingScoreFirst = new Map([
+            ['A', [{ id: 'ga', score: 1 }, { id: 'missing' }]],
+            ['B', [{ id: 'gb', score: 1 }, { id: 'scored', score: 0.5 }]],
+        ]);
+        expect(superCourse.mergeBalancedCourseResults(missingScoreFirst, 3).map(item => item.id))
+            .toEqual(['ga', 'gb', 'scored']);
+    });
+});
+
+describe('superCourseService.searchSuperCourse', () => {
+    const poolDb = () => memoryDb({
+        courses: [
+            { courseId: 'C1', courseName: 'One', status: 'active', superchatIds: ['b1'] },
+            { courseId: 'C2', courseName: 'Two', status: 'active', superchatIds: ['b1'] },
+        ],
+    });
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        QdrantService.mockImplementation(() => ({
+            client: null,
+            initialize: jest.fn().mockResolvedValue(undefined),
+            searchDocumentsByCourse: jest.fn().mockResolvedValue(new Map()),
+        }));
+        NotesQdrantService.mockImplementation(() => ({
+            initialize: jest.fn().mockResolvedValue(undefined),
+            searchNotes: jest.fn().mockResolvedValue([]),
+        }));
+        SuperChatNote.incrementUsage.mockResolvedValue(undefined);
+    });
+
+    test('initializes lecture retrieval, balances courses, and tags results', async () => {
+        const instance = {
+            client: null,
+            initialize: jest.fn().mockResolvedValue(undefined),
+            searchDocumentsByCourse: jest.fn().mockResolvedValue(new Map([
+                ['C1', [{ id: 'a', score: 0.9, courseId: 'C1' }]],
+                ['C2', [{ id: 'b', score: 0.8, courseId: 'C2' }]],
+            ])),
+        };
+        QdrantService.mockImplementationOnce(() => instance);
+
+        const found = await superCourse.searchSuperCourse(poolDb(), 'ATP', 2, { superchatId: 'b1' });
+
+        expect(instance.initialize).toHaveBeenCalledTimes(1);
+        expect(instance.searchDocumentsByCourse).toHaveBeenCalledWith('ATP', ['C1', 'C2'], 2);
+        expect(found.results.map(result => result.sourceType)).toEqual(['lecture', 'lecture']);
+    });
+
+    test('supports default search options with an empty retrieval pool', async () => {
+        await expect(superCourse.searchSuperCourse(memoryDb({}), 'ATP', 3))
+            .resolves.toEqual({ pool: [], results: [] });
+    });
+
+    test('uses an injected initialized Qdrant service and defaults an invalid limit to eight', async () => {
+        const qdrant = {
+            client: {},
+            initialize: jest.fn(),
+            searchDocumentsByCourse: jest.fn().mockResolvedValue(new Map()),
+        };
+        await superCourse.searchSuperCourse(poolDb(), 'ATP', 0, { superchatId: 'b1', qdrant });
+        expect(qdrant.initialize).not.toHaveBeenCalled();
+        expect(qdrant.searchDocumentsByCourse).toHaveBeenCalledWith('ATP', ['C1', 'C2'], 8);
+    });
+
+    test('allocates note slots, initializes from injected Qdrant, and donates unused slots to lectures', async () => {
+        const qdrant = {
+            client: {},
+            searchDocumentsByCourse: jest.fn().mockResolvedValue(new Map([
+                ['C1', [1, 2, 3, 4].map(n => ({ id: `l${n}`, score: 1 - n / 10, courseId: 'C1' }))],
+            ])),
+        };
+        const notes = {
+            initialize: jest.fn().mockResolvedValue(undefined),
+            searchNotes: jest.fn().mockResolvedValue([{ id: 'n1', noteId: 'note-1', sourceType: 'note', score: 0.9 }]),
+        };
+        NotesQdrantService.mockImplementationOnce(() => notes);
+
+        const found = await superCourse.searchSuperCourse(poolDb(), 'ATP', 4, {
+            superchatId: 'b1', includeNotes: true, noteRatio: 0.5, noteMinScore: 0.4, qdrant,
+        });
+
+        expect(notes.initialize).toHaveBeenCalledWith(qdrant);
+        expect(notes.searchNotes).toHaveBeenCalledWith('ATP', 2, { minScore: 0.4 });
+        expect(found.results.filter(result => result.sourceType === 'lecture')).toHaveLength(3);
+        expect(found.results.at(-1)).toMatchObject({ sourceType: 'note', noteId: 'note-1' });
+        expect(SuperChatNote.incrementUsage).toHaveBeenCalledWith(expect.anything(), ['note-1']);
+    });
+
+    test('caps over-returned notes and always preserves a lecture slot', async () => {
+        const qdrant = {
+            client: {},
+            searchDocumentsByCourse: jest.fn().mockResolvedValue(new Map([
+                ['C1', [{ id: 'lecture', score: 1, courseId: 'C1' }]],
+            ])),
+        };
+        const notes = {
+            initialize: jest.fn(),
+            searchNotes: jest.fn().mockResolvedValue([
+                { noteId: 'n1', sourceType: 'note' },
+                { noteId: 'n2', sourceType: 'note' },
+                { noteId: 'n3', sourceType: 'note' },
+            ]),
+        };
+        NotesQdrantService.mockImplementationOnce(() => notes);
+
+        const found = await superCourse.searchSuperCourse(poolDb(), 'ATP', 2, {
+            superchatId: 'b1', includeNotes: true, noteRatio: 1, qdrant,
+        });
+        expect(found.results).toHaveLength(2);
+        expect(found.results[0].sourceType).toBe('lecture');
+        expect(found.results[1].noteId).toBe('n1');
+    });
+
+    test('treats malformed notes as empty and does not count notes without IDs', async () => {
+        const notes = { initialize: jest.fn(), searchNotes: jest.fn().mockResolvedValue(null) };
+        NotesQdrantService.mockImplementationOnce(() => notes);
+        await expect(superCourse.searchSuperCourse(memoryDb({}), 'ATP', 4, {
+            includeNotes: true, noteRatio: 1,
+        })).resolves.toMatchObject({ pool: [], results: [] });
+
+        notes.searchNotes.mockResolvedValueOnce([{ sourceType: 'note', chunkText: 'anonymous' }]);
+        NotesQdrantService.mockImplementationOnce(() => notes);
+        await superCourse.searchSuperCourse(memoryDb({}), 'ATP', 4, { includeNotes: true, noteRatio: 1 });
+        expect(SuperChatNote.incrementUsage).not.toHaveBeenCalled();
+    });
+
+    test('degrades gracefully on ordinary note errors but propagates LlmKeyError', async () => {
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        const notes = { initialize: jest.fn(), searchNotes: jest.fn().mockRejectedValue(new Error('notes down')) };
+        NotesQdrantService.mockImplementationOnce(() => notes);
+        await expect(superCourse.searchSuperCourse(memoryDb({}), 'ATP', 4, {
+            includeNotes: true, noteRatio: 0.5,
+        })).resolves.toMatchObject({ results: [] });
+        expect(errorSpy).toHaveBeenCalledWith('Super Course note retrieval failed:', 'notes down');
+
+        const keyError = Object.assign(new Error('missing key'), { name: 'LlmKeyError' });
+        notes.searchNotes.mockRejectedValueOnce(keyError);
+        NotesQdrantService.mockImplementationOnce(() => notes);
+        await expect(superCourse.searchSuperCourse(memoryDb({}), 'ATP', 4, {
+            includeNotes: true, noteRatio: 0.5,
+        })).rejects.toBe(keyError);
+        errorSpy.mockRestore();
+    });
+
+    test('logs a rejected fire-and-forget usage update without failing retrieval', async () => {
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        const notes = {
+            initialize: jest.fn(),
+            searchNotes: jest.fn().mockResolvedValue([{ noteId: 'n1', sourceType: 'note' }]),
+        };
+        NotesQdrantService.mockImplementationOnce(() => notes);
+        SuperChatNote.incrementUsage.mockRejectedValueOnce(new Error('write failed'));
+
+        const found = await superCourse.searchSuperCourse(memoryDb({}), 'ATP', 4, {
+            includeNotes: true, noteRatio: 1,
+        });
+        await Promise.resolve();
+        expect(found.results).toHaveLength(1);
+        expect(errorSpy).toHaveBeenCalledWith('Failed to increment note usage:', 'write failed');
+        errorSpy.mockRestore();
+    });
 });
 
 describe('superCourseService context/summary builders', () => {
@@ -149,9 +344,22 @@ describe('superCourseService context/summary builders', () => {
         expect(context).toContain('\n\n---\n\n');
     });
 
+    test('buildSuperCourseContext formats valid note dates and uses safe source fallbacks', () => {
+        expect(superCourse.buildSuperCourseContext()).toBe('');
+        const context = superCourse.buildSuperCourseContext([
+            { sourceType: 'note', createdAt: '2026-06-15T12:00:00Z', chunkText: '' },
+            { sourceType: 'note', createdAt: 'not-a-date' },
+            { sourceType: 'lecture' },
+        ]);
+        expect(context).toContain('From an instructor note by an instructor (2026-06-15)');
+        expect(context).toContain('From an instructor note by an instructor:\n');
+        expect(context).toContain('From Unknown course / Unknown unit (Unknown source):');
+    });
+
     test('buildSuperCoursePoolSummary lists courses or a no-courses message', () => {
-        expect(superCourse.buildSuperCoursePoolSummary([])).toMatch(/No courses are currently included/);
+        expect(superCourse.buildSuperCoursePoolSummary()).toMatch(/No courses are currently included/);
         expect(superCourse.buildSuperCoursePoolSummary(pool)).toBe('Course One (C1); CC2 (C2)');
+        expect(superCourse.buildSuperCoursePoolSummary([{ courseId: 'C3' }])).toBe('C3 (C3)');
     });
 
     test('buildSuperCourseCitations tags lecture vs note citations', () => {
@@ -162,6 +370,22 @@ describe('superCourseService context/summary builders', () => {
         expect(citations[0]).toMatchObject({ sourceType: 'lecture', courseName: 'Course One', lectureName: 'Unit 2' });
         expect(citations[1]).toMatchObject({ sourceType: 'note', noteId: 'n1' });
         expect(citations[1].label).toContain('Note by Dr X');
+    });
+
+    test('buildSuperCourseCitations exposes stable null/default fields for sparse inputs', () => {
+        expect(superCourse.buildSuperCourseCitations()).toEqual([]);
+        const citations = superCourse.buildSuperCourseCitations([
+            { sourceType: 'note', createdAt: '2026-06-15T12:00:00Z' },
+            { sourceType: 'lecture' },
+            { sourceType: 'lecture', courseId: 'raw-id', documentType: 'pdf' },
+        ]);
+        expect(citations[0]).toMatchObject({
+            noteId: null, authorName: null, title: null, label: 'Note by instructor, 2026-06-15',
+        });
+        expect(citations[1]).toMatchObject({
+            courseId: null, courseName: null, lectureName: null, fileName: null, documentId: null,
+        });
+        expect(citations[2].courseName).toBe('raw-id');
     });
 
     test('buildSuperCourseSourceAttribution distinguishes empty vs retrieved results', () => {
@@ -177,6 +401,50 @@ describe('superCourseService context/summary builders', () => {
         expect(withResults.source).toBe('super-course');
         expect(withResults.documents).toHaveLength(1); // deduped by documentId
         expect(withResults.description).toContain('From:');
+    });
+
+    test('buildSuperCourseSourceAttribution includes and deduplicates instructor notes', () => {
+        const attributed = superCourse.buildSuperCourseSourceAttribution([
+            { sourceType: 'note', id: 'raw-1', authorName: 'Dr X', title: 'Review', createdAt: '2026-06-15T12:00:00Z', score: 0.8 },
+            { sourceType: 'note', id: 'raw-1', authorName: 'Duplicate' },
+            { sourceType: 'note', noteId: 'n2', score: 0.4 },
+        ]);
+        expect(attributed.documents).toHaveLength(2);
+        expect(attributed.documents[0]).toMatchObject({
+            sourceType: 'note', courseName: 'Note by Dr X', unitName: '2026-06-15',
+            noteId: null, fileName: 'Review', documentType: 'note',
+        });
+        expect(attributed.documents[1]).toMatchObject({
+            courseName: 'Note by instructor', unitName: 'Instructor note', noteId: 'n2', fileName: null,
+        });
+        expect(attributed.description).toContain('Note by Dr X / 2026-06-15');
+    });
+
+    test('buildSuperCourseSourceAttribution supports defaults and sparse lecture fallbacks', () => {
+        expect(superCourse.buildSuperCourseSourceAttribution()).toMatchObject({
+            source: 'general-biochemistry',
+            description: 'No courses are currently included in the Super Course source pool',
+        });
+        const attributed = superCourse.buildSuperCourseSourceAttribution([
+            { sourceType: 'lecture', courseId: 'raw', lectureName: 'U', fileName: 'f', type: 'slides' },
+            { sourceType: 'lecture' },
+            { sourceType: 'lecture' },
+        ]);
+        expect(attributed.documents).toHaveLength(2);
+        expect(attributed.documents[0]).toMatchObject({
+            courseName: 'raw', documentId: null, documentType: 'slides',
+        });
+        expect(attributed.documents[1]).toMatchObject({
+            courseId: null, courseName: null, unitName: null, documentId: null,
+            fileName: null, documentType: null,
+        });
+        expect(attributed.description).toContain('Course');
+
+        const poolFallback = superCourse.buildSuperCourseSourceAttribution(
+            [{ sourceType: 'lecture', courseId: 'C9' }],
+            [{ courseId: 'C9' }]
+        );
+        expect(poolFallback.poolCourses[0].courseName).toBe('C9');
     });
 });
 
@@ -254,6 +522,20 @@ describe('superCourseService.getSuperCourseRetrievalPool', () => {
             { courseId: 'C1', courseName: 'Alpha', approvedTopics: ['Glycolysis', 'Krebs'] },
         ]);
     });
+
+    test('pool/topic helpers support default options and course-name fallbacks', async () => {
+        const db = memoryDb({ courses: [
+            { courseId: 'C1', courseCode: 'CODE', status: 'active', superchatIds: ['b1'], approvedStruggleTopics: ['A'] },
+            { courseId: 'C2', status: 'active', superchatIds: ['b1'], approvedStruggleTopics: ['B'] },
+            { courseId: 'C3', status: 'active', superchatIds: ['b1'] },
+            { courseId: '', status: 'active', superchatIds: ['b1'] },
+        ] });
+        await expect(superCourse.getSuperCourseRetrievalPool(db)).resolves.toHaveLength(3);
+        await expect(superCourse.getSuperCourseApprovedTopics(db)).resolves.toEqual([
+            { courseId: 'C1', courseName: 'CODE', approvedTopics: ['A'] },
+            { courseId: 'C2', courseName: 'C2', approvedTopics: ['B'] },
+        ]);
+    });
 });
 
 describe('superCourseService settings/bucket resolution', () => {
@@ -262,6 +544,11 @@ describe('superCourseService settings/bucket resolution', () => {
         const settings = await superCourse.getSuperCourseChatSettings(db);
         expect(settings.studentTopK).toBe(5);
         expect(settings.instructorTopK).toBe(DEFAULTS.instructorTopK); // untouched -> default
+    });
+
+    test('getSuperCourseChatSettings uses defaults when the settings doc is absent', async () => {
+        await expect(superCourse.getSuperCourseChatSettings(memoryDb({})))
+            .resolves.toMatchObject({ studentTopK: DEFAULTS.studentTopK });
     });
 
     test('getInstructorSuperCourseChat reports key availability and never shows students', async () => {
@@ -295,6 +582,13 @@ describe('superCourseService settings/bucket resolution', () => {
         await expect(superCourse.getSuperchat(db, 'b9')).resolves.toBeNull(); // soft-deleted
     });
 
+    test('getSuperchat normalizes missing optional metadata', async () => {
+        const db = memoryDb({ superchats: [{ superchatId: 'b1', name: 'Sparse', isDeleted: false }] });
+        await expect(superCourse.getSuperchat(db, 'b1')).resolves.toMatchObject({
+            description: '', yearLevel: null, showToStudents: false, aiAvailable: false,
+        });
+    });
+
     test('listSuperchats can filter to student-visible buckets', async () => {
         const db = memoryDb({
             superchats: [
@@ -308,5 +602,12 @@ describe('superCourseService settings/bucket resolution', () => {
 
         const visible = await superCourse.listSuperchats(db, { studentVisibleOnly: true });
         expect(visible.map((b) => b.superchatId)).toEqual(['b1']);
+    });
+
+    test('listSuperchats normalizes missing summary metadata', async () => {
+        const db = memoryDb({ superchats: [{ superchatId: 'b1', name: 'Sparse', isDeleted: false }] });
+        await expect(superCourse.listSuperchats(db)).resolves.toEqual([
+            expect.objectContaining({ description: '', yearLevel: null, showToStudents: false, aiAvailable: false }),
+        ]);
     });
 });

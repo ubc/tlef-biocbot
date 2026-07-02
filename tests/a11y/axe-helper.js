@@ -12,9 +12,9 @@ const BLOCKING_IMPACTS = new Set(['critical', 'serious']);
  * blocking (critical/serious) WCAG 2 A/AA violations.
  *
  * @param {import('@playwright/test').Page} page
- * @param {{ disableRules?: string[] }} [options]
+ * @param {{ disableRules?: string[], include?: string | string[] }} [options]
  */
-async function expectNoA11yViolations(page, { disableRules = [] } = {}) {
+async function expectNoA11yViolations(page, { disableRules = [], include } = {}) {
     // Freeze CSS entrance animations/transitions before scanning. Pages like
     // /ta/onboarding fade their content in (opacity 0 -> 1 over 0.5s); if axe
     // samples mid-animation it reads washed-out colors and reports false
@@ -37,6 +37,12 @@ async function expectNoA11yViolations(page, { disableRules = [] } = {}) {
     }
 
     let builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']);
+    // Scope the scan to a subtree when requested. Modal scans use this so the
+    // audit reports issues inside the open dialog only, instead of re-failing on
+    // the host page's pre-existing (separately tracked) violations.
+    if (include) {
+        builder = builder.include(include);
+    }
     if (disableRules.length) {
         builder = builder.disableRules(disableRules);
     }

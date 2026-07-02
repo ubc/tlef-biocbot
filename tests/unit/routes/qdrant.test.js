@@ -21,7 +21,7 @@ jest.mock('../../../src/routes/llmKeyMiddleware', () => ({
 const { memoryDb } = require('../helpers/memory-db');
 const { makeRouteApp, request } = require('../helpers/route-app');
 const Course = require('../../../src/models/Course');
-const { resolveCourseAi } = require('../../../src/routes/llmKeyMiddleware');
+const { resolveCourseAi, sendLlmKeyError } = require('../../../src/routes/llmKeyMiddleware');
 const router = require('../../../src/routes/qdrant');
 
 const instructor = { userId: 'i1', role: 'instructor' };
@@ -45,6 +45,7 @@ beforeEach(() => {
     Course.userHasCourseAccess.mockReset().mockResolvedValue(true);
     Course.checkTAPermission.mockReset().mockResolvedValue(true);
     resolveCourseAi.mockReset();
+    sendLlmKeyError.mockReset().mockReturnValue(false);
 });
 
 afterAll(() => jest.restoreAllMocks());
@@ -76,6 +77,24 @@ describe('Qdrant route access and status', () => {
         Course.checkTAPermission.mockResolvedValueOnce(false);
         expect((await request(app({ db, user: ta })).post('/search').send({ courseId: 'C1', query: 'ATP' })).status).toBe(403);
     });
+
+    test('admin bypasses course lookup while allowed staff and new courses pass access checks', async () => {
+        expect((await request(app({ user: admin })).post('/search').send({ courseId: 'C1' })).status).toBe(400);
+
+        const db = memoryDb({ courses: [{ courseId: 'C1' }] });
+        expect((await request(app({ db, user: instructor })).post('/search').send({ courseId: 'C1' })).status).toBe(400);
+        expect(Course.userHasCourseAccess).toHaveBeenCalledWith(db, 'C1', 'i1', 'instructor');
+        expect((await request(app({ db, user: ta })).post('/search').send({ courseId: 'C1' })).status).toBe(400);
+        expect(Course.checkTAPermission).toHaveBeenCalledWith(db, 'C1', 't1', 'courses');
+
+        expect((await request(app({ db, user: instructor })).post('/search').send({ courseId: 'NEW' })).status).toBe(400);
+    });
+
+    test('course-scoped access reports an unavailable database', async () => {
+        const res = await request(app({ user: instructor })).post('/search').send({ courseId: 'C1', query: 'ATP' });
+        expect(res.status).toBe(503);
+        expect(res.body.message).toBe('Database connection not available');
+    });
 });
 
 describe('document processing and search with mocked AI/vector service', () => {
@@ -101,6 +120,28 @@ describe('document processing and search with mocked AI/vector service', () => {
         expect(res.body.error).toBe('embedding failed');
     });
 
+    test('process-document stops when AI resolution responds and maps ordinary and key errors', async () => {
+        resolveCourseAi.mockImplementationOnce(async (_req, response) => {
+            response.status(409).json({ success: false, message: 'AI unavailable' });
+            return null;
+        });
+        let res = await request(app({ db: memoryDb({}), user: instructor })).post('/process-document').send({ courseId: 'C1', lectureName: 'U', documentId: 'd', content: 'text', fileName: 'f' });
+        expect(res.status).toBe(409);
+
+        resolveCourseAi.mockRejectedValueOnce(new Error('resolver exploded'));
+        res = await request(app({ db: memoryDb({}), user: instructor })).post('/process-document').send({ courseId: 'C1', lectureName: 'U', documentId: 'd', content: 'text', fileName: 'f' });
+        expect(res.status).toBe(500);
+        expect(res.body.error).toBe('resolver exploded');
+
+        resolveCourseAi.mockRejectedValueOnce(new Error('missing key'));
+        sendLlmKeyError.mockImplementationOnce((response) => {
+            response.status(422).json({ success: false, message: 'key required' });
+            return true;
+        });
+        res = await request(app({ db: memoryDb({}), user: instructor })).post('/process-document').send({ courseId: 'C1', lectureName: 'U', documentId: 'd', content: 'text', fileName: 'f' });
+        expect(res.status).toBe(422);
+    });
+
     test('search validates course and query', async () => {
         expect((await request(app({ user: instructor })).post('/search').send({ query: 'ATP' })).status).toBe(400);
         expect((await request(app({ db: memoryDb({ courses: [] }), user: instructor })).post('/search').send({ courseId: 'C1' })).status).toBe(400);
@@ -113,6 +154,36 @@ describe('document processing and search with mocked AI/vector service', () => {
         expect(res.status).toBe(200);
         expect(res.body.data).toMatchObject({ totalResults: 1, filters: { courseId: 'C1', lectureName: 'Unit 1' } });
         expect(qdrant.searchDocuments).toHaveBeenCalledWith('ATP', { courseId: 'C1', lectureName: 'Unit 1' }, 4);
+    });
+
+    test('search uses default limit, omits lecture filter, and stops on absent AI', async () => {
+        const qdrant = { searchDocuments: jest.fn(async () => []) };
+        resolveCourseAi.mockResolvedValueOnce({ qdrant });
+        let res = await request(app({ db: memoryDb({}), user: instructor })).post('/search').send({ query: 'ATP', courseId: 'C1' });
+        expect(res.status).toBe(200);
+        expect(qdrant.searchDocuments).toHaveBeenCalledWith('ATP', { courseId: 'C1' }, 10);
+
+        resolveCourseAi.mockImplementationOnce(async (_req, response) => {
+            response.status(409).json({ success: false, message: 'AI unavailable' });
+            return null;
+        });
+        res = await request(app({ db: memoryDb({}), user: instructor })).post('/search').send({ query: 'ATP', courseId: 'C1' });
+        expect(res.status).toBe(409);
+    });
+
+    test('search maps ordinary and delegated key errors', async () => {
+        resolveCourseAi.mockRejectedValueOnce(new Error('search exploded'));
+        let res = await request(app({ db: memoryDb({}), user: instructor })).post('/search').send({ query: 'ATP', courseId: 'C1' });
+        expect(res.status).toBe(500);
+        expect(res.body.error).toBe('search exploded');
+
+        resolveCourseAi.mockRejectedValueOnce(new Error('missing key'));
+        sendLlmKeyError.mockImplementationOnce((response) => {
+            response.status(422).json({ success: false, message: 'key required' });
+            return true;
+        });
+        res = await request(app({ db: memoryDb({}), user: instructor })).post('/search').send({ query: 'ATP', courseId: 'C1' });
+        expect(res.status).toBe(422);
     });
 });
 
@@ -127,11 +198,27 @@ describe('maintenance operations', () => {
         expect(res.status).toBe(500);
     });
 
+    test('document deletion maps service exceptions', async () => {
+        mockService.deleteDocumentChunks.mockRejectedValueOnce(new Error('delete exploded'));
+        const res = await request(app({ user: instructor })).delete('/document/d1');
+        expect(res.status).toBe(500);
+        expect(res.body.error).toBe('delete exploded');
+    });
+
     test('collection stats require staff and return mocked stats', async () => {
         expect((await request(app({ user: student })).get('/collection-stats')).status).toBe(403);
         const res = await request(app({ user: instructor })).get('/collection-stats');
         expect(res.status).toBe(200);
         expect(res.body.data.pointsCount).toBe(3);
+    });
+
+    test('collection stats maps service exceptions without reinitializing an active client', async () => {
+        mockService.client = mockClient;
+        mockService.getCollectionStats.mockRejectedValueOnce(new Error('stats exploded'));
+        const res = await request(app({ user: instructor })).get('/collection-stats');
+        expect(res.status).toBe(500);
+        expect(res.body.error).toBe('stats exploded');
+        expect(mockService.initialize).not.toHaveBeenCalled();
     });
 
     test('collection deletion is system-admin only', async () => {
@@ -142,6 +229,52 @@ describe('maintenance operations', () => {
         mockService.deleteCollection.mockResolvedValueOnce({ success: false, error: 'cannot delete' });
         res = await request(app({ user: admin })).delete('/collection');
         expect(res.status).toBe(500);
+    });
+
+    test('collection deletion initializes when needed and maps thrown errors', async () => {
+        mockService.deleteCollection.mockRejectedValueOnce(new Error('collection exploded'));
+        const res = await request(app({ user: admin })).delete('/collection');
+        expect(res.status).toBe(500);
+        expect(res.body.error).toBe('collection exploded');
+        expect(mockService.initialize).toHaveBeenCalled();
+    });
+
+    test('delete-all-collections enforces admin and reports Qdrant or database precondition failures', async () => {
+        expect((await request(app({ user: instructor })).delete('/delete-all-collections')).status).toBe(403);
+
+        mockService.deleteCollection.mockResolvedValueOnce({ success: false, error: 'qdrant retained' });
+        let res = await request(app({ user: admin })).delete('/delete-all-collections');
+        expect(res.status).toBe(500);
+        expect(res.body.message).toBe('Failed to delete Qdrant collection');
+
+        res = await request(app({ user: admin })).delete('/delete-all-collections');
+        expect(res.status).toBe(500);
+        expect(res.body.error).toBe('Database not initialized');
+    });
+
+    test('delete-all-collections drops each Mongo collection and records per-collection failures', async () => {
+        const db = {
+            listCollections: jest.fn(() => ({ toArray: jest.fn(async () => [{ name: 'courses' }, { name: 'users' }]) })),
+            collection: jest.fn((name) => ({ countDocuments: jest.fn(async () => name === 'courses' ? 3 : 2) })),
+            dropCollection: jest.fn(async (name) => { if (name === 'users') throw new Error('drop denied'); }),
+        };
+        const res = await request(app({ db, user: admin })).delete('/delete-all-collections');
+        expect(res.status).toBe(200);
+        expect(res.body.data).toEqual({
+            qdrantDeletedCount: 'all',
+            mongoDeletedCount: 3,
+            mongoResults: {
+                courses: { exists: true, deleted: 3, success: true },
+                users: { exists: true, deleted: 0, success: false, error: 'drop denied' },
+            },
+        });
+    });
+
+    test('delete-all-collections maps unexpected failures', async () => {
+        mockService.deleteCollection.mockRejectedValueOnce(new Error('qdrant exploded'));
+        const res = await request(app({ user: admin })).delete('/delete-all-collections');
+        expect(res.status).toBe(500);
+        expect(res.body.error).toBe('qdrant exploded');
     });
 
     test('cleanup-vectors removes only IDs absent from Mongo', async () => {
@@ -156,5 +289,31 @@ describe('maintenance operations', () => {
         expect(res.status).toBe(200);
         expect(res.body.data).toMatchObject({ validMongoDocs: 2, qdrantDocs: 2, orphanedDocs: 1, deletedChunks: 3, deletedDocIds: ['orphan'] });
         expect(mockService.deleteDocumentChunks).toHaveBeenCalledWith('orphan', 'C1');
+    });
+
+    test('cleanup validates course scope and database availability', async () => {
+        expect((await request(app({ user: instructor })).post('/cleanup-vectors').send({})).status).toBe(400);
+        const res = await request(app({ user: admin })).post('/cleanup-vectors').send({ courseId: 'C1' });
+        expect(res.status).toBe(503);
+    });
+
+    test('cleanup initializes, follows scroll pages, ignores malformed payloads, and tolerates delete failures', async () => {
+        mockClient.scroll
+            .mockResolvedValueOnce({ points: [{}, { payload: {} }, { payload: { documentId: 'orphan' } }], next_page_offset: 'next' })
+            .mockResolvedValueOnce({ points: null, next_page_offset: null });
+        mockService.deleteDocumentChunks.mockResolvedValueOnce({ success: false, error: 'retained' });
+        const res = await request(app({ db: memoryDb({ documents: [] }), user: instructor })).post('/cleanup-vectors').send({ courseId: 'C1' });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ orphanedDocs: 1, deletedChunks: 0, deletedDocIds: [] });
+        expect(mockService.initialize).toHaveBeenCalled();
+        expect(mockClient.scroll).toHaveBeenCalledTimes(2);
+    });
+
+    test('cleanup maps scroll failures', async () => {
+        mockService.client = mockClient;
+        mockClient.scroll.mockRejectedValueOnce(new Error('scroll exploded'));
+        const res = await request(app({ db: memoryDb({ documents: [] }), user: instructor })).post('/cleanup-vectors').send({ courseId: 'C1' });
+        expect(res.status).toBe(500);
+        expect(res.body.error).toBe('scroll exploded');
     });
 });

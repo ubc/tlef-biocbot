@@ -359,12 +359,12 @@ header h1 {
 }
 
 .notification.success {
-    background-color: var(--success-color);
+    background-color: #1e7e34;
     color: white;
 }
 
 .notification.info {
-    background-color: var(--info-color);
+    background-color: #117a8b;
     color: white;
 }
 

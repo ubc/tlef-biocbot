@@ -348,11 +348,17 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                             : undefined
                     });
                     const parsePromise = parser.parse({ filePath: tempFilePath }, 'text');
-                    const timeoutPromise = new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('Document parsing timed out after 5 minutes')), PARSE_TIMEOUT_MS)
-                    );
-                    
-                    const parseResult = await Promise.race([parsePromise, timeoutPromise]);
+                    let timeoutId;
+                    const timeoutPromise = new Promise((_, reject) => {
+                        timeoutId = setTimeout(() => reject(new Error('Document parsing timed out after 5 minutes')), PARSE_TIMEOUT_MS);
+                    });
+
+                    let parseResult;
+                    try {
+                        parseResult = await Promise.race([parsePromise, timeoutPromise]);
+                    } finally {
+                        clearTimeout(timeoutId);
+                    }
                     
                     if (parseResult && parseResult.content) {
                         textContent = parseResult.content;

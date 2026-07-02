@@ -47,7 +47,7 @@ const port = process.env.TLEF_BIOCBOT_PORT || 8080;
 
 // Configure CORS to allow requests from localhost:3002 (browser-sync proxy)
 app.use(cors({
-    origin: ['http://localhost:3000', 'http://localhost:3002', 'http://localhost:8085'],
+    origin: ['http://localhost:3000', 'http://localhost:3002', 'http://localhost:8050'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']

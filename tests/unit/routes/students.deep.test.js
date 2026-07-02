@@ -37,6 +37,11 @@ describe('GET /:courseId/:studentId/sessions — admin list', () => {
         expect(res.status).toBe(404);
     });
 
+    test('503 when the db is unavailable', async () => {
+        const res = await request(app({ db: null, user: adminInstructor })).get('/C1/s1/sessions');
+        expect(res.status).toBe(503);
+    });
+
     test('returns the student\'s non-deleted sessions with a recalculated duration', async () => {
         const db = memoryDb({
             courses: [ownedCourse],
@@ -52,9 +57,26 @@ describe('GET /:courseId/:studentId/sessions — admin list', () => {
         expect(res.body.data.studentName).toBe('Alice');
         expect(res.body.data.sessions[0]).toHaveProperty('duration');
     });
+
+    test('500 when a database read fails', async () => {
+        const db = { collection: () => ({ findOne: async () => { throw new Error('db down'); } }) };
+        const res = await request(app({ db, user: adminInstructor })).get('/C1/s1/sessions');
+        expect(res.status).toBe(500);
+    });
 });
 
 describe('GET /:courseId/:studentId/sessions/:sessionId — admin single', () => {
+    test('401 without a user, 503 without a db, and 403 for a non-admin', async () => {
+        expect((await request(app({ db: memoryDb({}) })).get('/C1/s1/sessions/sess1')).status).toBe(401);
+        expect((await request(app({ db: null, user: adminInstructor })).get('/C1/s1/sessions/sess1')).status).toBe(503);
+        expect((await request(app({ db: memoryDb({}), user: plainInstructor })).get('/C1/s1/sessions/sess1')).status).toBe(403);
+    });
+
+    test('404 when the admin has no access to the course', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'other' }] });
+        expect((await request(app({ db, user: adminInstructor })).get('/C1/s1/sessions/sess1')).status).toBe(404);
+    });
+
     test('404 when the session does not exist', async () => {
         const db = memoryDb({ courses: [ownedCourse], chat_sessions: [] });
         const res = await request(app({ db, user: adminInstructor })).get('/C1/s1/sessions/missing');
@@ -68,9 +90,19 @@ describe('GET /:courseId/:studentId/sessions/:sessionId — admin single', () =>
         expect(res.body.data).toMatchObject({ sessionId: 'sess1', studentId: 's1' });
         expect(res.body.data).toHaveProperty('duration');
     });
+
+    test('500 when a database read fails', async () => {
+        const db = { collection: () => ({ findOne: async () => { throw new Error('db down'); } }) };
+        expect((await request(app({ db, user: adminInstructor })).get('/C1/s1/sessions/sess1')).status).toBe(500);
+    });
 });
 
 describe('DELETE /:courseId/:studentId/sessions/:sessionId — instructor soft delete', () => {
+    test('401 without a user and 500 without a db', async () => {
+        expect((await request(app({ db: memoryDb({}) })).delete('/C1/s1/sessions/sess1')).status).toBe(401);
+        expect((await request(app({ db: null, user: plainInstructor })).delete('/C1/s1/sessions/sess1')).status).toBe(500);
+    });
+
     test('403 for a student', async () => {
         const db = memoryDb({ chat_sessions: [session()] });
         const res = await request(app({ db, user: student })).delete('/C1/s1/sessions/sess1');
@@ -88,5 +120,18 @@ describe('DELETE /:courseId/:studentId/sessions/:sessionId — instructor soft d
         const res = await request(app({ db, user: plainInstructor })).delete('/C1/s1/sessions/sess1');
         expect(res.status).toBe(200);
         expect((await db.collection('chat_sessions').findOne({ sessionId: 'sess1' })).isDeleted).toBe(true);
+    });
+
+    test('500 when the session lookup fails', async () => {
+        const db = { collection: () => ({ findOne: async () => { throw new Error('db down'); } }) };
+        expect((await request(app({ db, user: plainInstructor })).delete('/C1/s1/sessions/sess1')).status).toBe(500);
+    });
+
+    test('404 when the session disappears between lookup and update', async () => {
+        const db = { collection: () => ({
+            findOne: async () => ({ sessionId: 'sess1' }),
+            updateOne: async () => ({ matchedCount: 0 }),
+        }) };
+        expect((await request(app({ db, user: plainInstructor })).delete('/C1/s1/sessions/sess1')).status).toBe(404);
     });
 });

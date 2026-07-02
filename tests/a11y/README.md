@@ -70,6 +70,40 @@ Use `storageStatePath('ta')`.
 - [x] ~~/login~~ - `scanned-pass`, unauthenticated scan in `shared.a11y.spec.js`
 - [x] ~~/qdrant-test~~ - `scanned-pass`, authenticated scan in `shared.a11y.spec.js`
 
+### Modals & Pop-ups
+
+Modals are `display:none` until opened, so the page-level scans above never see
+them. `modals.a11y.spec.js` force-reveals each one (static markup gets a `.show`
+class / inline-display flip; dynamically-built popups are constructed by calling
+the app's own global builder) and scopes axe to the dialog subtree. This audits
+structure/naming/contrast but not focus-trapping — that stays in e2e.
+
+Status: `scanned-failing` overall; passing/failing noted per modal.
+
+Instructor (`storageStatePath('instructor')`):
+
+- [x] ~~#upload-modal~~, ~~#question-modal~~, ~~#delete-unit-modal~~, ~~#regenerate-modal~~, ~~#auto-link-confirmation-modal~~, ~~#question-learning-objective-modal~~ on `/instructor/documents` - `scanned-pass`
+- [x] ~~#calibration-modal~~ on `/instructor/documents` - `scanned-failing`, missing slider label
+- [x] ~~#transfer-course-modal~~ on `/instructor/settings` - `scanned-pass`
+- [x] ~~#remove-ta-modal~~ on `/instructor/ta-hub` - `scanned-pass`
+- [x] ~~#download-modal~~ on `/instructor/downloads` - `scanned-pass`; needs system-admin
+- [x] ~~#student-modal~~ on `/instructor/downloads` - `scanned-failing`, secondary-button contrast
+- [x] ~~topic-review modal~~ on `/instructor/documents` - `scanned-pass`; built via `ensureTopicReviewModal()`
+- [x] ~~topic-unit assignment modal~~ on `/instructor/home` - `scanned-failing`, button contrast; built via `ensureTopicUnitAssignmentModal()`
+- [x] ~~notification toasts~~ on `/instructor/documents` - `scanned-failing`, success/info contrast; injected via `window.showNotification`
+
+Instructor onboarding (`storageStatePath('instructor_fresh')`):
+
+- [x] ~~#upload-modal~~, ~~#question-modal~~, ~~#regenerate-modal~~, ~~#auto-link-confirmation-modal~~, ~~#question-learning-objective-modal~~ on `/instructor/onboarding` - `scanned-failing`, primary-button contrast
+
+Student (`storageStatePath('student')`):
+
+- [x] ~~#confirm-modal~~ on `/student/dashboard.html` - `scanned-failing`, cancel-button contrast
+- [x] ~~#idle-timeout-modal~~ on `/student` - `scanned-pass`
+- [x] ~~agreement modal~~ (consent + read-only) on `/student` - `scanned-pass`; revealed via `window.agreementModal.show()`
+- [x] ~~chat-limit info modal~~ on `/student` - `scanned-failing`, muted-text contrast; built via `window.showChatLimitModal()`
+- [ ] chat-survey popup - `blocked`; IIFE-private behind `maybeShowChatSurvey`, needs seeded survey settings + message threshold (e2e candidate)
+
 ### Route Aliases / Redirects
 
 These are viewable or navigable URLs, but they should usually be covered through
