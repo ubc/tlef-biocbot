@@ -490,13 +490,14 @@ describe('main chat source, mode, tracking, safety, and continuation branches', 
         expect(res.status).toBe(400);
     });
 
-    test('empty search result normalization and explanation-request profanity bypass', async () => {
+    test('treats a non-array Qdrant result as an empty result set', async () => {
         const { qdrant } = ai();
         qdrant.searchDocuments.mockResolvedValueOnce(null);
         const res = await request(app({ db: chatDb() })).post('/').send({
             message: 'shit', courseId: 'C1', unitName: 'Unit 1', isExplanationRequest: true
         });
-        expect(res.status).toBe(500);
+        expect(res.status).toBe(200);
+        expect(res.body.debug.searchResultsCount).toBe(0);
     });
 });
 

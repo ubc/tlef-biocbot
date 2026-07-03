@@ -2324,25 +2324,11 @@ async function handleJoinCourse() {
             throw new Error('No instructor ID found. User not authenticated.');
         }
         
-        // Call the join course API
-        const response = await fetch(`/api/courses/${courseId}/instructors`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({
-                instructorId: instructorId,
-                code
-            })
+        const result = await BiocBotCourseJoin.joinInstructorCourse({
+            courseId,
+            instructorId,
+            code
         });
-        
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || 'Failed to join course');
-        }
-        
-        const result = await response.json();
         console.log('Successfully joined course:', result);
 
         await Promise.all([

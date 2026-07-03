@@ -83,7 +83,7 @@ describe('User.createUser', () => {
                 permissions: { systemAdmin: false },
             },
         });
-        expect(result.userId).toMatch(/^user_\d+_[a-z0-9]+$/);
+        expect(result.userId).toMatch(/^user_[0-9a-f-]{36}$/i);
 
         const stored = await db.collection(COLL).findOne({ userId: result.userId });
         expect(stored).toMatchObject({
@@ -334,7 +334,7 @@ describe('User.createOrGetSAMLUser', () => {
                 invitedCourses: [],
             },
         });
-        expect(result.userId).toMatch(/^user_\d+_[a-z0-9]+$/);
+        expect(result.userId).toMatch(/^user_[0-9a-f-]{36}$/i);
 
         const stored = await db.collection(COLL).findOne({ userId: result.userId });
         expect(stored).toMatchObject({

@@ -28,7 +28,7 @@ describe('MentalHealthFlag.createMentalHealthFlag', () => {
             success: true,
             insertedId: 'mem-1',
         });
-        expect(result.flagId).toMatch(/^mhf_\d+_[a-z0-9]+$/);
+        expect(result.flagId).toMatch(/^mhf_[0-9a-f-]{36}$/i);
 
         const stored = await db.collection(COLL).findOne({ flagId: result.flagId });
         expect(stored).toMatchObject({

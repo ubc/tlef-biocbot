@@ -11,6 +11,7 @@ const DocumentModel = require('../models/Document');
 const QdrantService = require('../services/qdrantService');
 const gridfs = require('../services/gridfs');
 const { hasSystemAdminAccess } = require('../services/authorization');
+const { createId } = require('../services/id');
 const {
     buildKeySubdocument,
     decryptApiKey,
@@ -251,11 +252,7 @@ async function userCanBypassCourseCodes(db, user) {
 }
 
 function generateCourseId(courseName = '') {
-    return `${String(courseName)
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '') || 'course'}-${Date.now()}`;
+    return createId('course');
 }
 
 function deepClone(value) {
@@ -533,6 +530,7 @@ router.post('/', async (req, res) => {
         }
         
         const { course, weeks, lecturesPerWeek, contentTypes, apiKey } = req.body;
+        const normalizedContentTypes = contentTypes === undefined ? [] : contentTypes;
         
         // Use authenticated user's ID
         const instructorId = user.userId;
@@ -542,6 +540,13 @@ router.post('/', async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: 'Missing required fields: course, weeks, lecturesPerWeek'
+            });
+        }
+
+        if (!Array.isArray(normalizedContentTypes)) {
+            return res.status(400).json({
+                success: false,
+                message: 'contentTypes must be an array'
             });
         }
         
@@ -581,7 +586,7 @@ router.post('/', async (req, res) => {
         }
         
         // Generate course ID
-        const courseId = `${course.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}`;
+        const courseId = generateCourseId(course);
         
         // Create course structure
         const courseStructure = {
@@ -598,7 +603,7 @@ router.post('/', async (req, res) => {
             courseDescription: `Course: ${course}`,
             learningOutcomes: [],
             assessmentCriteria: '',
-            courseMaterials: contentTypes || [],
+            courseMaterials: normalizedContentTypes,
             unitFiles: {},
             courseStructure
         };
@@ -633,13 +638,13 @@ router.post('/', async (req, res) => {
                 name: course,
                 weeks: parseInt(weeks),
                 lecturesPerWeek: parseInt(lecturesPerWeek),
-                contentTypes: contentTypes || [],
+                contentTypes: normalizedContentTypes,
                 instructorId: instructorId,
                 llmKey: publicKeySummary(llmApiKey),
                 aiAvailable: true,
                 createdAt: new Date().toISOString(),
                 status: 'active',
-                structure: generateCourseStructure(weeks, lecturesPerWeek, contentTypes),
+                structure: generateCourseStructure(weeks, lecturesPerWeek, normalizedContentTypes),
                 totalUnits: result.totalUnits
             }
         });
@@ -708,7 +713,7 @@ router.post('/:courseId/content', async (req, res) => {
         // 5. Update course structure
         
         const contentData = {
-            id: `content-${Date.now()}`,
+            id: createId('content'),
             courseId: courseId,
             title: title,
             description: description || '',
@@ -1582,7 +1587,15 @@ router.put('/:courseId', async (req, res) => {
         };
         
         if (name) updateData.courseName = name;
-        if (status) updateData.status = status;
+        if (status !== undefined) {
+            if (!CourseModel.isValidCourseStatus(status)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `status must be one of: ${CourseModel.COURSE_STATUS_VALUES.join(', ')}`
+                });
+            }
+            updateData.status = CourseModel.normalizeCourseStatus(status);
+        }
         if (typeof isAdditiveRetrieval === 'boolean') updateData.isAdditiveRetrieval = isAdditiveRetrieval;
         // Year level: accept 1-5 (5 = Graduate), or null to clear back to "not set"
         if (yearLevel !== undefined) {
@@ -2240,16 +2253,12 @@ router.get('/available/all', async (req, res) => {
         if (user && user.role === 'ta') {
             console.log(`Filtering courses for TA ${user.userId}`);
 
-            const invitedCourses = new Set(user.invitedCourses || []);
-
             // Filter from the already-narrowed availableCourses, not the raw
             // `courses` list. Avoids undoing any earlier role-based narrowing.
             availableCourses = availableCourses.filter(course => {
-                const isInvited = invitedCourses.has(course.courseId);
-                const isAssigned = course.tas && course.tas.includes(user.userId);
-                const isActive = (course.status || 'active') === 'active';
+                const isActive = CourseModel.normalizeCourseStatus(course.status) === CourseModel.COURSE_STATUS.ACTIVE;
 
-                return isInvited || isAssigned || isActive;
+                return isActive;
             });
             console.log(`TA ${user.userId} sees ${availableCourses.length} courses (from total ${courses.length})`);
         }

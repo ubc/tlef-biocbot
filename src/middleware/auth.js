@@ -562,7 +562,9 @@ function createAuthMiddleware(db) {
             }
 
             const CourseModel = require('../models/Course');
-            const course = await CourseModel.getCourseById(db, courseId);
+            // This guard must see deleted rows so it can actively deny them;
+            // ordinary product reads use getCourseById(), which hides them.
+            const course = await CourseModel.getCourseByIdIncludingDeleted(db, courseId);
 
             if (!course) {
                 return next();

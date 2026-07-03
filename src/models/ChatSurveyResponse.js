@@ -4,6 +4,7 @@
  */
 
 const crypto = require('crypto');
+const { createId } = require('../services/id');
 
 const COLLECTION_NAME = 'chatSurveyResponses';
 const VALID_EVENT_TYPES = new Set(['shown', 'dismissed', 'submitted']);
@@ -16,10 +17,7 @@ function getChatSurveyResponseCollection(db) {
 }
 
 function generateSurveyResponseId() {
-    if (typeof crypto.randomUUID === 'function') {
-        return `survey_${crypto.randomUUID()}`;
-    }
-    return `survey_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    return createId('survey');
 }
 
 function normalizeText(value, limit = 255) {

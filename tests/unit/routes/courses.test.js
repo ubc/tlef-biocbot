@@ -213,6 +213,18 @@ describe('available and joinable course lists', () => {
         expect(res.body.data.map(course => course.courseId)).toEqual(['C1', 'C2']);
     });
 
+    test('GET /available/all does not reintroduce inactive courses for TAs', async () => {
+        const db = memoryDb({ courses: [
+            { courseId: 'ACTIVE', status: 'active', tas: [] },
+            { courseId: 'ASSIGNED-INACTIVE', status: 'inactive', tas: ['t1'] },
+            { courseId: 'INVITED-INACTIVE', status: 'inactive', tas: [] },
+        ] });
+        const invitedTa = { ...ta, invitedCourses: ['INVITED-INACTIVE'] };
+        const res = await request(app({ db, user: invitedTa })).get('/available/all');
+        expect(res.status).toBe(200);
+        expect(res.body.data.map(course => course.courseId)).toEqual(['ACTIVE']);
+    });
+
     test('GET /available/joinable rejects non-instructors', async () => {
         expect((await request(app({ db: memoryDb({}), user: student })).get('/available/joinable')).status).toBe(403);
     });
@@ -227,6 +239,16 @@ describe('available and joinable course lists', () => {
         const res = await request(app({ db, user: instructor })).get('/available/joinable');
         expect(res.status).toBe(200);
         expect(res.body.data.map(course => course.courseId)).toEqual(['open']);
+    });
+});
+
+describe('canonical course status updates', () => {
+    test('rejects non-canonical status strings', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1', status: 'active' }] });
+        const res = await request(app({ db, user: instructor }))
+            .put('/C1').send({ instructorId: 'i1', status: 'archived' });
+        expect(res.status).toBe(400);
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).status).toBe('active');
     });
 });
 

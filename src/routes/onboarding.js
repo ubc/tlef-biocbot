@@ -127,6 +127,14 @@ router.post('/', async (req, res) => {
             });
         }
 
+        const existingCourse = await CourseModel.getCourseById(db, courseId);
+        if (existingCourse && !hasInstructorAccess(existingCourse, instructorId)) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have access to update this course'
+            });
+        }
+
         const validation = await validateApiKey(apiKey);
         if (!validation.ok) {
             return res.status(400).json({
@@ -153,14 +161,47 @@ router.post('/', async (req, res) => {
         // Save to database using Course model
         const result = await CourseModel.createCourseFromOnboarding(db, onboardingData);
 
+        let onboardingModifiedCount = result.modifiedCount;
+        if (!result.created) {
+            const updateData = {
+                courseName,
+                updatedAt: new Date()
+            };
+            for (const field of [
+                'courseDescription', 'assessmentCriteria', 'courseMaterials', 'courseStructure'
+            ]) {
+                if (Object.prototype.hasOwnProperty.call(req.body, field)) {
+                    updateData[field] = onboardingData[field];
+                }
+            }
+
+            const updateResult = await db.collection('courses').updateOne(
+                { courseId: result.courseId, instructorId },
+                { $set: updateData }
+            );
+            onboardingModifiedCount = updateResult.modifiedCount;
+
+            if (Object.prototype.hasOwnProperty.call(req.body, 'learningOutcomes')) {
+                await db.collection('courses').updateOne(
+                    { courseId: result.courseId, 'lectures.name': 'Unit 1' },
+                    {
+                        $set: {
+                            'lectures.$.learningObjectives': onboardingData.learningOutcomes,
+                            'lectures.$.updatedAt': new Date()
+                        }
+                    }
+                );
+            }
+        }
+
         const llmApiKey = buildKeySubdocument(apiKey, user.userId);
         await db.collection('courses').updateOne(
-            { courseId },
+            { courseId: result.courseId },
             { $set: { llmApiKey, updatedAt: new Date() } }
         );
 
         if (req.app.locals.llmRegistry) {
-            req.app.locals.llmRegistry.evictCourse(courseId);
+            req.app.locals.llmRegistry.evictCourse(result.courseId);
         }
         
         console.log(`Course ${result.created ? 'created' : 'updated'} from onboarding for course ${courseId}`);
@@ -169,9 +210,9 @@ router.post('/', async (req, res) => {
             success: true,
             message: `Course ${result.created ? 'created' : 'updated'} successfully from onboarding`,
             data: {
-                courseId,
+                courseId: result.courseId,
                 created: result.created,
-                modifiedCount: result.modifiedCount,
+                modifiedCount: onboardingModifiedCount,
                 totalUnits: result.totalUnits,
                 llmKey: publicKeySummary(llmApiKey),
                 timestamp: new Date().toISOString()
@@ -385,6 +426,15 @@ router.put('/:courseId/unit-files', async (req, res) => {
             return res.status(403).json({
                 success: false,
                 message: 'Only instructors with course access can update unit files'
+            });
+        }
+
+        const unitExists = Array.isArray(course.lectures) &&
+            course.lectures.some(lecture => lecture.name === unitName);
+        if (!unitExists) {
+            return res.status(404).json({
+                success: false,
+                message: 'Unit not found'
             });
         }
         

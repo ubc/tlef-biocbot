@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+const { createId } = require('./id');
 const { getAcademicApiClient } = require('./academicApi');
 const { normalizeEmail } = require('./authorization');
 
@@ -27,7 +27,7 @@ function normalizeAcademicPerson(person = {}) {
 }
 
 function generateUserId() {
-    return `user_${Date.now()}_${crypto.randomBytes(5).toString('hex')}`;
+    return createId('user');
 }
 
 async function findExistingStudent(usersCollection, student) {

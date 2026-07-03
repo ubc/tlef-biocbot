@@ -307,7 +307,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (data.success && data.data) {
                 correct = data.data.correct;
                 feedback = data.data.feedback || (correct ? 'Correct!' : 'Incorrect.');
-                serverCorrectAnswer = data.data.correctAnswer || null;
+                serverCorrectAnswer = data.data.correctAnswer ?? null;
             } else {
                 feedback = 'Unable to evaluate answer. Please try again.';
             }
@@ -383,14 +383,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     function highlightOptions(q, studentAnswer, correctAnswer) {
         const containerSelector = q.questionType === 'multiple-choice' ? '#mc-options' : '#tf-options';
         const labels = document.querySelectorAll(`${containerSelector} .option-label`);
+        const normalizedStudentAnswer = String(studentAnswer).toLowerCase();
+        const normalizedCorrectAnswer = correctAnswer === null || correctAnswer === undefined
+            ? null
+            : String(correctAnswer).toLowerCase();
 
         labels.forEach(label => {
             const radio = label.querySelector('input[type="radio"]');
             label.classList.add('disabled');
+            const normalizedValue = String(radio.value).toLowerCase();
 
-            if (correctAnswer && radio.value.toLowerCase() === correctAnswer.toLowerCase()) {
-                label.classList.add(radio.value.toLowerCase() === studentAnswer.toLowerCase() ? 'correct' : 'was-correct');
-            } else if (radio.value.toLowerCase() === studentAnswer.toLowerCase()) {
+            if (normalizedCorrectAnswer !== null && normalizedValue === normalizedCorrectAnswer) {
+                label.classList.add(normalizedValue === normalizedStudentAnswer ? 'correct' : 'was-correct');
+            } else if (normalizedValue === normalizedStudentAnswer) {
                 label.classList.add('incorrect');
             }
         });

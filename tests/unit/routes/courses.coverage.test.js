@@ -321,7 +321,7 @@ describe('remaining public validation and role branches', () => {
 
         db = memoryDb({ courses: [{ ...course, status: 'inactive' }, { courseId: 'C2', status: 'active' }] });
         res = await request(app({ db, user: ta })).get('/available/all');
-        expect(res.body.data.map((c) => c.courseId)).toContain('C1');
+        expect(res.body.data.map((c) => c.courseId)).not.toContain('C1');
 
         db = memoryDb({
             courses: [{ ...course, studentEnrollment: { inactive: { enrolled: true }, missing: { enrolled: true } } }],

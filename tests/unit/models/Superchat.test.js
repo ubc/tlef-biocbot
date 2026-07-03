@@ -16,7 +16,7 @@ describe('Superchat.yearLabel / generateSuperchatId', () => {
     test('generateSuperchatId produces unique, prefixed ids', () => {
         const ids = new Set(Array.from({ length: 5 }, () => Superchat.generateSuperchatId()));
         expect(ids.size).toBe(5);
-        for (const id of ids) expect(id).toMatch(/^sc_\d+_[a-z0-9]+$/);
+        for (const id of ids) expect(id).toMatch(/^sc_[0-9a-f-]{36}$/i);
     });
 });
 

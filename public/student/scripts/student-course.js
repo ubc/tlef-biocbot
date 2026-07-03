@@ -268,17 +268,28 @@ function showCourseSelection(courses) {
     `;
 
     const chatMessages = document.getElementById('chat-messages');
+    let courseSelectionHost = document.getElementById('course-selection-host');
+    if (!courseSelectionHost && chatMessages?.parentElement) {
+        courseSelectionHost = document.createElement('div');
+        courseSelectionHost.id = 'course-selection-host';
+        courseSelectionHost.className = 'course-selection-host';
+        chatMessages.parentElement.insertBefore(courseSelectionHost, chatMessages);
+    }
     
     // Clear any existing messages (including default welcome message) to prevents showing content from other courses
     if (chatMessages) {
         chatMessages.innerHTML = '';
-        
+    }
+
+    if (courseSelectionHost) {
+        courseSelectionHost.innerHTML = '';
+
         // Create a container for the course selection
         const courseSelectionDiv = document.createElement('div');
         courseSelectionDiv.innerHTML = courseSelectionHTML;
         courseSelectionDiv.id = 'course-selection-wrapper';
-        
-        chatMessages.appendChild(courseSelectionDiv);
+
+        courseSelectionHost.appendChild(courseSelectionDiv);
     }
 
     // Add event listener for course selection
@@ -755,13 +766,10 @@ function getCurrentStudentId() {
  */
 async function getCurrentStudentName() {
     try {
-        const response = await fetch('/api/auth/me');
-        if (response.ok) {
-            const userData = await response.json();
-            if (userData.success && userData.user && userData.user.displayName) {
-                return userData.user.displayName;
-            }
-        }
+        const user = typeof waitForCurrentUser === 'function'
+            ? await waitForCurrentUser()
+            : (typeof getCurrentUser === 'function' ? getCurrentUser() : null);
+        if (user?.displayName) return user.displayName;
     } catch (error) {
         console.error('Error fetching student name:', error);
     }
@@ -777,13 +785,11 @@ async function getCurrentStudentName() {
 async function getCurrentCourseId() {
     try {
         // First, try to get the user's current course context from their session
-        const userResponse = await fetch('/api/auth/me');
-        if (userResponse.ok) {
-            const userData = await userResponse.json();
-            if (userData.success && userData.user && userData.user.preferences && userData.user.preferences.courseId) {
-
-                return userData.user.preferences.courseId;
-            }
+        const user = typeof waitForCurrentUser === 'function'
+            ? await waitForCurrentUser()
+            : (typeof getCurrentUser === 'function' ? getCurrentUser() : null);
+        if (user?.preferences?.courseId) {
+            return user.preferences.courseId;
         }
 
         // Check localStorage for previously selected course

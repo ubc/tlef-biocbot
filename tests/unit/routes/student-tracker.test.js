@@ -109,11 +109,10 @@ describe('POST /reset', () => {
         expect(saved.struggleState.topics).toEqual([]);
     });
 
-    test('500 when the user has no DB record (resetUserStruggleState reports failure)', async () => {
-        // resetUserStruggleState returns { success:false } for an unknown user, and
-        // the route maps any non-success result to a 500 (no 404 branch here).
+    test('404 when the user has no DB record', async () => {
         const res = await request(app({ db: memoryDb({ users: [] }), user: student })).post('/reset').send({ topic: 'ALL' });
-        expect(res.status).toBe(500);
+        expect(res.status).toBe(404);
+        expect(res.body.message).toBe('User not found');
     });
 });
 

@@ -515,7 +515,7 @@ async function saveQuestion() {
     
     let question = {
         id: Date.now(),
-        type: questionType,
+        questionType,
         question: questionText,
         learningObjective
     };
@@ -652,19 +652,20 @@ function createQuestionElement(question, questionNumber, week) {
     const questionDiv = document.createElement('div');
     questionDiv.className = 'question-item';
     
-    const typeBadgeClass = question.type === 'multiple-choice' ? 'multiple-choice' : 
-                          question.type === 'true-false' ? 'true-false' : 'short-answer';
+    const questionType = question.questionType || question.type;
+    const typeBadgeClass = questionType === 'multiple-choice' ? 'multiple-choice' :
+                          questionType === 'true-false' ? 'true-false' : 'short-answer';
     
     let answerPreview = '';
     
-    if (question.type === 'multiple-choice') {
+    if (questionType === 'multiple-choice') {
         answerPreview = '<div class="mcq-preview">';
         question.options.forEach((option, index) => {
             const isCorrect = index === question.correctAnswer;
             answerPreview += `<div class="mcq-option-preview ${isCorrect ? 'correct' : ''}">${option}</div>`;
         });
         answerPreview += '</div>';
-    } else if (question.type === 'true-false') {
+    } else if (questionType === 'true-false') {
         answerPreview = `<div class="answer-preview">Correct Answer: ${question.correctAnswer ? 'True' : 'False'}</div>`;
     } else {
         answerPreview = `<div class="answer-preview">Sample Answer: ${question.correctAnswer}</div>`;
@@ -672,7 +673,7 @@ function createQuestionElement(question, questionNumber, week) {
     
     questionDiv.innerHTML = `
         <div class="question-header">
-            <span class="question-type-badge ${typeBadgeClass}">${question.type.replace('-', ' ')}</span>
+            <span class="question-type-badge ${typeBadgeClass}">${questionType.replace('-', ' ')}</span>
             <span class="question-number">Question ${questionNumber}</span>
             <div class="question-action-buttons">
                 <button class="edit-question-btn" onclick="openQuestionLearningObjectiveModal('${week}', ${question.id})" title="Edit learning objective">✎</button>
@@ -783,14 +784,9 @@ async function autoLinkQuestionsToLearningObjectives(week, buttonElement = null)
                 learningObjectives,
                 questions: questions.map(question => ({
                     questionId: question.questionId || String(question.id),
-                    questionType: question.type,
+                    questionType: question.questionType || question.type,
                     question: question.question,
-                    options: Array.isArray(question.options)
-                        ? question.options.reduce((acc, optionText, index) => {
-                            acc[String.fromCharCode(65 + index)] = optionText;
-                            return acc;
-                        }, {})
-                        : (question.options || {}),
+                    options: question.options || [],
                     correctAnswer: question.correctAnswer,
                     learningObjective: question.learningObjective || ''
                 }))
@@ -1094,7 +1090,7 @@ async function saveUnit1AssessmentQuestion(courseId, lectureName, questionObjOrT
             questionObj = {
                 question: questionObjOrText,
                 type: 'multiple-choice',
-                options: [],
+                options: ['Option A', 'Option B', 'Option C', 'Option D'],
                 correctAnswer: 0
             };
         } else {
@@ -1105,52 +1101,32 @@ async function saveUnit1AssessmentQuestion(courseId, lectureName, questionObjOrT
         // Determine question type - use from question object or default to multiple-choice
         const questionType = questionObj.type || questionObj.questionType || 'multiple-choice';
         
-        // Convert options from array format to object format if needed
-        // In onboarding, options are stored as an array: ['Option 1', 'Option 2', ...]
-        // Backend expects object format: {A: 'Option 1', B: 'Option 2', ...}
-        let options = {};
+        // Normalize both legacy modal objects and current arrays to the
+        // structured API contract: ordered option arrays + numeric answer index.
+        let options = [];
         let correctAnswer = questionObj.correctAnswer;
         
         if (questionType === 'multiple-choice') {
-            // Check if options is an array (onboarding format) or object (instructor.js format)
             if (Array.isArray(questionObj.options)) {
-                // Convert array to object format: ['text1', 'text2', ...] -> {A: 'text1', B: 'text2', ...}
-                const optionLetters = ['A', 'B', 'C', 'D', 'E', 'F'];
-                questionObj.options.forEach((optionText, index) => {
-                    if (optionText && optionText.trim()) {
-                        options[optionLetters[index]] = optionText.trim();
-                    }
-                });
-                
-                // Convert index-based correctAnswer (0, 1, 2, 3) to letter format ('A', 'B', 'C', 'D')
-                if (typeof correctAnswer === 'number' && correctAnswer >= 0 && correctAnswer < questionObj.options.length) {
-                    correctAnswer = optionLetters[correctAnswer];
+                const populated = questionObj.options
+                    .map((option, originalIndex) => ({ value: String(option).trim(), originalIndex }))
+                    .filter(option => option.value);
+                options = populated.map(option => option.value);
+                if (typeof correctAnswer === 'number') {
+                    correctAnswer = populated.findIndex(option => option.originalIndex === correctAnswer);
                 }
             } else if (questionObj.options && typeof questionObj.options === 'object') {
-                // Already in object format, use as is
-                options = questionObj.options;
-                // correctAnswer should already be in letter format ('A', 'B', etc.)
-            } else {
-                // Fallback: create default options if none provided
-                options = {
-                    A: 'Option A',
-                    B: 'Option B',
-                    C: 'Option C',
-                    D: 'Option D'
-                };
-                correctAnswer = 'A';
+                const entries = Object.entries(questionObj.options).sort(([a], [b]) => a.localeCompare(b));
+                options = entries.map(([, value]) => String(value).trim()).filter(Boolean);
+                if (typeof correctAnswer === 'string') {
+                    const answerIndex = entries.findIndex(([key]) => key === correctAnswer);
+                    if (answerIndex >= 0) correctAnswer = answerIndex;
+                }
             }
         } else if (questionType === 'true-false') {
-            // True/false questions don't need options object
-            options = {};
-            // correctAnswer should be 'true' or 'false' as a string
-            if (typeof correctAnswer === 'boolean') {
-                correctAnswer = correctAnswer.toString();
-            }
+            correctAnswer = correctAnswer === true || String(correctAnswer).toLowerCase() === 'true';
         } else if (questionType === 'short-answer') {
-            // Short answer questions don't need options object
-            options = {};
-            // correctAnswer should be the expected answer text
+            options = [];
         }
         
         const requestBody = {
@@ -1160,7 +1136,7 @@ async function saveUnit1AssessmentQuestion(courseId, lectureName, questionObjOrT
             questionType: questionType,
             question: questionObj.question || questionObj.questionText || '',
             options: options,
-            correctAnswer: correctAnswer || 'A',
+            correctAnswer: correctAnswer,
             explanation: questionObj.explanation || '',
             difficulty: questionObj.difficulty || 'medium',
             tags: questionObj.tags || [],

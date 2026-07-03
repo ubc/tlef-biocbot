@@ -1,3 +1,5 @@
+const { createId } = require('../services/id');
+
 /**
  * Flagged Question Model for MongoDB
  * Stores student flags on questions and instructor responses
@@ -66,7 +68,7 @@ async function createFlaggedQuestion(db, flagData) {
     const now = new Date();
     
     // Generate unique flag ID
-    const flagId = `flag_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const flagId = createId('flag');
     
     const flag = {
         ...flagData,

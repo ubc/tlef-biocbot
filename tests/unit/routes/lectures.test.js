@@ -70,16 +70,12 @@ describe('POST /publish', () => {
         expect(res.body.message).toMatch(/unpublished successfully/i);
     });
 
-    test('404-style: returns 500 when the lecture name is unknown (model reports not found)', async () => {
-        // updateLecturePublishStatus returns { success:false } for an unknown lecture;
-        // the unpublish path does not special-case it, so the success contract still
-        // serializes — the route echoes the request. Use an unknown lecture under unpublish.
+    test('404 when the lecture name is unknown', async () => {
         const db = memoryDb({ courses: [course()] });
         const res = await request(app({ db, user: instructor }))
             .post('/publish').send({ lectureName: 'Ghost Unit', isPublished: false, courseId: 'C1' });
-        // The model returns success:false but the route still responds 200 with its echo.
-        expect(res.status).toBe(200);
-        expect(res.body.data.created).toBeUndefined();
+        expect(res.status).toBe(404);
+        expect(res.body).toEqual({ success: false, message: 'Lecture not found' });
     });
 });
 

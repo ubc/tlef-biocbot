@@ -12,6 +12,7 @@
  */
 
 const CourseModel = require('./Course');
+const { createId } = require('../services/id');
 
 const COLLECTION_NAME = 'superchats';
 
@@ -37,12 +38,10 @@ function getCollection(db) {
 
 /**
  * Generate a unique superchat ID.
- * @returns {string} e.g. "sc_1717363200000_a1b2c3d4e"
+ * @returns {string} Prefixed collision-resistant superchat ID
  */
 function generateSuperchatId() {
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 11);
-    return `sc_${timestamp}_${random}`;
+    return createId('sc');
 }
 
 function yearLabel(yearLevel) {

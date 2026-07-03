@@ -1,3 +1,5 @@
+const { createId } = require('../services/id');
+
 /**
  * Document Model for MongoDB
  * Stores uploaded documents, text content, and metadata
@@ -84,7 +86,7 @@ async function uploadDocument(db, documentData) {
     };
     
     // Generate unique document ID
-    document.documentId = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    document.documentId = createId('doc');
     
     const result = await collection.insertOne(document);
     

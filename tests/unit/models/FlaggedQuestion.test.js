@@ -46,7 +46,7 @@ describe('FlaggedQuestion.createFlaggedQuestion', () => {
         });
 
         expect(result).toMatchObject({ success: true, insertedId: 'mem-1' });
-        expect(result.flagId).toMatch(/^flag_\d+_[a-z0-9]+$/);
+        expect(result.flagId).toMatch(/^flag_[0-9a-f-]{36}$/i);
 
         const stored = await FlaggedQuestion.getFlaggedQuestionById(db, result.flagId);
         expect(stored).toMatchObject({
@@ -97,7 +97,7 @@ describe('FlaggedQuestion.createFlaggedQuestion', () => {
             flagReason: 'unclear',
         });
 
-        expect(result.flagId).toMatch(/^flag_\d+_[a-z0-9]+$/);
+        expect(result.flagId).toMatch(/^flag_[0-9a-f-]{36}$/i);
         expect(result.flagId).not.toBe('caller-id');
         await expect(FlaggedQuestion.getFlaggedQuestionById(db, result.flagId))
             .resolves.toMatchObject({ flagId: result.flagId, questionId: 'q1' });

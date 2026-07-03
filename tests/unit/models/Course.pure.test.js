@@ -16,6 +16,22 @@ describe('Course constants', () => {
         expect(Course.DEFAULT_STUDENT_RAG_TOP_K).toBe(3);
         expect(Course.MIN_RAG_TOP_K).toBe(1);
         expect(Course.MAX_RAG_TOP_K).toBe(20);
+        expect(Course.COURSE_STATUS).toEqual({ ACTIVE: 'active', INACTIVE: 'inactive', DELETED: 'deleted' });
+    });
+});
+
+describe('Course status normalization', () => {
+    test('normalizes known states and defaults missing or unknown values to active', () => {
+        expect(Course.normalizeCourseStatus(' INACTIVE ')).toBe(Course.COURSE_STATUS.INACTIVE);
+        expect(Course.normalizeCourseStatus('deleted')).toBe(Course.COURSE_STATUS.DELETED);
+        expect(Course.normalizeCourseStatus('archived')).toBe(Course.COURSE_STATUS.ACTIVE);
+        expect(Course.normalizeCourseStatus(null)).toBe(Course.COURSE_STATUS.ACTIVE);
+    });
+
+    test('validates only canonical status values', () => {
+        expect(Course.isValidCourseStatus('active')).toBe(true);
+        expect(Course.isValidCourseStatus(' INACTIVE ')).toBe(true);
+        expect(Course.isValidCourseStatus('archived')).toBe(false);
     });
 });
 
@@ -40,9 +56,9 @@ describe('Course.normalizeYearLevel', () => {
         expect(Course.normalizeYearLevel('')).toBeNull();
     });
 
-    // Characterizes Number() coercion: true -> 1 (in range). Not "fixed" here.
-    test('coerces boolean true to 1 (Number(true) === 1)', () => {
-        expect(Course.normalizeYearLevel(true)).toBe(1);
+    test('does not coerce boolean state into a year level', () => {
+        expect(Course.normalizeYearLevel(true)).toBeNull();
+        expect(Course.normalizeYearLevel(false)).toBeNull();
     });
 });
 
@@ -71,10 +87,10 @@ describe('Course.parseYearLevelFromName', () => {
         expect(Course.parseYearLevelFromName(null)).toBeNull();
     });
 
-    // A bare single digit falls through to the `(\d+)` fallback, so its own value
-    // is the "first digit": "7" -> min(7,5) = 5. Characterized, not fixed.
-    test('clamps a single-digit fallback to MAX_YEAR_LEVEL', () => {
-        expect(Course.parseYearLevelFromName('Level 7')).toBe(5);
+    test('accepts valid single-digit year labels and rejects unrelated digits', () => {
+        expect(Course.parseYearLevelFromName('Year 2')).toBe(2);
+        expect(Course.parseYearLevelFromName('Level 7')).toBeNull();
+        expect(Course.parseYearLevelFromName('Course 42')).toBeNull();
     });
 });
 

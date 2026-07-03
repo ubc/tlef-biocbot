@@ -89,7 +89,11 @@ router.post('/reset', async (req, res) => {
         if (result.success) {
             res.json({ success: true, message: 'Struggle state reset successfully' });
         } else {
-            res.status(500).json({ success: false, message: 'Failed to reset state' });
+            const status = result.error === 'User not found' ? 404 : 500;
+            res.status(status).json({
+                success: false,
+                message: result.error || 'Failed to reset state'
+            });
         }
 
     } catch (error) {

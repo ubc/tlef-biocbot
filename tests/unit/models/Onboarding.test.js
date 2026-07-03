@@ -89,7 +89,7 @@ describe('Onboarding.upsertOnboarding', () => {
         });
     });
 
-    test('overwrites createdAt on update when the caller omits createdAt', async () => {
+    test('preserves createdAt on update when the caller omits createdAt', async () => {
         const originalCreatedAt = new Date('2026-01-01T00:00:00Z');
         const db = memoryDb({
             [COLL]: [{
@@ -108,10 +108,8 @@ describe('Onboarding.upsertOnboarding', () => {
         });
 
         const stored = await Onboarding.getOnboardingByCourseId(db, 'C1');
-        // The function comment says createdAt is set only for new documents, but
-        // the implementation places createdAt in $set for every upsert.
         expect(stored.createdAt).toBeInstanceOf(Date);
-        expect(stored.createdAt.getTime()).not.toBe(originalCreatedAt.getTime());
+        expect(stored.createdAt.getTime()).toBe(originalCreatedAt.getTime());
     });
 });
 

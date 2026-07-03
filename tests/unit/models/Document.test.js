@@ -55,7 +55,7 @@ describe('Document.uploadDocument', () => {
             _id: 'mem-1',
             metadata: { tags: ['bio'] },
         });
-        expect(created.documentId).toMatch(/^doc_\d+_[a-z0-9]+$/);
+        expect(created.documentId).toMatch(/^doc_[0-9a-f-]{36}$/i);
         expect(created.uploadDate).toBeInstanceOf(Date);
         expect(created.lastModified).toBeInstanceOf(Date);
 

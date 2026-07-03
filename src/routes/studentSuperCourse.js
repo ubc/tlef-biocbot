@@ -207,7 +207,6 @@ router.get('/list', async (req, res) => {
         if (!studentId) {
             return res.status(401).json({ success: false, message: 'Authentication required' });
         }
-
         const [accessibleIds, visible, studentYearLevel] = await Promise.all([
             getStudentAccessibleSuperchatIds(db, studentId),
             listSuperchats(db, { studentVisibleOnly: true }),
@@ -312,10 +311,6 @@ router.post('/save', async (req, res) => {
         }
 
         const studentId = req.user && req.user.userId;
-        if (!studentId) {
-            return res.status(401).json({ success: false, message: 'Authentication required' });
-        }
-
         const sessionData = {
             sessionId,
             studentId,
@@ -354,10 +349,6 @@ router.get('/sessions', async (req, res) => {
         if (!ctx) return;
 
         const studentId = req.user && req.user.userId;
-        if (!studentId) {
-            return res.status(401).json({ success: false, message: 'Authentication required' });
-        }
-
         const sessions = await ctx.db.collection('student_super_course_chat_sessions')
             .find({
                 studentId,
@@ -422,10 +413,6 @@ router.delete('/sessions/:sessionId', async (req, res) => {
         if (!ctx) return;
 
         const studentId = req.user && req.user.userId;
-        if (!studentId) {
-            return res.status(401).json({ success: false, message: 'Authentication required' });
-        }
-
         await ctx.db.collection('student_super_course_chat_sessions').updateOne(
             { sessionId: req.params.sessionId, studentId },
             { $set: { isDeleted: true, deletedAt: new Date() } }

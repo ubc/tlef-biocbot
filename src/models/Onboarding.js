@@ -50,20 +50,16 @@ async function upsertOnboarding(db, onboardingData) {
         updatedAt: now
     };
     
-    // Set createdAt only if it's a new document
-    if (!createdAt) {
-        document.createdAt = now;
-    } else {
-        document.createdAt = createdAt;
-    }
-    
     try {
         console.log('Attempting to upsert onboarding data for course:', courseId);
         console.log('Document to upsert:', document);
         
         const result = await collection.updateOne(
             { courseId },
-            { $set: document },
+            {
+                $set: document,
+                $setOnInsert: { createdAt: createdAt || now }
+            },
             { upsert: true }
         );
         

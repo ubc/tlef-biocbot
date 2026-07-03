@@ -545,13 +545,6 @@ router.delete('/:courseId/:studentId/sessions/:sessionId/own', async (req, res) 
     try {
         const { courseId, studentId, sessionId } = req.params;
         
-        if (!courseId || !studentId || !sessionId) {
-            return res.status(400).json({
-                success: false,
-                error: 'Course ID, Student ID, and Session ID are required'
-            });
-        }
-
         // Get authenticated user information
         const user = req.user;
         if (!user) {
@@ -650,13 +643,6 @@ router.delete('/:courseId/:studentId/sessions/:sessionId', async (req, res) => {
     try {
         const { courseId, studentId, sessionId } = req.params;
         
-        if (!courseId || !studentId || !sessionId) {
-            return res.status(400).json({
-                success: false,
-                error: 'Course ID, Student ID, and Session ID are required'
-            });
-        }
-
         const user = req.user;
         if (!user) {
             return res.status(401).json({
@@ -752,7 +738,7 @@ router.put('/:courseId/:studentId/sessions/:sessionId/title', async (req, res) =
         const { courseId, studentId, sessionId } = req.params;
         const { title } = req.body;
 
-        if (!courseId || !studentId || !sessionId || !title) {
+        if (!title) {
             return res.status(400).json({
                 success: false,
                 error: 'Course ID, Student ID, Session ID, and Title are required'

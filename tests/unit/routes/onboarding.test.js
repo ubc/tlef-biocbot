@@ -91,10 +91,19 @@ describe('POST / — create course from onboarding', () => {
         });
     });
 
-    test('reports an existing course as updated although only its key changes', async () => {
+    test('updates submitted onboarding fields for an existing owned course', async () => {
         const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1', courseName: 'Original' }] });
         const res = await request(app({ db, user: instructor })).post('/').send({ courseId: 'C1', courseName: 'Renamed', apiKey: 'sk-test' });
-        expect(res.body).toMatchObject({ message: 'Course updated successfully from onboarding', data: { created: false, modifiedCount: 0 } });
+        expect(res.body).toMatchObject({ message: 'Course updated successfully from onboarding', data: { created: false, modifiedCount: 1 } });
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).courseName).toBe('Renamed');
+    });
+
+    test('does not update an existing course owned by another instructor', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'other', courseName: 'Original' }] });
+
+        const res = await request(app({ db, user: instructor })).post('/').send({ courseId: 'C1', courseName: 'Renamed', apiKey: 'sk-test' });
+
+        expect(res.status).toBe(403);
         expect((await db.collection('courses').findOne({ courseId: 'C1' })).courseName).toBe('Original');
     });
 
@@ -267,11 +276,11 @@ describe('PUT /:courseId/unit-files', () => {
         expect((await request(app({ db: memoryDb({ courses: [{ ...course, instructorId: 'i1' }] }), user: student })).put('/C1/unit-files').send(payload)).status).toBe(403);
     });
 
-    test('reports success even when the named unit does not exist', async () => {
+    test('404 when the named unit does not exist', async () => {
         const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1', lectures: [] }] });
         const res = await request(app({ db, user: instructor })).put('/C1/unit-files').send({ unitName: 'Missing', files: ['a.pdf'] });
-        expect(res.status).toBe(200);
-        expect(res.body.data.modifiedCount).toBe(0);
+        expect(res.status).toBe(404);
+        expect(res.body.message).toBe('Unit not found');
     });
 
     test('503 without a db and 500 on update failure', async () => {

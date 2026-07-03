@@ -589,25 +589,11 @@ async function joinExistingCourse() {
         joinBtn.textContent = 'Joining Course...';
         joinBtn.disabled = true;
         
-        // Call the join course API
-        const response = await fetch(`/api/courses/${onboardingState.existingCourseId}/instructors`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({
-                instructorId: getCurrentInstructorId(),
-                code
-            })
+        const result = await BiocBotCourseJoin.joinInstructorCourse({
+            courseId: onboardingState.existingCourseId,
+            instructorId: getCurrentInstructorId(),
+            code
         });
-        
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || 'Failed to join course');
-        }
-        
-        const result = await response.json();
         console.log('✅ [ONBOARDING] Successfully joined course:', result);
         
         // Mark instructor's onboarding as complete since they joined an existing course

@@ -10,6 +10,8 @@
     "dev:client": "browser-sync start --proxy 'http://localhost:8050' --files 'public'",
     "diagnose": "node diagnose.js",
     "grant:system-admin": "node scripts/grant-system-admin.js",
+    "migrate:question-schema": "node scripts/migrate-question-schema.js",
+    "migrate:question-schema:apply": "node scripts/migrate-question-schema.js --apply",
     "test": "playwright test",
     "test:e2e": "playwright test",
     "test:a11y": "playwright test --config=playwright.a11y.config.js",

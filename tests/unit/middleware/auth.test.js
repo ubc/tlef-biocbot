@@ -690,7 +690,7 @@ describe('requireActiveCourseForNonInstructors', () => {
     });
 
     test('returns 500 when the course lookup throws', async () => {
-        jest.spyOn(CourseModel, 'getCourseById').mockRejectedValueOnce(new Error('boom'));
+        jest.spyOn(CourseModel, 'getCourseByIdIncludingDeleted').mockRejectedValueOnce(new Error('boom'));
         const res = makeRes();
         await m().requireActiveCourseForNonInstructors(makeReq({ user: { role: 'student' }, body: { courseId: 'C1' } }), res, next);
         expect(res.statusCode).toBe(500);

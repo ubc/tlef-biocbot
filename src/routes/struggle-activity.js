@@ -25,13 +25,6 @@ router.get('/student/:userId', async (req, res) => {
         const { userId } = req.params;
         const limit = parseInt(req.query.limit) || 50;
 
-        if (!userId) {
-            return res.status(400).json({
-                success: false,
-                message: 'User ID is required'
-            });
-        }
-
         if (req.user?.role === 'student' && req.user.userId !== userId) {
             return res.status(403).json({
                 success: false,
@@ -69,13 +62,6 @@ router.get('/persistence/:courseId', async (req, res) => {
     try {
         const { courseId } = req.params;
 
-        if (!courseId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Course ID is required'
-            });
-        }
-
         const db = req.app.locals.db;
 
         const topics = await PersistenceTopic.getPersistenceTopics(db, courseId);
@@ -107,13 +93,6 @@ router.get('/weekly/:courseId', async (req, res) => {
     try {
         const { courseId } = req.params;
         const weeks = parseInt(req.query.weeks) || 8;
-
-        if (!courseId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Course ID is required'
-            });
-        }
 
         const db = req.app.locals.db;
 
@@ -227,13 +206,6 @@ router.get('/:courseId', async (req, res) => {
         const { courseId } = req.params;
         const limit = parseInt(req.query.limit) || 100;
         const state = req.query.state; // Optional filter
-
-        if (!courseId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Course ID is required'
-            });
-        }
 
         const db = req.app.locals.db;
 

@@ -16,7 +16,7 @@ describe('QuizAttempt.saveAttempt', () => {
             lectureName: 'Unit 1', questionType: 'TF', studentAnswer: true, correct: true,
         });
         expect(res.success).toBe(true);
-        expect(res.attemptId).toMatch(/^qa_\d+_[a-z0-9]+$/);
+        expect(res.attemptId).toMatch(/^qa_[0-9a-f-]{36}$/i);
 
         const stored = await db.collection(COLL).findOne({ attemptId: res.attemptId });
         expect(stored).toMatchObject({ studentId: 's1', courseId: 'c1', correct: true, feedback: '' });

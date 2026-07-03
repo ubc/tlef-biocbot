@@ -20,14 +20,14 @@ function loadAssessmentQuestionsFromCourseData(courseData) {
             // Clear existing questions and add new ones
             assessmentQuestions[unit.name] = [];
             
-            // Convert database questions to local format
+            // Keep the API/storage question shape in local state.
             unit.assessmentQuestions.forEach(dbQuestion => {
                 const localQuestion = {
                     id: dbQuestion.questionId,
                     questionId: dbQuestion.questionId,
-                    type: dbQuestion.questionType,
+                    questionType: dbQuestion.questionType,
                     question: dbQuestion.question,
-                    answer: dbQuestion.correctAnswer,
+                    correctAnswer: dbQuestion.correctAnswer,
                     options: dbQuestion.options || {},
                     learningObjective: dbQuestion.learningObjective || ''
                 };
@@ -89,15 +89,15 @@ async function loadAssessmentQuestions() {
                     // Clear existing questions first to prevent duplicates
                     assessmentQuestions[lectureName] = [];
                     
-                    // Convert database questions to local format
+                    // Keep the API/storage question shape in local state.
                     questions.forEach((dbQuestion, index) => {
                         console.log(`❓ [ASSESSMENT_QUESTIONS] Converting question ${index + 1} for ${lectureName}:`, dbQuestion);
                         const localQuestion = {
                             id: dbQuestion.questionId,
                             questionId: dbQuestion.questionId,
-                            type: dbQuestion.questionType,
+                            questionType: dbQuestion.questionType,
                             question: dbQuestion.question,
-                            answer: dbQuestion.correctAnswer,
+                            correctAnswer: dbQuestion.correctAnswer,
                             options: dbQuestion.options || {},
                             learningObjective: dbQuestion.learningObjective || ''
                         };
@@ -861,10 +861,10 @@ async function saveQuestion() {
         const savedQuestion = {
             id: result.data.questionId,
             questionId: result.data.questionId,
-            type: question.questionType,
+            questionType: question.questionType,
             question: question.question,
-            answer: question.correctAnswer,
-            options: question.options || {},
+            correctAnswer: wireCorrectAnswer,
+            options: wireOptions,
             learningObjective: question.learningObjective || ''
         };
         
@@ -912,14 +912,14 @@ async function reloadQuestionsForUnit(unitName) {
             // Clear existing questions and add new ones
             assessmentQuestions[unitName] = [];
             
-            // Convert database questions to local format
+            // Keep the API/storage question shape in local state.
             questions.forEach(dbQuestion => {
                 const localQuestion = {
                     id: dbQuestion.questionId,
                     questionId: dbQuestion.questionId,
-                    type: dbQuestion.questionType,
+                    questionType: dbQuestion.questionType,
                     question: dbQuestion.question,
-                    answer: dbQuestion.correctAnswer,
+                    correctAnswer: dbQuestion.correctAnswer,
                     options: dbQuestion.options || {},
                     learningObjective: dbQuestion.learningObjective || ''
                 };
@@ -961,10 +961,11 @@ function updateQuestionsDisplay(week) {
     
     let html = '';
     questions.forEach((question, index) => {
+        const questionType = question.questionType || question.type;
         html += `
             <div class="question-item" data-question-id="${question.questionId || question.id}">
                 <div class="question-header">
-                    <span class="question-type-badge ${question.type}">${getQuestionTypeLabel(question.type)}</span>
+                    <span class="question-type-badge ${questionType}">${getQuestionTypeLabel(questionType)}</span>
                     <span class="question-number">Question ${index + 1}</span>
                     <div class="question-action-buttons">
                         <button class="edit-question-btn" onclick="openQuestionLearningObjectiveModal('${week}', '${question.questionId || question.id}')" title="Edit learning objective">✎</button>
@@ -1042,17 +1043,26 @@ function getQuestionTypeLabel(type) {
  * @returns {string} HTML string
  */
 function getQuestionAnswerDisplay(question) {
-    if (question.type === 'true-false') {
-        return `<p class="answer-preview"><strong>Answer:</strong> ${question.answer === 'true' ? 'True' : 'False'}</p>`;
-    } else if (question.type === 'multiple-choice') {
+    const questionType = question.questionType || question.type;
+    const answer = Object.prototype.hasOwnProperty.call(question, 'correctAnswer')
+        ? question.correctAnswer
+        : question.answer;
+
+    if (questionType === 'true-false') {
+        const isTrue = answer === true || String(answer).toLowerCase() === 'true';
+        return `<p class="answer-preview"><strong>Answer:</strong> ${isTrue ? 'True' : 'False'}</p>`;
+    } else if (questionType === 'multiple-choice') {
         let optionsHtml = '';
-        Object.entries(question.options).forEach(([key, value]) => {
-            const isCorrect = key === question.answer;
+        const entries = Array.isArray(question.options)
+            ? question.options.map((value, index) => [String.fromCharCode(65 + index), value])
+            : Object.entries(question.options || {});
+        entries.forEach(([key, value], index) => {
+            const isCorrect = typeof answer === 'number' ? index === answer : key === answer;
             optionsHtml += `<span class="mcq-option-preview ${isCorrect ? 'correct' : ''}">${key}) ${value}</span>`;
         });
         return `<div class="mcq-preview">${optionsHtml}</div>`;
-    } else if (question.type === 'short-answer') {
-        return `<p class="answer-preview"><strong>Expected:</strong> ${question.answer}</p>`;
+    } else if (questionType === 'short-answer') {
+        return `<p class="answer-preview"><strong>Expected:</strong> ${answer}</p>`;
     }
     return '';
 }

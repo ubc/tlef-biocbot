@@ -36,21 +36,23 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **✅ Phase 1 — DONE.** Defensive `String(...)` coercion in `quiz.js:211` and
   `chat.js:1319` so the comparison works regardless of which shape is in the DB.
   Stops the runtime crash. Both shapes compare correctly today.
-- **Phase 2a — fix `POST /api/questions` validation** so structured falsy
-  answers are accepted. Today `src/routes/questions.js:178` rejects boolean
-  `false` and numeric `0` because it checks `!correctAnswer`.
-- **Phase 2b — fix the save paths** to write the structured shape:
+- **✅ Phase 2a — DONE.** `POST /api/questions` uses an explicit presence check,
+  so structured `false` and numeric `0` answers are accepted.
+- **✅ Phase 2b — DONE.** Both save paths write the structured shape:
   `instructor.js` `saveQuestion()` and onboarding's
   `saveUnit1AssessmentQuestion()` should both send TF→boolean,
   MCQ options→array, MCQ correctAnswer→numeric index.
   Existing failing tests in `tests/e2e/instructor.spec.js` turn green.
-- **Phase 3a — Mongo migration script** in `scripts/` to convert
-  instructor-created questions already in the DB to the structured shape.
-- **Phase 3b — clean up `student.js`** dual-shape branches at lines 2200, 2213,
+- **✅ Phase 3a — SCRIPT READY.** `scripts/migrate-question-schema.js` converts
+  existing TF and MCQ values. `npm run migrate:question-schema` is a dry run;
+  `npm run migrate:question-schema:apply` persists the migration.
+- **Phase 3b — DEPLOYMENT FOLLOW-UP.** Clean up the student dual-shape branches
+  only after the migration has been applied in every deployed database. Until
+  then they intentionally preserve compatibility with legacy records.
   2216–2221, and update its wire protocol so MCQ submits numeric index instead
   of letter.
-- **Phase 4 — student-side spec** that exercises `/api/quiz/check-answer`
-  end-to-end and would have caught Finding #4 originally.
+- **✅ Phase 4 — DONE.** Quiz API specs exercise server-side `/check-answer`
+  evaluation, visibility gates, and structured objective answers.
 
 ---
 
@@ -118,15 +120,17 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **Why it matters:** Footgun. Every new caller has to know to filter; some will forget. Better to make the helper enforce the invariant.
 - **Fix:** Either (a) make `getCourseById` filter soft-deleted by default with an explicit `{ includeDeleted: true }` opt-in, or (b) introduce `getActiveCourseById` and a separate `getCourseByIdIncludingDeleted` so the choice is explicit at the call site.
 
-### 8. In-memory question shape differs between `onboarding.js` and `instructor.js`
+### 8. ✅ FIXED — In-memory question shape differed between onboarding and instructor flows
 
 - **Where:**
   - `onboarding.js` line 2243: builds `{ id: Date.now(), type: questionType, question, learningObjective, ... }`
   - `instructor.js` line 4194: builds `{ questionType, question, learningObjective, ... }` (no `id`, uses `questionType` directly)
 - **Symptom:** Two different in-memory schemas for the same conceptual object. The wire protocol (POST `/api/questions`) and storage (`questionType`, `questionId`) use a third schema, so both client paths have to translate. Drift-prone — if one path's translation breaks, the other might mask it.
-- **Fix:** Pick one in-memory shape (probably matching what the API expects: `questionType`, no separate `id` since the server assigns `questionId`). Consider extracting a shared `buildQuestionPayload(formInputs)` helper used by both pages.
+- **Now:** Both flows retain `questionType`, structured `options`, and structured
+  `correctAnswer` in local state and at the API boundary. Onboarding retains a
+  temporary UI `id` only until the server supplies `questionId`.
 
-### 8a. Onboarding's final assessment save undoes its structured modal shape
+### 8a. ✅ FIXED — Onboarding's final assessment save undid its structured modal shape
 
 - **Where:** `public/instructor/scripts/onboarding.js` line 3676,
   especially lines 3711-3723 and 3741-3744.
@@ -137,15 +141,17 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **Why it matters:** It is easy to write an e2e assertion against the modal
   state and think onboarding has been fixed, while the database still receives
   the legacy shape.
-- **Fix:** Delete this conversion once the API accepts the structured contract.
+- **Now:** The final POST preserves booleans, ordered arrays, and numeric indexes;
+  focused browser tests assert the transmitted payload.
 
-### 9. Quiz `/check-answer` and chat `/check-practice-answer` are parallel implementations with divergent contracts
+### 9. ✅ FIXED — Quiz and chat duplicated objective-answer evaluation
 
 - **Where:**
   - `src/routes/quiz.js` `POST /check-answer` — requires `{ courseId, questionId, lectureName, studentAnswer }`. Looks up the question via `CourseModel.getAssessmentQuestions`.
   - `src/routes/chat.js` line 1281 — requires `{ practiceId, studentAnswer }`. Looks up the question from an in-memory store keyed by `practiceId`.
 - **Symptom:** Same conceptual operation ("check this student's answer to this question") implemented two ways with different request shapes, different lookup mechanisms, different response payloads, and different error handling. They both have the (now-fixed) string-comparison logic; future bugs fixed in one won't propagate to the other.
-- **Fix:** Extract a shared `evaluateObjectiveAnswer(question, studentAnswer)` utility that both routes call. Keep the two endpoints (they serve different UIs / lookup paths) but the core logic should live in one place.
+- **Now:** The endpoints keep their distinct lookup/request contracts but call
+  the shared `src/services/objectiveAnswer.js` evaluator.
 
 ### 9b. ✅ FIXED — 🔒 `/api/quiz/check-answer` bypassed quiz visibility gates
 
@@ -282,7 +288,7 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **Why it matters:** Future engineer adding "what's the publish status?" has to remember whether this concept uses a boolean or a string. Easy to query incorrectly.
 - **Fix:** Pick one per concept type and document. State machines (multiple values) → string enum. Binary states (truly two values forever) → boolean. Audit current fields and migrate any that don't fit.
 
-### 21. `POST /api/questions` rejects valid structured answers that are falsy
+### 21. ✅ FIXED — `POST /api/questions` rejected valid structured falsy answers
 
 - **Where:** `src/routes/questions.js` line 178.
 - **Symptom:** The required-field check uses `!correctAnswer`. That means a
@@ -291,10 +297,10 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   onboarding POST string-y values such as `"false"` and `"A"`.
 - **Failing test to add:** API-level or e2e test that creates a TF question with
   `correctAnswer: false`, and an MCQ with `correctAnswer: 0`.
-- **Fix:** Check presence instead:
-  `correctAnswer === undefined || correctAnswer === null || correctAnswer === ''`.
+- **Now:** The route checks presence explicitly and unit/E2E coverage includes
+  boolean `false` and numeric index `0`.
 
-### 22. `instructor.js` display helpers assume the legacy string-y shape
+### 22. ✅ FIXED — Instructor display helpers assumed the legacy string-y shape
 
 - **Where:** `public/instructor/scripts/instructor.js` lines 4504-4513.
 - **Symptom:** TF display checks `question.answer === 'true'`, so a boolean
@@ -303,8 +309,8 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   render index labels and no correct highlight.
 - **Why it matters:** After storage is standardized, tests may pass at the DB
   level but fail visually unless display normalization is updated too.
-- **Fix:** Normalize question objects at the page boundary, then render from one
-  shape.
+- **Now:** Local state uses the API/storage shape, while the display helper can
+  safely render structured arrays/indexes and legacy records during migration.
 
 ### 23. ✅ FIXED — Question routes trust body `instructorId` and do not check course access
 
@@ -569,7 +575,7 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   "DELETE on existing course/lecture but unknown questionId → success with
   deletedCount=0".
 
-### 35. `PUT /api/questions/:questionId` silently creates when the question does not exist
+### 35. ✅ FIXED — `PUT /api/questions/:questionId` silently creates when the question does not exist
 
 - **Where:** `src/routes/questions.js` PUT handler (line 519-579) →
   `src/models/Course.js` `updateAssessmentQuestions` (line 499-587).
@@ -587,9 +593,14 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **Failing test:** `tests/e2e/questions-api-ownership-branches.spec.js` ›
   "PRODUCT BUG (FINDING #35): PUT on an unknown questionId silently creates
   a new question".
-- **Fix:** In the PUT handler, look up the question first (or have the model
-  surface `created` truthy and reject it on the PUT path) and return 404 when
-  the question does not exist. Bulk insertion / create stays the POST path.
+- **Now:** PUT calls `updateAssessmentQuestions` with `requireExisting: true`.
+  The model returns a not-found result instead of entering its create branch,
+  and its conditional update filter also prevents a concurrent deletion from
+  being reported as a successful update. The route maps that result to 404.
+  POST and bulk insertion retain the model's create behavior.
+- **Regression coverage:** `tests/unit/routes/questions.test.js` verifies the
+  HTTP 404, while `tests/unit/models/Course.db.test.js` verifies that strict
+  update mode does not insert the missing question.
 
 ### 36. ✅ FIXED — 🔒 `DELETE /api/flags/:flagId` has no role gate or ownership check
 

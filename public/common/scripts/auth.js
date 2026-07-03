@@ -289,6 +289,22 @@ function getCurrentUser() {
     return currentUser;
 }
 
+function waitForCurrentUser(timeoutMs = 5000) {
+    if (currentUser) return Promise.resolve(currentUser);
+
+    return new Promise(resolve => {
+        let settled = false;
+        const finish = user => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
+            resolve(user || currentUser || null);
+        };
+        const timeoutId = setTimeout(() => finish(null), timeoutMs);
+        document.addEventListener('auth:ready', event => finish(event.detail), { once: true });
+    });
+}
+
 /**
  * Check if current user has system administrator access
  * @returns {boolean} True if user is a system admin

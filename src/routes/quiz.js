@@ -14,6 +14,7 @@ const prompts = require('../services/prompts');
 const BadWordsFilter = require('bad-words');
 const { resolveCourseAi, sendLlmKeyError } = require('./llmKeyMiddleware');
 const { publicKeySummary } = require('../services/llmKeyStore');
+const { evaluateObjectiveAnswer } = require('../services/objectiveAnswer');
 const profanityFilter = new BadWordsFilter();
 
 router.use(express.json());
@@ -137,15 +138,6 @@ async function getVisibleQuizQuestion(db, courseId, lectureName, questionId) {
 
 function isObjectiveQuestion(question) {
     return question.questionType === 'multiple-choice' || question.questionType === 'true-false';
-}
-
-function evaluateObjectiveAnswer(question, studentAnswer) {
-    const correct = String(studentAnswer).toLowerCase() === String(question.correctAnswer).toLowerCase();
-    const feedback = correct
-        ? 'Correct! Well done.'
-        : `Incorrect. The correct answer is ${question.correctAnswer}.`;
-
-    return { correct, feedback, correctAnswer: question.correctAnswer };
 }
 
 /**

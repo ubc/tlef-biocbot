@@ -9,6 +9,7 @@ const bcrypt = require('bcryptjs');
 const StruggleActivity = require('./StruggleActivity');
 const PersistenceTopic = require('./PersistenceTopic');
 const { applyAccessState, normalizeEmail } = require('../services/authorization');
+const { createId } = require('../services/id');
 
 /**
  * User Schema Structure:
@@ -48,10 +49,6 @@ function getUsersCollection(db) {
 function toSessionUser(user) {
     const resolvedUser = applyAccessState(user);
 
-    if (!resolvedUser) {
-        return null;
-    }
-
     return {
         userId: resolvedUser.userId,
         username: resolvedUser.username,
@@ -80,7 +77,7 @@ async function createUser(db, userData) {
     const now = new Date();
     
     // Generate unique user ID
-    const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const userId = createId('user');
     
     // Hash password if provided (for basic auth)
     let passwordHash = null;
@@ -459,7 +456,7 @@ async function createOrGetSAMLUser(db, samlData) {
     
     // Create new SAML user
     const now = new Date();
-    const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const userId = createId('user');
     
     const user = {
         userId,

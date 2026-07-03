@@ -41,7 +41,7 @@ describe('Question.createQuestion', () => {
             isActive: true,
             _id: 'mem-1',
         });
-        expect(created.questionId).toMatch(/^q_\d+_[a-z0-9]+$/);
+        expect(created.questionId).toMatch(/^q_[0-9a-f-]{36}$/i);
         expect(created.createdAt).toBeInstanceOf(Date);
         expect(created.updatedAt).toBeInstanceOf(Date);
 
@@ -214,8 +214,8 @@ describe('Question.bulkCreateQuestions', () => {
         expect(stored).toHaveLength(2);
         expect(stored[0]).toMatchObject({ question: 'A?', isActive: true });
         expect(stored[1]).toMatchObject({ question: 'B?', isActive: true });
-        expect(stored[0].questionId).toMatch(/^q_\d+_[a-z0-9]+$/);
-        expect(stored[1].questionId).toMatch(/^q_\d+_[a-z0-9]+$/);
+        expect(stored[0].questionId).toMatch(/^q_[0-9a-f-]{36}$/i);
+        expect(stored[1].questionId).toMatch(/^q_[0-9a-f-]{36}$/i);
         expect(stored[0].createdAt).toBeInstanceOf(Date);
         expect(stored[0].updatedAt).toBeInstanceOf(Date);
         expect(stored[1].createdAt.getTime()).toBe(stored[0].createdAt.getTime());

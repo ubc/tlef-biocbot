@@ -48,6 +48,7 @@ describe('POST /login (pre-Passport branches only)', () => {
         const res = await request(app({ db: memoryDb({}) })).post('/login').send({ username: 'only-user' });
         expect(res.status).toBe(400);
         expect(res.body.error).toMatch(/required/i);
+        expect(res.body.message).toBe(res.body.error);
     });
 });
 

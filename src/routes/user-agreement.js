@@ -11,6 +11,9 @@ router.get('/status', async (req, res) => {
         console.log('🔍 [AGREEMENT] Status check - req.app.locals:', req.app.locals);
         console.log('🔍 [AGREEMENT] Status check - db:', req.app.locals.db);
         
+        if (!req.user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
         const { userId, role } = req.user;
         const db = req.app.locals.db;
         
@@ -55,6 +58,9 @@ router.post('/agree', async (req, res) => {
         console.log('📝 [AGREEMENT] req.app.locals:', req.app.locals);
         console.log('📝 [AGREEMENT] db:', req.app.locals.db);
         
+        if (!req.user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
         const { userId, role } = req.user;
         const { agreementVersion = '1.0' } = req.body || {};
         const db = req.app.locals.db;

@@ -1016,6 +1016,7 @@ test.describe('student.js compact browser harness', () => {
         });
 
         await expect(page.locator('#course-select')).toBeVisible();
+        await expect(page.locator('#course-selection-host > #course-selection-wrapper')).toHaveCount(1);
         await page.locator('#course-select').click();
         await page.locator('#course-select').selectOption('JOINABLE');
         await expect.poll(() => page.evaluate(() => /** @type {any} */ (window).__prompts.length)).toBe(1);

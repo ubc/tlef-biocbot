@@ -5,7 +5,6 @@
  */
 
 const express = require('express');
-const crypto = require('crypto');
 const path = require('path');
 const router = express.Router();
 const LLMService = require('../services/llm');
@@ -21,12 +20,15 @@ const User = require('../models/User');
 const MentalHealthFlag = require('../models/MentalHealthFlag');
 const gridfs = require('../services/gridfs');
 const { resolveCourseAi, sendLlmKeyError } = require('./llmKeyMiddleware');
+const { evaluateObjectiveAnswer } = require('../services/objectiveAnswer');
+const { createId } = require('../services/id');
 
 function generateChatMessageId() {
-    if (typeof crypto.randomUUID === 'function') {
-        return `msg_${crypto.randomUUID()}`;
-    }
-    return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    return createId('msg');
+}
+
+function normalizeQdrantSearchResults(results) {
+    return Array.isArray(results) ? results : [];
 }
 
 /**
@@ -1241,13 +1243,15 @@ router.post('/', async (req, res) => {
         let searchResults;
         if (course.additionalMaterialSecondarySearch === true) {
             searchResults = await qdrant.searchDocuments(message, { courseId, lectureNames, excludeAdditionalMaterials: true }, ragSettings.student.topK);
-            if (!searchResults || searchResults.length === 0) {
+            if (!Array.isArray(searchResults) || searchResults.length === 0) {
                 console.log('🔎 [CHAT_RAG] No chunks found in main materials; falling back to additional materials');
                 searchResults = await qdrant.searchDocuments(message, { courseId, lectureNames, additionalMaterialsOnly: true }, ragSettings.student.topK);
             }
         } else {
             searchResults = await qdrant.searchDocuments(message, { courseId, lectureNames }, ragSettings.student.topK);
         }
+
+        searchResults = normalizeQdrantSearchResults(searchResults);
 
         // Log summary of results by lecture to validate scope
         try {
@@ -1870,7 +1874,7 @@ router.post('/practice-question', async (req, res) => {
         }
 
         // Store correct answer server-side, keyed by a temp ID
-        const practiceId = `pq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const practiceId = createId('pq');
         practiceQuestionStore.set(practiceId, {
             courseId,
             correctAnswer: generated.correctAnswer,
@@ -1939,18 +1943,13 @@ router.post('/check-practice-answer', async (req, res) => {
                 }
             });
         } else {
-            // MCQ or TF — simple string comparison
-            const correct = studentAnswer.trim().toLowerCase() === correctAnswer.trim().toLowerCase();
-            const feedback = correct
-                ? 'Correct! Well done.'
-                : `Incorrect. The correct answer is ${correctAnswer}.`;
+            const evaluated = evaluateObjectiveAnswer({ correctAnswer }, studentAnswer);
 
             return res.json({
                 success: true,
                 data: {
-                    correct,
-                    feedback: feedback + (explanation ? ` ${explanation}` : ''),
-                    correctAnswer: correctAnswer
+                    ...evaluated,
+                    feedback: evaluated.feedback + (explanation ? ` ${explanation}` : '')
                 }
             });
         }

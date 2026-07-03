@@ -17,7 +17,7 @@ describe('SuperChatNote constants', () => {
 
 describe('SuperChatNote.generateNoteId', () => {
     test('matches the note_<timestamp>_<random> shape', () => {
-        expect(SuperChatNote.generateNoteId()).toMatch(/^note_\d+_[a-z0-9]+$/);
+        expect(SuperChatNote.generateNoteId()).toMatch(/^note_[0-9a-f-]{36}$/i);
     });
 });
 
@@ -87,7 +87,7 @@ describe('SuperChatNote.createNote', () => {
             isDeleted: false,
             deletedAt: null,
         });
-        expect(note.noteId).toMatch(/^note_\d+_/);
+        expect(note.noteId).toMatch(/^note_[0-9a-f-]{36}$/i);
         expect(note.createdAt).toBeInstanceOf(Date);
 
         const stored = await db.collection(COLL).findOne({ noteId: note.noteId });
