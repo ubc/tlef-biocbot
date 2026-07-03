@@ -444,7 +444,9 @@ test.describe('home.css harness coverage', () => {
         await expect(page.locator('.info-icon').first()).toHaveCSS('border-radius', '50%');
         await page.locator('.info-icon').first().hover();
         await expect(page.locator('.info-icon').first()).toHaveCSS('background-color', 'rgb(222, 226, 230)');
-        await expect(pseudoStyle(page.locator('.tooltip').first(), '::after', 'visibility')).resolves.toBe('visible');
+        // Poll: visibility transitions over 0.2s, so a one-shot read can catch
+        // the pseudo-element while it still computes as hidden.
+        await expect.poll(() => pseudoStyle(page.locator('.tooltip').first(), '::after', 'visibility')).toBe('visible');
 
         await expect(page.locator('.struggle-topic-item')).toHaveCSS('overflow', 'hidden');
         await expect(page.locator('.topic-header')).toHaveCSS('cursor', 'pointer');
