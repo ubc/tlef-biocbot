@@ -24,6 +24,18 @@ const quizRouter = require('../../../src/routes/quiz');
 
 const student = { userId: 's1', role: 'student' };
 const app = (opts) => makeRouteApp(quizRouter, opts);
+const materialCourse = (overrides = {}) => ({
+    courseId: 'C1',
+    quizSettings: { enabled: true, testableUnits: 'all', allowLectureMaterialAccess: true },
+    lectures: [{ name: 'Unit 1', isPublished: true }],
+    ...overrides,
+});
+const materialDocument = (overrides = {}) => ({
+    documentId: 'd1',
+    courseId: 'C1',
+    lectureName: 'Unit 1',
+    ...overrides,
+});
 
 beforeAll(() => {
     jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -106,16 +118,33 @@ describe('GET /materials', () => {
     });
 
     test('403 when lecture material access is disabled', async () => {
-        const db = memoryDb({ courses: [{ courseId: 'C1', quizSettings: { enabled: true, allowLectureMaterialAccess: false } }] });
+        const db = memoryDb({ courses: [materialCourse({
+            quizSettings: { enabled: true, testableUnits: 'all', allowLectureMaterialAccess: false },
+        })] });
         const res = await request(app({ db, user: student })).get('/materials?courseId=C1&lectureName=Unit 1');
         expect(res.status).toBe(403);
     });
 
+    test.each([
+        ['an unpublished lecture', [{ name: 'Unit 1', isPublished: false }], 'all'],
+        ['a lecture outside testableUnits', [{ name: 'Unit 1', isPublished: true }], ['Unit 2']],
+    ])('403 for %s', async (_description, lectures, testableUnits) => {
+        const db = memoryDb({ courses: [materialCourse({
+            lectures,
+            quizSettings: { enabled: true, testableUnits, allowLectureMaterialAccess: true },
+        })] });
+
+        const res = await request(app({ db, user: student })).get('/materials?courseId=C1&lectureName=Unit 1');
+
+        expect(res.status).toBe(403);
+        expect(res.body.message).toBe('Quiz material is not available');
+    });
+
     test('200 lists the lecture\'s documents', async () => {
         const db = memoryDb({
-            courses: [{ courseId: 'C1', quizSettings: { enabled: true, allowLectureMaterialAccess: true } }],
+            courses: [materialCourse()],
             documents: [
-                { documentId: 'd1', courseId: 'C1', lectureName: 'Unit 1', originalName: 'slides.pdf', mimeType: 'application/pdf', size: 100, documentType: 'lecture' },
+                materialDocument({ originalName: 'slides.pdf', mimeType: 'application/pdf', size: 100, documentType: 'lecture' }),
                 { documentId: 'd2', courseId: 'C1', lectureName: 'Unit 2', originalName: 'other.pdf' }, // different lecture
             ],
         });
@@ -127,19 +156,19 @@ describe('GET /materials', () => {
 
     test('503 without a DB and converts a missing document list to an empty list', async () => {
         expect((await request(app({ db: null })).get('/materials?courseId=C1&lectureName=Unit')).status).toBe(503);
-        const db = memoryDb({ courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }] });
+        const db = memoryDb({ courses: [materialCourse()] });
         const spy = jest.spyOn(DocumentModel, 'getDocumentsForLecture').mockResolvedValue(null);
-        expect((await request(app({ db })).get('/materials?courseId=C1&lectureName=Unit')).body.materials).toEqual([]);
+        expect((await request(app({ db })).get('/materials?courseId=C1&lectureName=Unit 1')).body.materials).toEqual([]);
         spy.mockRestore();
     });
 
     test('handles key errors and ordinary document lookup failures', async () => {
-        const db = memoryDb({ courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }] });
+        const db = memoryDb({ courses: [materialCourse()] });
         const spy = jest.spyOn(DocumentModel, 'getDocumentsForLecture').mockRejectedValue(new Error('boom'));
         sendLlmKeyError.mockImplementationOnce((res) => { res.status(401).json({ success: false }); return true; });
-        expect((await request(app({ db })).get('/materials?courseId=C1&lectureName=Unit')).status).toBe(401);
+        expect((await request(app({ db })).get('/materials?courseId=C1&lectureName=Unit 1')).status).toBe(401);
         sendLlmKeyError.mockReturnValueOnce(false);
-        expect((await request(app({ db })).get('/materials?courseId=C1&lectureName=Unit')).status).toBe(500);
+        expect((await request(app({ db })).get('/materials?courseId=C1&lectureName=Unit 1')).status).toBe(500);
         spy.mockRestore();
     });
 });
@@ -147,16 +176,36 @@ describe('GET /materials', () => {
 describe('GET /materials/:documentId/download', () => {
     test('validates course, settings, and document ownership', async () => {
         expect((await request(app({ db: memoryDb({}) })).get('/materials/d1/download')).status).toBe(400);
-        const disabled = memoryDb({ courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: false } }] });
+        const disabled = memoryDb({ courses: [materialCourse({
+            quizSettings: { enabled: true, testableUnits: 'all', allowLectureMaterialAccess: false },
+        })] });
         expect((await request(app({ db: disabled })).get('/materials/d1/download?courseId=C1')).status).toBe(403);
-        const missing = memoryDb({ courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }], documents: [] });
+        const missing = memoryDb({ courses: [materialCourse()], documents: [] });
         expect((await request(app({ db: missing })).get('/materials/d1/download?courseId=C1')).status).toBe(404);
+    });
+
+    test.each([
+        ['an unpublished lecture', [{ name: 'Unit 1', isPublished: false }], 'all'],
+        ['a lecture outside testableUnits', [{ name: 'Unit 1', isPublished: true }], ['Unit 2']],
+    ])('403 when the document belongs to %s', async (_description, lectures, testableUnits) => {
+        const db = memoryDb({
+            courses: [materialCourse({
+                lectures,
+                quizSettings: { enabled: true, testableUnits, allowLectureMaterialAccess: true },
+            })],
+            documents: [materialDocument({ contentType: 'text', content: 'hidden' })],
+        });
+
+        const res = await request(app({ db })).get('/materials/d1/download?courseId=C1');
+
+        expect(res.status).toBe(403);
+        expect(res.body.message).toBe('Quiz material is not available');
     });
 
     test('downloads text with a safe inferred extension', async () => {
         const db = memoryDb({
-            courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }],
-            documents: [{ documentId: 'd1', courseId: 'C1', contentType: 'text', originalName: '../Notes', mimeType: 'text/plain', content: 'ATP content' }],
+            courses: [materialCourse()],
+            documents: [materialDocument({ contentType: 'text', originalName: '../Notes', mimeType: 'text/plain', content: 'ATP content' })],
         });
         const res = await request(app({ db })).get('/materials/d1/download?courseId=C1');
         expect(res.status).toBe(200);
@@ -166,13 +215,13 @@ describe('GET /materials/:documentId/download', () => {
 
     test('downloads legacy inline binary and rejects malformed data', async () => {
         let db = memoryDb({
-            courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }],
-            documents: [{ documentId: 'd1', courseId: 'C1', contentType: 'file', originalName: 'slides.pdf', mimeType: 'application/pdf', fileData: { buffer: [1, 2, 3] } }],
+            courses: [materialCourse()],
+            documents: [materialDocument({ contentType: 'file', originalName: 'slides.pdf', mimeType: 'application/pdf', fileData: { buffer: [1, 2, 3] } })],
         });
         expect((await request(app({ db })).get('/materials/d1/download?courseId=C1')).status).toBe(200);
         db = memoryDb({
-            courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }],
-            documents: [{ documentId: 'd1', courseId: 'C1', contentType: 'file', originalName: 'bad.pdf', fileData: {} }],
+            courses: [materialCourse()],
+            documents: [materialDocument({ contentType: 'file', originalName: 'bad.pdf', fileData: {} })],
         });
         expect((await request(app({ db })).get('/materials/d1/download?courseId=C1')).status).toBe(500);
     });
@@ -183,8 +232,8 @@ describe('GET /materials/:documentId/download', () => {
         ['application/rtf', '.rtf'], ['application/x-unknown', ''],
     ])('infers a safe filename for %s', async (mimeType, extension) => {
         const db = memoryDb({
-            courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }],
-            documents: [{ documentId: 'd1', courseId: 'C1', contentType: 'text', mimeType, content: 'x' }],
+            courses: [materialCourse()],
+            documents: [materialDocument({ contentType: 'text', mimeType, content: 'x' })],
         });
         const res = await request(app({ db })).get('/materials/d1/download?courseId=C1');
         expect(res.headers['content-disposition']).toContain(`quiz-material-d1${extension}`);
@@ -192,17 +241,17 @@ describe('GET /materials/:documentId/download', () => {
 
     test('prefers a stored filename extension and sanitizes unicode and quotes', async () => {
         const db = memoryDb({
-            courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }],
-            documents: [{ documentId: 'd1', courseId: 'C1', contentType: 'text', originalName: '../r\u00e9sum\u00e9"', filename: '../actual.pdf', content: '' }],
+            courses: [materialCourse()],
+            documents: [materialDocument({ contentType: 'text', originalName: '../r\u00e9sum\u00e9"', filename: '../actual.pdf', content: '' })],
         });
         const res = await request(app({ db })).get('/materials/d1/download?courseId=C1');
         expect(res.headers['content-disposition']).toContain('filename="actual.pdf"');
     });
 
     test('downloads a Buffer with the default binary MIME type', async () => {
-        const db = memoryDb({ courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }] });
+        const db = memoryDb({ courses: [materialCourse()] });
         const spy = jest.spyOn(DocumentModel, 'getDocumentById').mockResolvedValue({
-            documentId: 'd1', courseId: 'C1', contentType: 'file', filename: 'blob.bin', fileData: Buffer.from('abc'),
+            documentId: 'd1', courseId: 'C1', lectureName: 'Unit 1', contentType: 'file', filename: 'blob.bin', fileData: Buffer.from('abc'),
         });
         const res = await request(app({ db })).get('/materials/d1/download?courseId=C1');
         expect(res.status).toBe(200);
@@ -214,8 +263,8 @@ describe('GET /materials/:documentId/download', () => {
         const { Readable } = require('stream');
         gridfs.openDownloadStream.mockReturnValueOnce(Readable.from([Buffer.from('grid')]));
         const db = memoryDb({
-            courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }],
-            documents: [{ documentId: 'd1', courseId: 'C1', contentType: 'file', filename: 'grid.bin', fileId: 'f1' }],
+            courses: [materialCourse()],
+            documents: [materialDocument({ contentType: 'file', filename: 'grid.bin', fileId: 'f1' })],
         });
         const res = await request(app({ db })).get('/materials/d1/download?courseId=C1');
         expect(res.status).toBe(200);
@@ -228,8 +277,8 @@ describe('GET /materials/:documentId/download', () => {
             read() { this.destroy(new Error('missing')); },
         }));
         const db = memoryDb({
-            courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }],
-            documents: [{ documentId: 'd1', courseId: 'C1', contentType: 'file', filename: 'grid.bin', fileId: 'f1' }],
+            courses: [materialCourse()],
+            documents: [materialDocument({ contentType: 'file', filename: 'grid.bin', fileId: 'f1' })],
         });
         const res = await request(app({ db })).get('/materials/d1/download?courseId=C1');
         expect(res.status).toBe(500);
@@ -247,15 +296,15 @@ describe('GET /materials/:documentId/download', () => {
             },
         }));
         const db = memoryDb({
-            courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }],
-            documents: [{ documentId: 'd1', courseId: 'C1', contentType: 'file', filename: 'grid.bin', fileId: 'f1' }],
+            courses: [materialCourse()],
+            documents: [materialDocument({ contentType: 'file', filename: 'grid.bin', fileId: 'f1' })],
         });
         await request(app({ db })).get('/materials/d1/download?courseId=C1').catch(() => {});
     });
 
     test('503 without a DB and handles key and ordinary download failures', async () => {
         expect((await request(app({ db: null })).get('/materials/d1/download?courseId=C1')).status).toBe(503);
-        const db = memoryDb({ courses: [{ courseId: 'C1', quizSettings: { allowLectureMaterialAccess: true } }] });
+        const db = memoryDb({ courses: [materialCourse()] });
         const spy = jest.spyOn(DocumentModel, 'getDocumentById').mockRejectedValue(new Error('boom'));
         sendLlmKeyError.mockImplementationOnce((res) => { res.status(401).json({ success: false }); return true; });
         expect((await request(app({ db })).get('/materials/d1/download?courseId=C1')).status).toBe(401);

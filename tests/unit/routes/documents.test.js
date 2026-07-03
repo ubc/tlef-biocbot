@@ -272,12 +272,10 @@ describe('POST /:documentId/extract-questions', () => {
         expect(resolveCourseAi).toHaveBeenCalled();
     });
 
-    test('currently allows extraction without an authenticated user', async () => {
-        // This handler has no course-access check. The mocked LLM returns no
-        // response content, which still proves an anonymous request reaches 200.
-        const res = await request(app({ db: documentsDb() })).post('/d1/extract-questions');
-        expect(res.status).toBe(200);
-        expect(res.body.data).toMatchObject({ documentId: 'd1', totalFound: 0, wasChunked: false });
+    test('requires authentication and course authorization before invoking the LLM', async () => {
+        expect((await request(app({ db: documentsDb() })).post('/d1/extract-questions')).status).toBe(401);
+        expect((await request(app({ db: documentsDb(), user: otherInstructor })).post('/d1/extract-questions')).status).toBe(403);
+        expect(resolveCourseAi).not.toHaveBeenCalled();
     });
 });
 

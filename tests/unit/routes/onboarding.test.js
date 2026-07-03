@@ -232,12 +232,12 @@ describe('PUT /:courseId — update fields', () => {
         expect((await db.collection('courses').findOne({ courseId: 'C1' })).courseDescription).toBe('Updated desc');
     });
 
-    test('currently permits ownership and identifier fields to be overwritten', async () => {
+    test('rejects mass assignment of ownership and identifier fields', async () => {
         const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1' }] });
         const res = await request(app({ db, user: instructor })).put('/C1').send({ courseId: 'C2', instructorId: 'attacker' });
-        expect(res.status).toBe(200);
-        expect(await db.collection('courses').findOne({ courseId: 'C1' })).toBeNull();
-        expect(await db.collection('courses').findOne({ courseId: 'C2' })).toMatchObject({ instructorId: 'attacker' });
+        expect(res.status).toBe(400);
+        expect(await db.collection('courses').findOne({ courseId: 'C1' })).toMatchObject({ instructorId: 'i1' });
+        expect(await db.collection('courses').findOne({ courseId: 'C2' })).toBeNull();
     });
 
     test('503 without a db and 500 on update failure', async () => {

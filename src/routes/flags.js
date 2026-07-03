@@ -110,8 +110,8 @@ async function canCreateFlagForCourse(db, user, courseId, isSuperCourseFlag) {
         return true;
     }
 
-    if (user.role !== 'student') {
-        return false;
+    if (user.role === 'instructor') {
+        return CourseModel.userHasCourseAccess(db, courseId, user.userId, 'instructor');
     }
 
     return CourseModel.userHasCourseAccess(db, courseId, user.userId, 'student');
@@ -526,6 +526,14 @@ router.put('/:flagId/response', async (req, res) => {
             });
         }
 
+
+        if (flagStatus && !FlaggedQuestionModel.isValidFlagStatus(flagStatus)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid flag status'
+            });
+        }
+
         const db = req.app.locals.db;
         if (!db) {
             return res.status(503).json({
@@ -588,6 +596,14 @@ router.put('/:flagId/status', async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: 'Missing required fields: status'
+            });
+        }
+
+
+        if (!FlaggedQuestionModel.isValidFlagStatus(status)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid flag status'
             });
         }
 

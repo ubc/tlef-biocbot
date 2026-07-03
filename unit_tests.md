@@ -429,11 +429,11 @@ updates by `_id` (e.g. systemAdmin revoke).
 Record real behavior discrepancies surfaced by tests. These are for a *later* deliberate
 pass, NOT to be fixed while writing tests.
 
-- **Quiz material routes do not verify that the requested lecture is published or quiz-testable.**
-  `GET /api/quiz/materials` accepts any `lectureName` once course-wide material access is enabled, and
-  the download route checks only course ownership. A student who can guess an unpublished lecture name
-  or document ID can therefore retrieve that course material. The quiz-question routes do enforce both
-  publication and `testableUnits`; the material routes do not. Not fixed in this test-only pass.
+- **✅ Fixed — Quiz material routes did not verify that the requested lecture was published or
+  quiz-testable.** Both `GET /api/quiz/materials` and the direct download route now require quiz
+  practice and material access to be enabled, and require the document's lecture to be published and
+  included in `testableUnits`. Focused route tests cover unpublished and excluded lectures for both
+  listing and guessed-document download paths.
 
 - **A GridFS quiz-material failure after piping starts cannot return the advertised JSON error.** The
   stream error handler falls back to ending the partially-started response once headers are sent, so the
@@ -456,21 +456,18 @@ pass, NOT to be fixed while writing tests.
   while `'Course 0'` → null (leading digit 0 is rejected). Edge behavior, almost certainly
   fine for real course names; characterized in `Course.pure.test.js`, not fixed.
 
-- **`FlaggedQuestion.createFlaggedQuestion` lets `flagData.flagId` override the stored ID.**
-  It generates a new `flagId` and returns that generated value, but spreads `flagData` after it
-  in the inserted document, so a caller-provided `flagId` is what actually gets stored. The
-  generated return ID then cannot retrieve the inserted flag. Characterized in
-  `FlaggedQuestion.test.js`; not fixed.
+- **✅ Fixed — `FlaggedQuestion.createFlaggedQuestion` let `flagData.flagId` override the stored ID.**
+  The generated ID is now applied after caller data, so the returned ID always identifies the inserted
+  flag. The model regression test verifies that a caller-provided ID is ignored.
 
-- **`flags` says instructors may create flags, but rejects them for every ordinary course.** The
-  route's initial role gate explicitly allows students and instructors, while
-  `canCreateFlagForCourse` returns false for an instructor unless it is a Super Course flag. Thus an
-  instructor receives 403 even for a course they own. Characterized in `tests/unit/routes/flags.test.js`;
-  not fixed.
+- **✅ Fixed — `flags` said instructors may create flags but rejected ordinary-course flags.**
+  Instructors may now create a flag only when `userHasCourseAccess` confirms that they teach the
+  requested course. Route tests cover both an owning instructor and an unrelated instructor.
 
-- **`PUT /api/flags/:flagId/status` accepts arbitrary non-empty status strings.** Neither the route nor
-  `FlaggedQuestion.updateFlagStatus` validates the status vocabulary, so values such as `"banana"` are
-  persisted and returned as successful. Characterized in `tests/unit/routes/flags.test.js`; not fixed.
+- **✅ Fixed — `PUT /api/flags/:flagId/status` accepted arbitrary non-empty status strings.**
+  Both status-only updates and response updates now accept only `pending`, `reviewed`, `resolved`, or
+  `dismissed`, with validation at both the route and model boundaries. Regression tests verify invalid
+  values are rejected without modifying the stored flag.
 
 - **`Onboarding.upsertOnboarding` overwrites `createdAt` during updates when omitted.**
   The comment says `createdAt` is only set for new documents, but the implementation always places
@@ -478,15 +475,15 @@ pass, NOT to be fixed while writing tests.
   without `createdAt` therefore replaces the original creation timestamp. Characterized in
   `Onboarding.test.js`; not fixed.
 
-- **`PersistenceTopic.incrementStudentCount` builds a `RegExp` from unescaped topic text.**
-  A topic containing regex metacharacters can match a different stored topic, e.g. input
-  `'ATP.se'` matches stored topic `'atpase'` and increments that document instead of creating
-  a literal `atp.se` topic. Characterized in `PersistenceTopic.test.js`; not fixed.
+- **✅ Fixed — `PersistenceTopic.incrementStudentCount` built a `RegExp` from unescaped topic text.**
+  Topic text is now escaped before constructing the anchored case-insensitive expression, so regex
+  metacharacters are matched literally. The regression test verifies that input `'ATP.se'` creates a
+  distinct `atp.se` topic instead of incrementing an existing `atpase` topic.
 
-- **`User.authenticateUser` accepts a basic-auth user with `passwordHash: null`.**
-  The password check runs only when `authProvider === 'basic' && user.passwordHash`; if a basic
-  active user has no hash, any password is accepted and `lastLogin` is updated. Characterized in
-  `User.test.js`; not fixed.
+- **✅ Fixed — `User.authenticateUser` accepted a basic-auth user with `passwordHash: null`.**
+  Basic-auth accounts now fail closed when their password hash is missing, returning the same generic
+  invalid-credentials response used for unknown users and incorrect passwords. The regression test in
+  `User.test.js` also verifies that a rejected attempt does not update `lastLogin`.
 
 - **`GET /api/questions/stats` does not require authentication or course access.** Anyone who knows
   a `courseId` can retrieve aggregate question counts, points, and type breakdown. Characterized in

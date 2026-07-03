@@ -598,18 +598,31 @@ router.get('/stats', async (req, res) => {
             });
         }
 
-        // Get course data to calculate statistics
+        if (!req.user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        // Get course data to calculate statistics only after authentication.
         const collection = db.collection('courses');
         const course = await collection.findOne({ courseId });
+
+        if (course && !(await canReadCourseQuestions(db, courseId, req.user))) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have permission to access questions for this course'
+            });
+        }
 
         if (!course || !course.lectures) {
             return res.json({
                 success: true,
                 data: {
                     courseId,
-                    totalQuestions: 0,
-                    totalPoints: 0,
-                    typeBreakdown: []
+                    stats: {
+                        totalQuestions: 0,
+                        totalPoints: 0,
+                        typeBreakdown: []
+                    }
                 }
             });
         }

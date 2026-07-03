@@ -4,6 +4,7 @@
  */
 
 const { MongoClient } = require('mongodb');
+const VALID_FLAG_STATUSES = new Set(['pending', 'reviewed', 'resolved', 'dismissed']);
 
 /**
  * Flagged Question Schema Structure:
@@ -68,8 +69,8 @@ async function createFlaggedQuestion(db, flagData) {
     const flagId = `flag_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     const flag = {
-        flagId,
         ...flagData,
+        flagId,
         flagStatus: 'pending',
         createdAt: now,
         updatedAt: now,
@@ -171,6 +172,9 @@ async function updateInstructorResponse(db, flagId, responseData) {
     const now = new Date();
     
     const finalStatus = responseData.flagStatus || 'resolved';
+    if (!VALID_FLAG_STATUSES.has(finalStatus)) {
+        return { success: false, error: 'Invalid flag status' };
+    }
 
     const updateData = {
         instructorResponse: responseData.response,
@@ -207,6 +211,10 @@ async function updateInstructorResponse(db, flagId, responseData) {
  */
 async function updateFlagStatus(db, flagId, newStatus, instructorId) {
     const collection = getFlaggedQuestionsCollection(db);
+
+    if (!VALID_FLAG_STATUSES.has(newStatus)) {
+        return { success: false, error: 'Invalid flag status' };
+    }
     
     const now = new Date();
     
@@ -289,6 +297,10 @@ function determinePriority(flagReason) {
     }
 }
 
+function isValidFlagStatus(status) {
+    return VALID_FLAG_STATUSES.has(status);
+}
+
 /**
  * Delete a flagged question (for cleanup purposes)
  * @param {Object} db - MongoDB database instance
@@ -317,5 +329,6 @@ module.exports = {
     updateInstructorResponse,
     updateFlagStatus,
     getFlagStatistics,
-    deleteFlaggedQuestion
+    deleteFlaggedQuestion,
+    isValidFlagStatus
 };

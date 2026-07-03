@@ -13,6 +13,17 @@ const {
     validateApiKey
 } = require('../services/llmKeyStore');
 
+const ONBOARDING_UPDATE_FIELDS = new Set([
+    'courseName', 'courseDescription', 'learningOutcomes', 'assessmentCriteria',
+    'courseMaterials', 'unitFiles', 'courseStructure'
+]);
+
+function sanitizeOnboardingUpdates(input = {}) {
+    return Object.fromEntries(
+        Object.entries(input).filter(([field]) => ONBOARDING_UPDATE_FIELDS.has(field))
+    );
+}
+
 function hasInstructorAccess(course, userId) {
     return course.instructorId === userId ||
         (Array.isArray(course.instructors) && course.instructors.includes(userId));
@@ -422,13 +433,13 @@ router.put('/:courseId/unit-files', async (req, res) => {
  */
 router.put('/:courseId', async (req, res) => {
     const { courseId } = req.params;
-    const updates = req.body;
+    const updates = sanitizeOnboardingUpdates(req.body);
     const user = req.user;
     
-    if (!courseId || !updates || Object.keys(updates).length === 0) {
+    if (!courseId || Object.keys(updates).length === 0) {
         return res.status(400).json({
             success: false,
-            message: 'Missing required parameter: courseId or update data'
+            message: 'No supported onboarding fields were provided'
         });
     }
     

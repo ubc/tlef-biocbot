@@ -110,16 +110,21 @@ describe('DELETE /:courseId/:studentId/sessions/:sessionId — instructor soft d
     });
 
     test('404 when the session is missing', async () => {
-        const db = memoryDb({ chat_sessions: [] });
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1' }], chat_sessions: [] });
         const res = await request(app({ db, user: plainInstructor })).delete('/C1/s1/sessions/missing');
         expect(res.status).toBe(404);
     });
 
     test('a plain instructor (no admin) can soft-delete the session', async () => {
-        const db = memoryDb({ chat_sessions: [session()] });
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1' }], chat_sessions: [session()] });
         const res = await request(app({ db, user: plainInstructor })).delete('/C1/s1/sessions/sess1');
         expect(res.status).toBe(200);
         expect((await db.collection('chat_sessions').findOne({ sessionId: 'sess1' })).isDeleted).toBe(true);
+    });
+
+    test('403 when an instructor does not own the course', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'other' }], chat_sessions: [session()] });
+        expect((await request(app({ db, user: plainInstructor })).delete('/C1/s1/sessions/sess1')).status).toBe(403);
     });
 
     test('500 when the session lookup fails', async () => {

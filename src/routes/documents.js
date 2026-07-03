@@ -1107,6 +1107,9 @@ router.post('/:documentId/extract-questions', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Document not found' });
         }
 
+        const access = await requireCourseDocumentAccess(req, res, db, document.courseId);
+        if (!access) return;
+
         const ai = await resolveCourseAi(req, res, document.courseId);
         if (!ai) return;
         const llm = ai.llm;

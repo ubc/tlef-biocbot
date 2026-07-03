@@ -191,8 +191,17 @@ async function authenticateUser(db, username, password) {
         };
     }
     
-    // Check password for basic auth
-    if (user.authProvider === 'basic' && user.passwordHash) {
+    // A basic-auth account without a stored hash is malformed and must fail
+    // closed. Otherwise the missing hash would skip password verification and
+    // accept any supplied password.
+    if (user.authProvider === 'basic') {
+        if (!user.passwordHash) {
+            return {
+                success: false,
+                error: 'Invalid username or password'
+            };
+        }
+
         const isValidPassword = await bcrypt.compare(password, user.passwordHash);
         if (!isValidPassword) {
             return {

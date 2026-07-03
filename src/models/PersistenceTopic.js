@@ -16,6 +16,10 @@ function getPersistenceTopicsCollection(db) {
     return db.collection(COLLECTION_NAME);
 }
 
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Increment the student count for a topic if the user hasn't been counted yet
  * @param {Object} db - MongoDB database instance
@@ -36,7 +40,7 @@ async function incrementStudentCount(db, courseId, topic, userId) {
     const result = await collection.findOneAndUpdate(
         { 
             courseId, 
-            topic: { $regex: new RegExp(`^${normalizedTopic}$`, 'i') } // Case-insensitive match 
+            topic: { $regex: new RegExp(`^${escapeRegExp(normalizedTopic)}$`, 'i') } // Case-insensitive literal match
         },
         {
             $addToSet: { studentIds: userId },

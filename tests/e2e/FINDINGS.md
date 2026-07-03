@@ -650,7 +650,7 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
   (it queries `tas: userId` against bare strings, per `Course.js:1219`
   and the schema comment at L18). Seeds updated to `tas: [taId]`.
 
-### 38. `updateInstructorResponse` defaults `flagStatus` to "resolved" but does not stamp `resolvedAt`
+### 38. ✅ FIXED — `updateInstructorResponse` defaulted `flagStatus` to "resolved" without stamping `resolvedAt`
 
 - **Where:** `src/models/FlaggedQuestion.js` lines 165-180.
 - **Symptom:** When the caller omits `flagStatus`, the model stores
@@ -665,9 +665,9 @@ and `quiz.js`/`chat.js` were one bad input away from crashing.
 - **Failing test:** `tests/e2e/flags-api-error-branches.spec.js` ›
   "PRODUCT BUG: stored.flagStatus='resolved' without a matching
   resolvedAt".
-- **Fix:** Check the resolved status against the *final* value, e.g.
-  `const finalStatus = responseData.flagStatus || 'resolved'; if
-  (finalStatus === 'resolved') updateData.resolvedAt = now;`.
+- **Now:** The model checks the final defaulted status and stamps `resolvedAt`
+  whenever the stored status is `resolved`. Model unit coverage verifies both
+  the default-resolved path and an explicit non-resolved response.
 
 ### 39. ✅ FIXED — auth middleware always redirected API requests instead of returning 401 JSON
 

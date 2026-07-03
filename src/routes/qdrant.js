@@ -36,7 +36,7 @@ async function canUseQdrantForCourse(db, courseId, user) {
     return false;
 }
 
-async function requireDirectQdrantAccess(req, res, { courseId } = {}) {
+async function requireDirectQdrantAccess(req, res, { courseId, requireExistingCourse = false } = {}) {
     const user = req.user;
     if (!user) {
         res.status(401).json({ success: false, message: 'Authentication required' });
@@ -74,6 +74,10 @@ async function requireDirectQdrantAccess(req, res, { courseId } = {}) {
     );
 
     if (!course) {
+        if (requireExistingCourse) {
+            res.status(404).json({ success: false, message: 'Course not found' });
+            return null;
+        }
         return user;
     }
 
@@ -272,13 +276,29 @@ router.delete('/document/:documentId', async (req, res) => {
             });
         }
 
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+
+        const document = await db.collection('documents').findOne({ documentId });
+        if (!document?.courseId) {
+            return res.status(404).json({ success: false, message: 'Document not found' });
+        }
+
+        const scopedUser = await requireDirectQdrantAccess(req, res, {
+            courseId: document.courseId,
+            requireExistingCourse: true
+        });
+        if (!scopedUser) return;
+
         // Ensure service is initialized
         if (!qdrantService.client) {
             await qdrantService.initialize();
         }
 
         // Delete document chunks
-        const result = await qdrantService.deleteDocumentChunks(documentId);
+        const result = await qdrantService.deleteDocumentChunks(documentId, document.courseId);
 
         if (result.success) {
             res.json({
@@ -489,7 +509,7 @@ router.post('/cleanup-vectors', async (req, res) => {
     try {
         const { courseId } = req.body;
 
-        const user = await requireDirectQdrantAccess(req, res, { courseId });
+        const user = await requireDirectQdrantAccess(req, res, { courseId, requireExistingCourse: true });
         if (!user) return;
         
         if (!courseId) {
