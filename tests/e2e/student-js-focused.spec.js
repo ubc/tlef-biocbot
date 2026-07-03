@@ -1119,12 +1119,14 @@ test.describe('student.js compact browser harness', () => {
             sessionStorage.removeItem('sessionId');
             const generatedId = w.getCurrentStudentId();
 
-            w.__fetchMocks['/api/auth/me'] = {
-                success: true,
-                user: { displayName: 'Preference Student', preferences: { courseId: 'PREF-COURSE' } },
-            };
+            // getCurrentCourseId now reads the shared auth.js state via
+            // waitForCurrentUser() instead of fetching /api/auth/me itself.
+            w.waitForCurrentUser = () => Promise.resolve({
+                displayName: 'Preference Student',
+                preferences: { courseId: 'PREF-COURSE' },
+            });
             const preferenceCourse = await w.getCurrentCourseId();
-            w.__fetchMocks['/api/auth/me'] = { status: 500, ok: false, json: { success: false } };
+            w.waitForCurrentUser = () => Promise.resolve(null);
             localStorage.removeItem('selectedCourseId');
             w.__fetchMocks['/api/courses/available/all'] = {
                 success: true,

@@ -50,7 +50,8 @@ test.describe('Course year-level helpers (pure)', () => {
         expect(CourseModel.parseYearLevelFromName('BIOC 401')).toBe(4);
         expect(CourseModel.parseYearLevelFromName('CHEM 121 - Intro')).toBe(1);
         expect(CourseModel.parseYearLevelFromName('MATH 200')).toBe(2);
-        expect(CourseModel.parseYearLevelFromName('BIOC401')).toBe(4);
+        // A standalone digit is accepted only when it is a valid year label (1-5).
+        expect(CourseModel.parseYearLevelFromName('Year 3 Seminar')).toBe(3);
         // 4-digit codes: leading digit is still the year.
         expect(CourseModel.parseYearLevelFromName('PHYS 1010')).toBe(1);
         // 5xx+ maps to Graduate (clamped to 5).
@@ -60,6 +61,10 @@ test.describe('Course year-level helpers (pure)', () => {
 
     test('parseYearLevelFromName returns null when no usable number is present', () => {
         expect(CourseModel.parseYearLevelFromName('Special Topics')).toBeNull();
+        // Course numbers glued to letters no longer match (no word boundary),
+        // and the old any-integer fallback is gone.
+        expect(CourseModel.parseYearLevelFromName('BIOC401')).toBeNull();
+        expect(CourseModel.parseYearLevelFromName('Section 7')).toBeNull(); // standalone digit outside 1-5
         expect(CourseModel.parseYearLevelFromName('course 099')).toBeNull(); // leading 0
         expect(CourseModel.parseYearLevelFromName('')).toBeNull();
         expect(CourseModel.parseYearLevelFromName(null)).toBeNull();

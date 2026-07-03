@@ -163,9 +163,11 @@ test.describe('PUT /:flagId/escalate and /dismiss', () => {
         expect(updated.resolvedBy).toBeNull();
     });
 
-    test('escalating a missing flag still returns 200 but success:false (no rows changed)', async ({ request: api }) => {
+    test('escalating a missing flag returns 404', async ({ request: api }) => {
+        // The staff-access guard looks the flag up first and 404s when it
+        // does not exist, instead of replying 200 with success:false.
         const res = await api.put('/api/mental-health-flags/mhf_does_not_exist/escalate');
-        expect(res.status()).toBe(200);
+        expect(res.status()).toBe(404);
         const body = await res.json();
         expect(body.success).toBe(false);
     });

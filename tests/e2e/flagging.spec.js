@@ -558,25 +558,44 @@ test.describe('Student creates a flag — unauthenticated and wrong role', () =>
         await anonCtx.dispose();
     });
 
-    test('403 when an instructor tries to create a flag', async ({ baseURL }) => {
+    test('instructor with course access can create a flag; without access gets 403', async ({ baseURL }) => {
         await resetCourse();
+        await seedUnrelatedCourse();
         const apiCtx = await loginAPI(baseURL, 'instructor', instructorPassword);
-        const res = await apiCtx.post('/api/flags', {
+
+        // Instructors may now flag content in their own courses.
+        const ownRes = await apiCtx.post('/api/flags', {
             data: {
                 questionId: QUESTION_ID,
                 courseId: COURSE_ID,
                 unitName: UNIT_NAME,
                 flagReason: 'unclear',
-                flagDescription: 'Instructor cannot flag.',
+                flagDescription: 'Instructor flags their own course.',
             },
             failOnStatusCode: false,
         });
-        expect(res.status()).toBe(403);
-
-        const count = await withDb((db) =>
+        expect(ownRes.status()).toBe(200);
+        const ownCount = await withDb((db) =>
             db.collection('flaggedQuestions').countDocuments({ courseId: COURSE_ID })
         );
-        expect(count).toBe(0);
+        expect(ownCount).toBe(1);
+
+        // But not in a course they have no instructor access to.
+        const foreignRes = await apiCtx.post('/api/flags', {
+            data: {
+                questionId: QUESTION_ID,
+                courseId: UNRELATED_COURSE_ID,
+                unitName: UNIT_NAME,
+                flagReason: 'unclear',
+                flagDescription: 'Instructor cannot flag a foreign course.',
+            },
+            failOnStatusCode: false,
+        });
+        expect(foreignRes.status()).toBe(403);
+        const foreignCount = await withDb((db) =>
+            db.collection('flaggedQuestions').countDocuments({ courseId: UNRELATED_COURSE_ID })
+        );
+        expect(foreignCount).toBe(0);
         await apiCtx.dispose();
     });
 });

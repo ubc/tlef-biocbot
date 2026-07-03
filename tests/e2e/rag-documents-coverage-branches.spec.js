@@ -747,15 +747,29 @@ test.describe('qdrant.js — happy + validation branches', () => {
         });
         expect(searchD.status()).toBe(400);
 
-        // Delete the document chunks — exercises happy delete branch.
-        const del = await api.delete(`/api/qdrant/document/${documentId}`);
-        expect(del.ok()).toBeTruthy();
+        // DELETE /document now resolves the document's course from the
+        // documents collection (404 otherwise), so seed the metadata row the
+        // uploader would normally have created.
+        await withDb((db) =>
+            db.collection('documents').updateOne(
+                { documentId },
+                { $set: { documentId, courseId: COURSE_A, fileName: `${documentId}.txt` } },
+                { upsert: true }
+            )
+        );
+        try {
+            // Delete the document chunks — exercises happy delete branch.
+            const del = await api.delete(`/api/qdrant/document/${documentId}`);
+            expect(del.ok()).toBeTruthy();
 
-        // Deleting again exercises the "no chunks found" branch in the service.
-        const delAgain = await api.delete(`/api/qdrant/document/${documentId}`);
-        expect(delAgain.ok()).toBeTruthy();
-        const delAgainBody = await delAgain.json();
-        expect(delAgainBody.data.deletedCount).toBe(0);
+            // Deleting again exercises the "no chunks found" branch in the service.
+            const delAgain = await api.delete(`/api/qdrant/document/${documentId}`);
+            expect(delAgain.ok()).toBeTruthy();
+            const delAgainBody = await delAgain.json();
+            expect(delAgainBody.data.deletedCount).toBe(0);
+        } finally {
+            await withDb((db) => db.collection('documents').deleteMany({ documentId }));
+        }
     });
 
     test('POST /process-document with empty content fails through the service-level "non-empty string" branch', async ({ request: api }) => {

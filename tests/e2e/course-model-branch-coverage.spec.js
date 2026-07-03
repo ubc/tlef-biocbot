@@ -171,10 +171,9 @@ test.describe('deleteAssessmentQuestion (via DELETE /api/questions/:questionId)'
 test.describe('updateLearningObjectives (via POST /api/learning-objectives)', () => {
     test.use({ storageState: storageStatePath('instructor') });
 
-    test('200 wrapper but model logs "Course not found" for bogus courseId (still 200 from route)', async ({ request: api }) => {
-        // The route never inspects result.success — it always returns 200.
-        // Coverage-wise this still drives the model's "Course not found"
-        // return branch (lines 459-460 in src/models/Course.js).
+    test('404 "Course not found" for bogus courseId', async ({ request: api }) => {
+        // The route now pre-checks the course and surfaces model failures
+        // instead of always replying 200.
         const res = await api.post('/api/learning-objectives', {
             data: {
                 courseId: COURSE_NONEXISTENT,
@@ -183,10 +182,12 @@ test.describe('updateLearningObjectives (via POST /api/learning-objectives)', ()
                 instructorId,
             },
         });
-        expect(res.status()).toBe(200);
+        expect(res.status()).toBe(404);
+        const body = await res.json();
+        expect(body.message).toMatch(/course not found/i);
     });
 
-    test('200 wrapper for lecture-not-found path on existing course', async ({ request: api }) => {
+    test('404 for lecture-not-found path on existing course', async ({ request: api }) => {
         await seedCourse({ courseId: COURSE_MAIN, instructorId });
         const res = await api.post('/api/learning-objectives', {
             data: {
@@ -196,9 +197,9 @@ test.describe('updateLearningObjectives (via POST /api/learning-objectives)', ()
                 instructorId,
             },
         });
-        // Route doesn't surface model errors — verify the model didn't add
-        // objectives to a non-existent unit.
-        expect(res.status()).toBe(200);
+        // Model failures are surfaced as 404 — verify no objectives were
+        // added to a non-existent unit either.
+        expect(res.status()).toBe(404);
         const doc = await withDb((db) => db.collection('courses').findOne({ courseId: COURSE_MAIN }));
         const u1 = doc.lectures.find((l) => l.name === 'Unit 1');
         expect(u1.learningObjectives || []).toEqual([]);

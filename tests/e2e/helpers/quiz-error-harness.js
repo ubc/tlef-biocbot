@@ -149,12 +149,15 @@ function applyMode(mode) {
             };
             return;
         case 'throw-getDocumentsForLecture':
-            // Allow access first so we reach the throw site.
+            // Allow access first so we reach the throw site. /materials now
+            // also checks the lecture is published & testable before reading
+            // documents, so the visibility gate must pass too.
             CourseModel.getQuizSettings = async () => ({
                 enabled: true,
                 testableUnits: 'all',
                 allowLectureMaterialAccess: true,
             });
+            CourseModel.getPublishedLectures = async () => ['U'];
             DocumentModel.getDocumentsForLecture = async () => {
                 throw new Error('harness: getDocumentsForLecture');
             };

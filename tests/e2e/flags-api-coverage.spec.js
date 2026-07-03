@@ -183,16 +183,29 @@ test.describe('POST /api/flags', () => {
         }
     });
 
-    test('403 when an instructor tries to flag', async ({ baseURL }) => {
+    test('200 when an instructor flags their own course; 403 for a TA', async ({ baseURL }) => {
+        // Instructors with course access may now create flags; TAs review
+        // flags but still cannot create them.
         const api = await request.newContext({ baseURL, storageState: storageStatePath('instructor') });
         try {
             const res = await api.post('/api/flags', {
                 data: { courseId: COURSE_A, questionId: QUESTION_ID, unitName: UNIT_NAME, flagReason: 'unclear', flagDescription: 'x' },
                 failOnStatusCode: false,
             });
-            expect(res.status()).toBe(403);
+            expect(res.status()).toBe(200);
         } finally {
             await api.dispose();
+        }
+
+        const taApi = await request.newContext({ baseURL, storageState: storageStatePath('ta') });
+        try {
+            const res = await taApi.post('/api/flags', {
+                data: { courseId: COURSE_A, questionId: QUESTION_ID, unitName: UNIT_NAME, flagReason: 'unclear', flagDescription: 'x' },
+                failOnStatusCode: false,
+            });
+            expect(res.status()).toBe(403);
+        } finally {
+            await taApi.dispose();
         }
     });
 

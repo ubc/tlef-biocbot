@@ -710,11 +710,14 @@ test('current student id falls back to a generated session id when auth helper t
 });
 
 test('student name falls back when the auth request fails', async ({ page }) => {
-    const harness = await openStudentWithMocks(page);
-    harness.setAuthResponse({ abort: true });
+    await openStudentWithMocks(page);
 
+    // getCurrentStudentName now reads the shared auth.js state via
+    // waitForCurrentUser() instead of fetching /api/auth/me itself, so
+    // simulate a failed auth bootstrap by resolving to no user.
     await expect.poll(() => page.evaluate(() => {
         const w = /** @type {any} */ (window);
+        w.waitForCurrentUser = () => Promise.resolve(null);
         return w.getCurrentStudentName();
     })).toBe('Student Name');
 });
@@ -846,19 +849,21 @@ test('updateCourseDisplay delegates to forceUpdateCourseName when no direct cour
 test('current course id follows preferences, storage, course list, and error fallbacks', async ({ page }) => {
     const harness = await openStudentWithMocks(page, { seedSelectedCourse: false });
 
-    harness.setAuthResponse({
-        status: 200,
-        body: {
-            success: true,
-            user: { preferences: { courseId: SECOND_COURSE_ID } },
-        },
-    });
+    // getCurrentCourseId now reads the shared auth.js state via
+    // waitForCurrentUser() rather than fetching /api/auth/me directly.
+    await page.evaluate((courseId) => {
+        const w = /** @type {any} */ (window);
+        w.waitForCurrentUser = () => Promise.resolve({ preferences: { courseId } });
+    }, SECOND_COURSE_ID);
     await expect.poll(() => page.evaluate(() => {
         const w = /** @type {any} */ (window);
         return w.getCurrentCourseId();
     })).toBe(SECOND_COURSE_ID);
 
-    harness.setAuthResponse({ status: 200, body: { success: true, user: { preferences: {} } } });
+    await page.evaluate(() => {
+        const w = /** @type {any} */ (window);
+        w.waitForCurrentUser = () => Promise.resolve({ preferences: {} });
+    });
     await page.evaluate((courseId) => localStorage.setItem('selectedCourseId', courseId), COURSE_ID);
     await expect.poll(() => page.evaluate(() => {
         const w = /** @type {any} */ (window);

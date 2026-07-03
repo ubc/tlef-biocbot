@@ -489,9 +489,10 @@ test.describe('GET /api/questions/stats', () => {
         const res = await api.get('/api/questions/stats?courseId=BIOC-E2E-NOPE-STATS');
         expect(res.ok()).toBeTruthy();
         const body = await res.json();
-        expect(body.data.totalQuestions).toBe(0);
-        expect(body.data.totalPoints).toBe(0);
-        expect(body.data.typeBreakdown).toEqual([]);
+        // Stats are now nested under data.stats, matching the populated-course shape.
+        expect(body.data.stats.totalQuestions).toBe(0);
+        expect(body.data.stats.totalPoints).toBe(0);
+        expect(body.data.stats.typeBreakdown).toEqual([]);
     });
 });
 

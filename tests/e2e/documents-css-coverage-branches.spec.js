@@ -344,67 +344,32 @@ async function gotoHarness(page) {
     });
     await page.goto(HARNESS_PATH);
     await page.waitForLoadState('networkidle');
+    // Wait until documents.css has applied: the empty state centers its text
+    // and the publish toggle slider picks up its grey track colour.
     await page.waitForFunction(() => {
         const testWindow = /** @type {any} */ (window);
-        const uploadZone = testWindow.document.querySelector('.upload-zone.dragover');
-        const table = testWindow.document.querySelector('.documents-table');
-        if (!uploadZone || !table) return false;
-        return testWindow.getComputedStyle(uploadZone).borderTopStyle === 'dashed'
-            && testWindow.getComputedStyle(table).width !== '';
+        const emptyState = testWindow.document.querySelector('.empty-state');
+        const slider = testWindow.document.querySelector('.toggle-slider');
+        if (!emptyState || !slider) return false;
+        return testWindow.getComputedStyle(emptyState).textAlign === 'center'
+            && testWindow.getComputedStyle(slider).backgroundColor === 'rgb(204, 204, 204)';
     });
 }
 
-/**
- * @param {import('@playwright/test').Locator} locator
- * @param {string} pseudo
- * @param {string} property
- */
-async function pseudoStyle(locator, pseudo, property) {
-    return locator.evaluate(
-        (element, args) => window.getComputedStyle(element, args.pseudo).getPropertyValue(args.property),
-        { pseudo, property }
-    );
-}
-
+// The 505-line dead-CSS cleanup removed the legacy upload/table/card/folder
+// rules (.upload-box, .documents-table, .document-card, .folder-item,
+// .file-type-*, .week-selection, .modal-step, .step-dot, .upload-zone,
+// .objectives-checkbox, .generate-btn, .validation-actions, ...), so this
+// harness now only asserts the branch rules that survive in documents.css.
 test.describe('documents.css branch harness coverage', () => {
     test('styles branch-only upload, document, accordion, and empty states', async ({ page }) => {
         await page.setViewportSize({ width: 1120, height: 1200 });
         await gotoHarness(page);
 
-        await expect(page.locator('.upload-box')).toHaveCSS('border-top-style', 'dashed');
-        await page.locator('#legacy-upload-box').hover();
-        await expect(page.locator('.upload-box')).toHaveCSS('border-top-color', 'rgb(74, 111, 165)');
-        await page.locator('.upload-button').hover();
-        await expect(page.locator('.upload-button')).toHaveCSS('background-color', 'rgb(61, 90, 128)');
         await expect(page.locator('.upload-info')).toHaveCSS('font-size', '14px');
-
-        await expect(page.locator('.documents-list')).toHaveCSS('padding-top', '20px');
-        await expect(page.locator('.document-filters')).toHaveCSS('display', 'flex');
-        await expect(page.locator('#document-search')).toHaveCSS('flex-grow', '1');
-        await expect(page.locator('#document-filter')).toHaveCSS('width', '150px');
-        await expect(page.locator('.documents-table')).toHaveCSS('border-collapse', 'collapse');
-        await page.locator('#document-row').hover();
-        await expect(page.locator('#document-row')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0.02)');
-        await expect(page.locator('.status.processed')).toHaveCSS('color', 'rgb(40, 167, 69)');
-        await expect(page.locator('.status.processing')).toHaveCSS('color', 'rgb(255, 193, 7)');
-        await expect(page.locator('.status.failed')).toHaveCSS('color', 'rgb(220, 53, 69)');
         await expect(page.locator('.status-text.processing')).toHaveCSS('color', 'rgb(255, 193, 7)');
         await expect(page.locator('.status-text.not-uploaded')).toHaveCSS('color', 'rgb(220, 53, 69)');
         await expect(page.locator('.empty-state')).toHaveCSS('text-align', 'center');
-        await expect(page.locator('.empty-state-icon')).toHaveCSS('font-size', '48px');
-
-        await expect(page.locator('.document-cards')).toHaveCSS('display', 'grid');
-        await page.locator('#document-card').hover();
-        expect(await page.locator('#document-card').evaluate((element) => window.getComputedStyle(element).transform)).not.toBe('none');
-        await expect(page.locator('.card-icons')).toHaveCSS('justify-content', 'flex-end');
-
-        await expect(page.locator('.folder-structure')).toHaveCSS('margin-top', '20px');
-        await page.locator('#folder-item').hover();
-        await expect(page.locator('#folder-item')).toHaveCSS('background-color', 'rgb(245, 247, 250)');
-        await expect(page.locator('.file-type-section')).toHaveCSS('padding-top', '20px');
-        await expect(page.locator('.file-type-options')).toHaveCSS('display', 'flex');
-        await expect(page.locator('.week-selection')).toHaveCSS('display', 'grid');
-        await expect(page.locator('.form-group label')).toHaveCSS('display', 'block');
 
         await page.locator('#publish-off').focus();
         await expect(page.locator('#publish-off + .toggle-slider')).toHaveCSS('background-color', 'rgb(204, 204, 204)');
@@ -432,35 +397,15 @@ test.describe('documents.css branch harness coverage', () => {
         await gotoHarness(page);
         await page.locator('#branch-modal').evaluate((element) => element.classList.add('show'));
 
-        await expect(page.locator('.modal-step.active')).toHaveCSS('display', 'block');
-        await expect(page.locator('.step-indicators')).toHaveCSS('display', 'flex');
-        await expect(page.locator('.step-dot.active')).toHaveCSS('background-color', 'rgb(74, 111, 165)');
         await page.locator('#modal-close').hover();
         await expect(page.locator('#modal-close')).toHaveCSS('background-color', 'rgb(240, 240, 240)');
         await expect(page.locator('.auto-link-confirmation-list')).toHaveCSS('line-height', '25.6px');
         await expect(page.locator('.auto-link-confirmation-note')).toHaveCSS('font-size', '15.2px');
 
-        await expect(page.locator('.upload-zone.dragover')).toHaveCSS('background-color', 'rgb(240, 244, 248)');
-        await page.locator('#upload-zone').hover();
-        await expect(page.locator('.upload-zone')).toHaveCSS('border-top-color', 'rgb(74, 111, 165)');
-
-        await expect(page.locator('.objectives-checkbox')).toHaveCSS('display', 'flex');
-        await expect(page.locator('#objectives-check + .checkmark')).toHaveCSS('background-color', 'rgb(74, 111, 165)');
-        expect(await pseudoStyle(page.locator('#objectives-check + .checkmark'), '::after', 'content')).not.toBe('none');
-        await expect(page.locator('#hidden-objectives')).toHaveCSS('opacity', '0');
-        await page.locator('#objectives-textarea').focus();
-        await expect(page.locator('#objectives-textarea')).toHaveCSS('border-color', 'rgb(74, 111, 165)');
-        await expect(page.locator('.content-preview')).toHaveCSS('margin-top', '20px');
-        await expect(page.locator('.preview-section h4')).toHaveCSS('font-size', '16px');
-
         await expect(page.locator('.mode-info')).toHaveCSS('background-color', 'rgb(248, 249, 250)');
         await expect(page.locator('.questions-section h3')).toHaveCSS('font-size', '16px');
-        await page.locator('#delete-question').hover();
-        await expect(page.locator('#delete-question')).toHaveCSS('background-color', 'rgb(248, 215, 218)');
         await page.locator('#question-textarea').focus();
         await expect(page.locator('#question-textarea')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
-        await page.locator('#option-item').hover();
-        await expect(page.locator('#option-item')).toHaveCSS('background-color', 'rgb(233, 236, 239)');
         await expect(page.locator('.option-input-group')).toHaveCSS('display', 'flex');
         await expect(page.locator('.correct-radio')).toHaveCSS('accent-color', 'rgb(74, 111, 165)');
         await page.locator('#option-text').focus();
@@ -469,14 +414,6 @@ test.describe('documents.css branch harness coverage', () => {
         await expect(page.locator('.score-box.correct-answer')).toHaveCSS('background-color', 'rgb(212, 237, 218)');
         await expect(page.locator('.threshold-section')).toHaveCSS('background-color', 'rgb(248, 249, 250)');
         await expect(page.locator('#threshold-value')).toHaveCSS('color', 'rgb(74, 111, 165)');
-
-        await expect(page.locator('.generate-questions-container')).toHaveCSS('text-align', 'center');
-        await page.locator('#generate-btn').hover();
-        expect(await page.locator('#generate-btn').evaluate((element) => window.getComputedStyle(element).boxShadow)).not.toBe('none');
-        await page.mouse.down();
-        expect(await page.locator('#generate-btn').evaluate((element) => window.getComputedStyle(element).transform)).not.toBe('none');
-        await page.mouse.up();
-        await expect(page.locator('.generate-help-text')).toHaveCSS('font-style', 'italic');
 
         await expect(page.locator('#selected-content-type')).toHaveCSS('background-color', 'rgb(240, 244, 248)');
         await page.locator('#content-type-hover').hover();
@@ -513,17 +450,12 @@ test.describe('documents.css branch harness coverage', () => {
         await page.setViewportSize({ width: 520, height: 900 });
         await gotoHarness(page);
 
-        await expect(page.locator('.document-filters')).toHaveCSS('flex-direction', 'column');
-        await expect(page.locator('.document-filters')).toHaveCSS('gap', '10px');
-        await expect(page.locator('.documents-table')).toHaveCSS('display', 'block');
-        await expect(page.locator('.document-cards')).toHaveCSS('grid-template-columns', '480px');
-        await expect(page.locator('.week-selection')).toHaveCSS('grid-template-columns', '440px');
-        await expect(page.locator('.file-type-options')).toHaveCSS('flex-direction', 'column');
+        // The 768px media override (padding: 16px) is shadowed by the later
+        // base .content-type-btn rule, so the computed padding stays 20px.
         await expect(page.locator('.content-type-btn').first()).toHaveCSS('padding-top', '20px');
-        await expect(page.locator('.upload-zone')).toHaveCSS('padding-top', '30px');
-        await expect(page.locator('.validation-actions')).toHaveCSS('flex-direction', 'column');
         await expect(page.locator('.modal-header')).toHaveCSS('padding-top', '20px');
         await expect(page.locator('.modal-body')).toHaveCSS('padding-top', '20px');
         await expect(page.locator('.modal-footer')).toHaveCSS('padding-top', '20px');
+        await expect(page.locator('.threshold-input')).toHaveCSS('flex-direction', 'column');
     });
 });
