@@ -1,3 +1,5 @@
+const { createId } = require('../services/id');
+
 /**
  * Message Feedback Model for MongoDB
  * Stores student thumbs-up / thumbs-down feedback on assistant chat messages.
@@ -14,7 +16,7 @@ function getMessageFeedbackCollection(db) {
 }
 
 function generateFeedbackId() {
-    return `feedback_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    return createId('feedback');
 }
 
 function normalizeText(value, limit = 255) {

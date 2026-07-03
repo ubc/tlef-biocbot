@@ -279,9 +279,6 @@ describe('POST /:courseId/transfer', () => {
 });
 
 describe('POST / — create course', () => {
-    // NOTE: contentTypes must be an array — the success path calls
-    // generateCourseStructure(...contentTypes) which does contentTypes.includes(),
-    // so omitting it 500s even though every other use treats it as optional.
     const body = { course: 'Biochem 200', weeks: 2, lecturesPerWeek: 2, apiKey: 'sk-test', contentTypes: ['practice-quizzes'] };
 
     test('401 without a user, 403 for a non-instructor', async () => {
@@ -292,6 +289,13 @@ describe('POST / — create course', () => {
     test('400 when required fields are missing', async () => {
         const res = await request(app({ db: memoryDb({}), user: instructor })).post('/').send({ course: 'X' });
         expect(res.status).toBe(400);
+    });
+
+    test('400 when contentTypes is supplied with a non-array value', async () => {
+        const res = await request(app({ db: memoryDb({}), user: instructor }))
+            .post('/').send({ ...body, contentTypes: 'practice-quizzes' });
+        expect(res.status).toBe(400);
+        expect(res.body.message).toMatch(/contentTypes must be an array/i);
     });
 
     test('400 when weeks is out of the 1–20 range', async () => {
@@ -319,6 +323,19 @@ describe('POST / — create course', () => {
         expect(res.body.data).toMatchObject({ name: 'Biochem 200', totalUnits: 4, aiAvailable: true, llmKey: { status: 'valid' } });
         const saved = await db.collection('courses').findOne({ courseId: res.body.data.id });
         expect(saved.llmApiKey).toEqual({ enc: 'stub' });
+    });
+
+    test('201 creates a course with no contentTypes and returns empty material folders', async () => {
+        const db = memoryDb({});
+        const { contentTypes, ...withoutContentTypes } = body;
+
+        const res = await request(app({ db, user: instructor })).post('/').send(withoutContentTypes);
+
+        expect(res.status).toBe(201);
+        expect(res.body.data.contentTypes).toEqual([]);
+        expect(res.body.data.structure.specialFolders).toEqual([]);
+        const saved = await db.collection('courses').findOne({ courseId: res.body.data.id });
+        expect(saved.courseMaterials).toEqual([]);
     });
 });
 

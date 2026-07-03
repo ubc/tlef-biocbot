@@ -46,6 +46,16 @@ async function gotoQuizPage(page) {
 }
 
 test.describe('Quiz nav visibility', () => {
+    // checkQuizNavVisibility() resolves the course through the student-page
+    // getCurrentCourseId() override (preferences → localStorage → course
+    // list), which ignores the URL param. Seed localStorage so the check is
+    // deterministic instead of racing the nav item's default-visible state.
+    test.beforeEach(async ({ page }) => {
+        await page.addInitScript((courseId) => {
+            localStorage.setItem('selectedCourseId', courseId);
+        }, QUIZ_COURSE_ID);
+    });
+
     test('nav item is hidden when quiz is disabled', async ({ page }) => {
         await resetQuizCourse({ instructorId, quizSettings: { enabled: false } });
 

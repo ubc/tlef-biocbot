@@ -5,6 +5,25 @@
 
 const { MongoClient } = require('mongodb');
 const { isAcademicApiEnabled } = require('../services/academicApi');
+const { createId } = require('../services/id');
+
+const COURSE_STATUS = Object.freeze({
+    ACTIVE: 'active',
+    INACTIVE: 'inactive',
+    DELETED: 'deleted'
+});
+
+const COURSE_STATUS_VALUES = Object.freeze(Object.values(COURSE_STATUS));
+
+function normalizeCourseStatus(value, fallback = COURSE_STATUS.ACTIVE) {
+    if (typeof value !== 'string') return fallback;
+    const normalized = value.trim().toLowerCase();
+    return COURSE_STATUS_VALUES.includes(normalized) ? normalized : fallback;
+}
+
+function isValidCourseStatus(value) {
+    return typeof value === 'string' && COURSE_STATUS_VALUES.includes(value.trim().toLowerCase());
+}
 
 /**
  * Course Schema Structure:
@@ -76,15 +95,15 @@ function generateDistinctCourseCode(existingCodes = []) {
             .map((code) => String(code).trim().toUpperCase())
     );
 
-    let code = generateCourseCode();
-    let attempts = 0;
-
-    while (normalizedExistingCodes.has(code) && attempts < 20) {
-        code = generateCourseCode();
-        attempts += 1;
+    const maxAttempts = 20;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const code = generateCourseCode();
+        if (!normalizedExistingCodes.has(code)) {
+            return code;
+        }
     }
 
-    return code;
+    throw new Error(`Unable to generate a distinct course code after ${maxAttempts} attempts`);
 }
 
 function normalizeCode(code) {
@@ -106,6 +125,9 @@ const MAX_YEAR_LEVEL = 5; // 5 = Graduate
  * @returns {number|null} Normalized year level or null
  */
 function normalizeYearLevel(value) {
+    if (typeof value === 'boolean' || value === null || value === '') {
+        return null;
+    }
     const parsed = Number(value);
     if (!Number.isInteger(parsed) || parsed < MIN_YEAR_LEVEL || parsed > MAX_YEAR_LEVEL) {
         return null;
@@ -127,8 +149,11 @@ function parseYearLevelFromName(courseName) {
         return null;
     }
 
-    // Prefer a standard 3-4 digit course number; fall back to any integer.
-    const match = courseName.match(/\b(\d{3,4})\b/) || courseName.match(/(\d+)/);
+    // Prefer a standard 3-4 digit course number. A standalone single digit is
+    // accepted only when it is itself a valid year label (1-5).
+    const standardMatch = courseName.match(/\b(\d{3,4})\b/);
+    const singleYearMatch = courseName.match(/\b([1-5])\b/);
+    const match = standardMatch || singleYearMatch;
     if (!match) {
         return null;
     }
@@ -290,7 +315,7 @@ function getCoursesCollection(db) {
 }
 
 function isInactiveCourse(course = {}) {
-    return (course.status || 'active') === 'inactive';
+    return normalizeCourseStatus(course.status) === COURSE_STATUS.INACTIVE;
 }
 
 function compareCoursesWithInactiveLast(a = {}, b = {}) {
@@ -711,6 +736,10 @@ async function updateLecturePublishStatus(db, courseId, lectureName, isPublished
                 }
             }
         );
+
+        if (result.matchedCount === 0) {
+            return { success: false, error: 'Course or lecture no longer exists' };
+        }
         
         console.log(`Updated existing lecture ${lectureName} publish status to ${isPublished}`);
         return { success: true, created: false, modifiedCount: result.modifiedCount };
@@ -810,6 +839,10 @@ async function updateLearningObjectives(db, courseId, lectureName, objectives, i
                 }
             }
         );
+
+        if (result.matchedCount === 0) {
+            return { success: false, error: 'Course or lecture no longer exists' };
+        }
         
         console.log(`Updated existing lecture ${lectureName} with learning objectives`);
         return { success: true, created: false, modifiedCount: result.modifiedCount };
@@ -826,9 +859,11 @@ async function updateLearningObjectives(db, courseId, lectureName, objectives, i
  * @param {string} lectureName - Name of the lecture/unit
  * @param {Object} questionData - Question data to add/update
  * @param {string} instructorId - ID of the instructor making the change
+ * @param {Object} [options] - Update behavior
+ * @param {boolean} [options.requireExisting=false] - Reject rather than create a missing question
  * @returns {Promise<Object>} Update result
  */
-async function updateAssessmentQuestions(db, courseId, lectureName, questionData, instructorId) {
+async function updateAssessmentQuestions(db, courseId, lectureName, questionData, instructorId, options = {}) {
     const collection = getCoursesCollection(db);
     
     const now = new Date();
@@ -846,7 +881,7 @@ async function updateAssessmentQuestions(db, courseId, lectureName, questionData
     if (existingLecture) {
         // Generate unique question ID if not provided
         if (!questionData.questionId) {
-            questionData.questionId = `q_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            questionData.questionId = createId('q');
         }
         
         // Add timestamp if not present
@@ -873,11 +908,16 @@ async function updateAssessmentQuestions(db, courseId, lectureName, questionData
             updatedQuestions[existingQuestionIndex] = updatedQuestion;
 
             // Update existing question
+            const updateFilter = {
+                courseId,
+                'lectures.name': lectureName
+            };
+            if (options.requireExisting) {
+                updateFilter['lectures.assessmentQuestions.questionId'] = questionData.questionId;
+            }
+
             const result = await collection.updateOne(
-                { 
-                    courseId,
-                    'lectures.name': lectureName
-                },
+                updateFilter,
                 {
                     $set: {
                         'lectures.$.assessmentQuestions': updatedQuestions,
@@ -887,10 +927,18 @@ async function updateAssessmentQuestions(db, courseId, lectureName, questionData
                     }
                 }
             );
+
+            if (options.requireExisting && result.matchedCount === 0) {
+                return { success: false, notFound: true, error: 'Question not found' };
+            }
             
             console.log(`Updated existing assessment question in ${lectureName}`);
             return { success: true, created: false, modifiedCount: result.modifiedCount, questionId: questionData.questionId };
         } else {
+            if (options.requireExisting) {
+                return { success: false, notFound: true, error: 'Question not found' };
+            }
+
             // Add new question
             const result = await collection.updateOne(
                 { 
@@ -1042,6 +1090,10 @@ async function updatePassThreshold(db, courseId, lectureName, passThreshold, ins
                 }
             }
         );
+
+        if (result.matchedCount === 0) {
+            return { success: false, error: 'Course or lecture no longer exists' };
+        }
         
         console.log(`Updated existing lecture ${lectureName} with pass threshold ${passThreshold}`);
         return { success: true, created: false, modifiedCount: result.modifiedCount };
@@ -1344,6 +1396,10 @@ async function updateUnitDisplayName(db, courseId, unitName, displayName, instru
         },
         updateOp
     );
+
+    if (result.matchedCount === 0) {
+        return { success: false, error: 'Course or unit no longer exists' };
+    }
     
     console.log(`Updated display name for ${unitName} to "${displayName || '(cleared)'}" in course ${courseId}`);
     
@@ -1404,6 +1460,10 @@ async function addDocumentToUnit(db, courseId, unitName, documentData, instructo
                     }
                 }
             );
+
+            if (result.matchedCount === 0) {
+                return { success: false, error: 'Document or unit no longer exists' };
+            }
             
             console.log(`Updated existing document in ${unitName}`);
             return { success: true, created: false, modifiedCount: result.modifiedCount };
@@ -1429,6 +1489,10 @@ async function addDocumentToUnit(db, courseId, unitName, documentData, instructo
                     }
                 }
             );
+
+            if (result.matchedCount === 0) {
+                return { success: false, error: 'Course or unit no longer exists' };
+            }
             
             console.log(`Added new document to ${unitName}`);
             return { success: true, created: true, modifiedCount: result.modifiedCount };
@@ -1624,7 +1688,7 @@ async function getCoursesForUser(db, userId, role) {
 async function userHasCourseAccess(db, courseId, userId, role) {
     const collection = getCoursesCollection(db);
     
-    let query = { courseId };
+    let query = { courseId, status: { $ne: COURSE_STATUS.DELETED } };
     if (role === 'instructor') {
         query.$or = [
             { instructorId: userId },
@@ -1632,7 +1696,7 @@ async function userHasCourseAccess(db, courseId, userId, role) {
         ];
     } else if (role === 'ta') {
         query.tas = userId;
-        query.status = { $ne: 'deleted' };
+        query.status = { $ne: COURSE_STATUS.DELETED };
     } else if (role === 'student') {
         // Defer to getStudentEnrollment so this matches the chat path and the
         // requireActiveCourseForNonInstructors middleware exactly: a course with
@@ -1656,8 +1720,15 @@ async function userHasCourseAccess(db, courseId, userId, role) {
 async function getCourseById(db, courseId) {
     const collection = getCoursesCollection(db);
     
-    const course = await collection.findOne({ courseId });
+    const course = await collection.findOne({
+        courseId,
+        status: { $ne: COURSE_STATUS.DELETED }
+    });
     return course;
+}
+
+async function getCourseByIdIncludingDeleted(db, courseId) {
+    return getCoursesCollection(db).findOne({ courseId });
 }
 
 /**
@@ -2276,6 +2347,10 @@ async function updateAnonymizeStudents(db, courseId, instructorId, enabled) {
 }
 
 module.exports = {
+    COURSE_STATUS,
+    COURSE_STATUS_VALUES,
+    normalizeCourseStatus,
+    isValidCourseStatus,
     getCoursesCollection,
     ensureCourseCodes,
     upsertCourse,
@@ -2299,6 +2374,7 @@ module.exports = {
     getCoursesForUser,
     userHasCourseAccess,
     getCourseById,
+    getCourseByIdIncludingDeleted,
     updateTAPermissions,
     getTAPermissions,
     checkTAPermission,

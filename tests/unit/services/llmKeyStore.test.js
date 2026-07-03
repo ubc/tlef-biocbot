@@ -295,12 +295,8 @@ describe('llmKeyStore.buildKeySubdocument', () => {
         expect(decryptApiKey(doc.ciphertext)).toBe('sk-test-1234');
     });
 
-    test('coerces a non-string key to an empty key (which is not round-trippable)', () => {
-        const doc = buildKeySubdocument(12345);
-        expect(doc.last4).toBe('');
-        // encrypt('') yields an empty payload segment, which decryptApiKey treats
-        // as malformed — documenting that an empty key cannot be recovered.
-        expect(() => decryptApiKey(doc.ciphertext)).toThrow(/Unsupported encrypted API key format/);
+    test.each([12345, null, undefined, '', '   '])('rejects empty or non-string key input: %p', value => {
+        expect(() => buildKeySubdocument(value)).toThrow(/non-empty string/);
     });
 });
 

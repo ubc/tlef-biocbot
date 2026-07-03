@@ -83,7 +83,7 @@ describe('User.createUser', () => {
                 permissions: { systemAdmin: false },
             },
         });
-        expect(result.userId).toMatch(/^user_\d+_[a-z0-9]+$/);
+        expect(result.userId).toMatch(/^user_[0-9a-f-]{36}$/i);
 
         const stored = await db.collection(COLL).findOne({ userId: result.userId });
         expect(stored).toMatchObject({
@@ -207,15 +207,16 @@ describe('User.authenticateUser', () => {
         });
     });
 
-    test('authenticates a basic user with no passwordHash without checking the password', async () => {
+    test('rejects a basic user with no passwordHash without updating lastLogin', async () => {
         const db = memoryDb({ [COLL]: [userDoc({ username: 'nohash', email: 'nohash@example.com', passwordHash: null })] });
 
-        // Existing behavior: the password comparison runs only when authProvider
-        // is basic AND passwordHash is present.
-        await expect(User.authenticateUser(db, 'nohash', 'anything')).resolves.toMatchObject({
-            success: true,
-            user: { userId: 'u1', username: 'nohash' },
+        await expect(User.authenticateUser(db, 'nohash', 'anything')).resolves.toEqual({
+            success: false,
+            error: 'Invalid username or password',
         });
+
+        const stored = await db.collection(COLL).findOne({ userId: 'u1' });
+        expect(stored.lastLogin).toBeNull();
     });
 });
 
@@ -333,7 +334,7 @@ describe('User.createOrGetSAMLUser', () => {
                 invitedCourses: [],
             },
         });
-        expect(result.userId).toMatch(/^user_\d+_[a-z0-9]+$/);
+        expect(result.userId).toMatch(/^user_[0-9a-f-]{36}$/i);
 
         const stored = await db.collection(COLL).findOne({ userId: result.userId });
         expect(stored).toMatchObject({

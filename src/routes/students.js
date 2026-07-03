@@ -5,6 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
+const CourseModel = require('../models/Course');
 const { hasSystemAdminAccess } = require('../services/authorization');
 
 // Middleware to parse JSON bodies
@@ -299,14 +300,24 @@ router.get('/:courseId/:studentId/sessions/own', async (req, res) => {
                     message: 'Course not found'
                 });
             }
+
+            if (!(await CourseModel.userHasCourseAccess(db, courseId, user.userId, 'student'))) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'You are not enrolled in this course'
+                });
+            }
         }
         
         // For instructors, verify they have access to this course
         if (user.role === 'instructor') {
             const coursesCollection = db.collection('courses');
-            const course = await coursesCollection.findOne({ 
-                courseId: courseId, 
-                instructorId: user.userId 
+            const course = await coursesCollection.findOne({
+                courseId: courseId,
+                $or: [
+                    { instructorId: user.userId },
+                    { instructors: { $in: [user.userId] } }
+                ]
             });
             
             if (!course) {
@@ -534,13 +545,6 @@ router.delete('/:courseId/:studentId/sessions/:sessionId/own', async (req, res) 
     try {
         const { courseId, studentId, sessionId } = req.params;
         
-        if (!courseId || !studentId || !sessionId) {
-            return res.status(400).json({
-                success: false,
-                error: 'Course ID, Student ID, and Session ID are required'
-            });
-        }
-
         // Get authenticated user information
         const user = req.user;
         if (!user) {
@@ -639,13 +643,6 @@ router.delete('/:courseId/:studentId/sessions/:sessionId', async (req, res) => {
     try {
         const { courseId, studentId, sessionId } = req.params;
         
-        if (!courseId || !studentId || !sessionId) {
-            return res.status(400).json({
-                success: false,
-                error: 'Course ID, Student ID, and Session ID are required'
-            });
-        }
-
         const user = req.user;
         if (!user) {
             return res.status(401).json({
@@ -666,6 +663,13 @@ router.delete('/:courseId/:studentId/sessions/:sessionId', async (req, res) => {
             return res.status(500).json({
                 success: false,
                 error: 'Database connection not available'
+            });
+        }
+
+        if (!(await CourseModel.userHasCourseAccess(db, courseId, user.userId, 'instructor'))) {
+            return res.status(403).json({
+                success: false,
+                error: 'You do not have access to this course'
             });
         }
 
@@ -734,7 +738,7 @@ router.put('/:courseId/:studentId/sessions/:sessionId/title', async (req, res) =
         const { courseId, studentId, sessionId } = req.params;
         const { title } = req.body;
 
-        if (!courseId || !studentId || !sessionId || !title) {
+        if (!title) {
             return res.status(400).json({
                 success: false,
                 error: 'Course ID, Student ID, Session ID, and Title are required'
@@ -771,6 +775,14 @@ router.put('/:courseId/:studentId/sessions/:sessionId/title', async (req, res) =
             return res.status(500).json({
                 success: false,
                 error: 'Database connection not available'
+            });
+        }
+
+        if (user.role === 'instructor' &&
+            !(await CourseModel.userHasCourseAccess(db, courseId, user.userId, 'instructor'))) {
+            return res.status(403).json({
+                success: false,
+                error: 'You do not have access to this course'
             });
         }
 

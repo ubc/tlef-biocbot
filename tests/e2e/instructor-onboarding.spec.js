@@ -1066,12 +1066,16 @@ test.describe('instructor onboarding', () => {
         expect(unit1.assessmentQuestions).toHaveLength(3);
         const savedTrueFalse = findSavedQuestion(unit1.assessmentQuestions, QUESTIONS.trueFalse.text);
         expect(savedTrueFalse.questionType).toBe('true-false');
-        expect(savedTrueFalse.correctAnswer).toBe('true');
+        // True/false answers are now stored as booleans (see scripts/migrate-question-schema.js).
+        expect(savedTrueFalse.correctAnswer).toBe(true);
 
         const savedMultipleChoice = findSavedQuestion(unit1.assessmentQuestions, QUESTIONS.multipleChoice.text);
         expect(savedMultipleChoice.questionType).toBe('multiple-choice');
-        expect(savedMultipleChoice.options).toEqual(QUESTIONS.multipleChoice.options);
-        expect(savedMultipleChoice.correctAnswer).toBe(QUESTIONS.multipleChoice.correct);
+        // Multiple-choice options are stored as an ordered array with a numeric answer index.
+        expect(savedMultipleChoice.options).toEqual(Object.values(QUESTIONS.multipleChoice.options));
+        expect(savedMultipleChoice.correctAnswer).toBe(
+            Object.keys(QUESTIONS.multipleChoice.options).indexOf(QUESTIONS.multipleChoice.correct)
+        );
 
         const savedShortAnswer = findSavedQuestion(unit1.assessmentQuestions, QUESTIONS.shortAnswer.text);
         expect(savedShortAnswer.questionType).toBe('short-answer');

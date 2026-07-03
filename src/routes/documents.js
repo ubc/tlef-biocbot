@@ -152,6 +152,50 @@ function getStoredFileBuffer(fileData) {
     return null;
 }
 
+async function ingestDocument({
+    db,
+    qdrantService,
+    documentData,
+    storedInstructorId,
+    linkTitle,
+    qdrantData,
+    indexDocument
+}) {
+    const result = await DocumentModel.uploadDocument(db, documentData);
+    const courseResult = await CourseModel.addDocumentToUnit(
+        db,
+        documentData.courseId,
+        documentData.lectureName,
+        {
+            documentId: result.documentId,
+            documentType: documentData.documentType,
+            ...(linkTitle ? { title: linkTitle } : {}),
+            filename: documentData.filename,
+            originalName: documentData.originalName,
+            mimeType: documentData.mimeType,
+            size: documentData.size,
+            status: 'uploaded',
+            metadata: documentData.metadata
+        },
+        storedInstructorId
+    );
+
+    let qdrantResult = null;
+    if (documentData.content) {
+        try {
+            const payload = { ...qdrantData, documentId: result.documentId, type: result.type };
+            qdrantResult = indexDocument
+                ? await indexDocument(payload)
+                : await qdrantService.processAndStoreDocument(payload);
+        } catch (error) {
+            if (error?.name === 'LlmKeyError') throw error;
+            console.warn('Warning: Document uploaded but Qdrant processing failed:', error.message);
+        }
+    }
+
+    return { result, courseResult, qdrantResult };
+}
+
 /**
  * Count tokens accurately using tiktoken (cl100k_base encoding)
  * @param {string} text - Text to count tokens for
@@ -388,87 +432,48 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             console.log(`📝 Document will be created with ${textContent.length} characters of extracted text`);
         }
         
-        // Upload document to MongoDB with content already included
-        const result = await DocumentModel.uploadDocument(db, documentData);
-        
-        // Also add document reference to the course structure
-        const courseResult = await CourseModel.addDocumentToUnit(db, courseId, lectureName, {
-            documentId: result.documentId,
-            documentType: documentType,
-            title: req.body.title || documentData.filename,
-            filename: documentData.filename, // Use the same filename as stored in DocumentModel
-            originalName: file.originalname,
-            mimeType: file.mimetype,
-            size: file.size,
-            status: 'uploaded',
-            metadata: documentData.metadata
-        }, storedInstructorId);
-        
-        if (!courseResult.success) {
-            console.warn('Warning: Document uploaded but failed to link to course structure:', courseResult.error);
-        }
-        
-        // Process document through Qdrant for vector search
-        let qdrantResult = null;
-        if (textContent) {
-            try {
-                const qdrantDocumentData = {
-                    courseId,
-                    lectureName,
-                    documentId: result.documentId,
-                    content: textContent,
-                    fileName: documentData.filename, // Use the strict title/filename
-                    mimeType: file.mimetype,
-                    documentType: documentType,
-                    type: result.type
+        const indexSlides = file.mimetype === PPTX_MIME_TYPE && parsedSlides.length > 0
+            ? async qdrantDocumentData => {
+                const slideChunks = parsedSlides.map(slide => slide.text.trim()).filter(Boolean);
+                const slideMetadata = parsedSlides
+                    .filter(slide => slide.text && slide.text.trim())
+                    .map(slide => ({
+                        sourceUnit: 'slide',
+                        slideNumber: slide.slideNumber,
+                        describedImageCount: slide.describedImageCount || 0
+                    }));
+                const embeddings = await qdrantService.generateEmbeddings(slideChunks);
+                const storedChunks = await qdrantService.storeChunks(
+                    { ...qdrantDocumentData, chunkMetadata: slideMetadata },
+                    slideChunks,
+                    embeddings,
+                    'pptx-slide'
+                );
+                return {
+                    success: true,
+                    chunksProcessed: slideChunks.length,
+                    chunksStored: storedChunks.length,
+                    message: `PowerPoint processed and ${storedChunks.length} slide chunks stored successfully`
                 };
-
-                if (file.mimetype === PPTX_MIME_TYPE && parsedSlides.length > 0) {
-                    const slideChunks = parsedSlides.map(slide => slide.text.trim()).filter(Boolean);
-                    const slideMetadata = parsedSlides
-                        .filter(slide => slide.text && slide.text.trim())
-                        .map(slide => ({
-                            sourceUnit: 'slide',
-                            slideNumber: slide.slideNumber,
-                            describedImageCount: slide.describedImageCount || 0
-                        }));
-
-                    console.log(`Processing PowerPoint through Qdrant per slide: ${file.originalname} -> ${slideChunks.length} slides`);
-                    const embeddings = await qdrantService.generateEmbeddings(slideChunks);
-                    const storedChunks = await qdrantService.storeChunks(
-                        {
-                            ...qdrantDocumentData,
-                            chunkMetadata: slideMetadata
-                        },
-                        slideChunks,
-                        embeddings,
-                        'pptx-slide'
-                    );
-
-                    qdrantResult = {
-                        success: true,
-                        chunksProcessed: slideChunks.length,
-                        chunksStored: storedChunks.length,
-                        message: `PowerPoint processed and ${storedChunks.length} slide chunks stored successfully`
-                    };
-                } else {
-                    // Try to process through Qdrant for vector search
-                    console.log(`Processing document through Qdrant: ${file.originalname} -> ${documentData.filename}`);
-                    qdrantResult = await qdrantService.processAndStoreDocument(qdrantDocumentData);
-                }
-                
-                if (qdrantResult.success) {
-                    console.log(`✅ Document processed and stored in Qdrant: ${qdrantResult.chunksStored} chunks`);
-                } else {
-                    console.warn(`⚠️ Qdrant processing failed: ${qdrantResult.error}`);
-                }
-            } catch (qdrantError) {
-                if (qdrantError && qdrantError.name === 'LlmKeyError') {
-                    throw qdrantError;
-                }
-                console.warn('Warning: Document uploaded but Qdrant processing failed:', qdrantError.message);
             }
-        }
+            : null;
+
+        const { result, courseResult, qdrantResult } = await ingestDocument({
+            db,
+            qdrantService,
+            documentData,
+            storedInstructorId,
+            linkTitle: req.body.title || documentData.filename,
+            qdrantData: {
+                courseId,
+                lectureName,
+                content: textContent,
+                fileName: documentData.filename,
+                mimeType: file.mimetype,
+                documentType
+            },
+            indexDocument: indexSlides
+        });
         
         console.log(`Document uploaded: ${file.originalname} for ${lectureName}`);
         
@@ -551,51 +556,20 @@ router.post('/text', async (req, res) => {
             }
         };
         
-        // Upload document to MongoDB
-        const result = await DocumentModel.uploadDocument(db, documentData);
-        
-        // Also add document reference to the course structure
-        const courseResult = await CourseModel.addDocumentToUnit(db, courseId, lectureName, {
-            documentId: result.documentId,
-            documentType: documentType,
-            filename: documentData.filename,
-            originalName: documentData.originalName,
-            mimeType: documentData.mimeType,
-            size: documentData.size,
-            status: 'uploaded',
-            metadata: documentData.metadata
-        }, storedInstructorId);
-        
-        if (!courseResult.success) {
-            console.warn('Warning: Text document uploaded but failed to link to course structure:', courseResult.error);
-        }
-        
-        // Process text document through Qdrant for vector search
-        let qdrantResult = null;
-        try {
-            console.log(`Processing text document through Qdrant: ${title}`);
-            qdrantResult = await qdrantService.processAndStoreDocument({
+        const { result, courseResult, qdrantResult } = await ingestDocument({
+            db,
+            qdrantService,
+            documentData,
+            storedInstructorId,
+            qdrantData: {
                 courseId,
                 lectureName,
-                documentId: result.documentId,
-                content: content,
+                content,
                 fileName: title,
                 mimeType: 'text/plain',
-                documentType: documentType,
-                type: result.type
-            });
-            
-            if (qdrantResult.success) {
-                console.log(`✅ Text document processed and stored in Qdrant: ${qdrantResult.chunksStored} chunks`);
-            } else {
-                console.warn(`⚠️ Qdrant processing failed: ${qdrantResult.error}`);
+                documentType
             }
-        } catch (qdrantError) {
-            if (qdrantError && qdrantError.name === 'LlmKeyError') {
-                throw qdrantError;
-            }
-            console.warn('Warning: Text document uploaded but Qdrant processing failed:', qdrantError.message);
-        }
+        });
         
         console.log(`Text document submitted: ${title} for ${lectureName}`);
         
@@ -1106,6 +1080,9 @@ router.post('/:documentId/extract-questions', async (req, res) => {
         if (!document) {
             return res.status(404).json({ success: false, message: 'Document not found' });
         }
+
+        const access = await requireCourseDocumentAccess(req, res, db, document.courseId);
+        if (!access) return;
 
         const ai = await resolveCourseAi(req, res, document.courseId);
         if (!ai) return;

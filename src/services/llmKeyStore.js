@@ -138,6 +138,9 @@ function decryptApiKey(ciphertext) {
 
 function buildKeySubdocument(apiKey, updatedBy) {
     const trimmed = normalizeApiKey(apiKey);
+    if (!trimmed) {
+        throw new TypeError('OpenAI API key must be a non-empty string');
+    }
     const now = new Date();
     return {
         ciphertext: encryptApiKey(trimmed),

@@ -14,6 +14,7 @@ const prompts = require('../services/prompts');
 const BadWordsFilter = require('bad-words');
 const { resolveCourseAi, sendLlmKeyError } = require('./llmKeyMiddleware');
 const { publicKeySummary } = require('../services/llmKeyStore');
+const { evaluateObjectiveAnswer } = require('../services/objectiveAnswer');
 const profanityFilter = new BadWordsFilter();
 
 router.use(express.json());
@@ -69,6 +70,43 @@ function isUnitTestable(settings, lectureName) {
         || (Array.isArray(settings.testableUnits) && settings.testableUnits.includes(lectureName));
 }
 
+async function getQuizMaterialSettings(db, courseId) {
+    const settings = await CourseModel.getQuizSettings(db, courseId);
+    if (!settings.enabled) {
+        return {
+            status: 403,
+            body: { success: false, message: 'Quiz practice is not enabled for this course' }
+        };
+    }
+
+    if (!settings.allowLectureMaterialAccess) {
+        return {
+            status: 403,
+            body: { success: false, message: 'Lecture material access is not enabled' }
+        };
+    }
+
+    return { settings };
+}
+
+async function getVisibleQuizMaterialSettings(db, courseId, lectureName, existingSettings) {
+    const access = existingSettings
+        ? { settings: existingSettings }
+        : await getQuizMaterialSettings(db, courseId);
+    if (access.status) return access;
+
+    const { settings } = access;
+    const publishedNames = await CourseModel.getPublishedLectures(db, courseId);
+    if (!publishedNames.includes(lectureName) || !isUnitTestable(settings, lectureName)) {
+        return {
+            status: 403,
+            body: { success: false, message: 'Quiz material is not available' }
+        };
+    }
+
+    return { settings };
+}
+
 async function getVisibleQuizQuestion(db, courseId, lectureName, questionId) {
     const settings = await CourseModel.getQuizSettings(db, courseId);
     if (!settings.enabled) {
@@ -100,15 +138,6 @@ async function getVisibleQuizQuestion(db, courseId, lectureName, questionId) {
 
 function isObjectiveQuestion(question) {
     return question.questionType === 'multiple-choice' || question.questionType === 'true-false';
-}
-
-function evaluateObjectiveAnswer(question, studentAnswer) {
-    const correct = String(studentAnswer).toLowerCase() === String(question.correctAnswer).toLowerCase();
-    const feedback = correct
-        ? 'Correct! Well done.'
-        : `Incorrect. The correct answer is ${question.correctAnswer}.`;
-
-    return { correct, feedback, correctAnswer: question.correctAnswer };
 }
 
 /**
@@ -400,10 +429,9 @@ router.get('/materials', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        // Check if material access is allowed
-        const settings = await CourseModel.getQuizSettings(db, courseId);
-        if (!settings.allowLectureMaterialAccess) {
-            return res.status(403).json({ success: false, message: 'Lecture material access is not enabled' });
+        const visibility = await getVisibleQuizMaterialSettings(db, courseId, lectureName);
+        if (visibility.status) {
+            return res.status(visibility.status).json(visibility.body);
         }
 
         const ai = await resolveCourseAi(req, res, courseId);
@@ -445,19 +473,28 @@ router.get('/materials/:documentId/download', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        // Check if material access is allowed
-        const settings = await CourseModel.getQuizSettings(db, courseId);
-        if (!settings.allowLectureMaterialAccess) {
-            return res.status(403).json({ success: false, message: 'Lecture material access is not enabled' });
+        const access = await getQuizMaterialSettings(db, courseId);
+        if (access.status) {
+            return res.status(access.status).json(access.body);
         }
-
-        const ai = await resolveCourseAi(req, res, courseId);
-        if (!ai) return;
 
         const document = await DocumentModel.getDocumentById(db, documentId);
         if (!document || document.courseId !== courseId) {
             return res.status(404).json({ success: false, message: 'Document not found' });
         }
+
+        const visibility = await getVisibleQuizMaterialSettings(
+            db,
+            courseId,
+            document.lectureName,
+            access.settings
+        );
+        if (visibility.status) {
+            return res.status(visibility.status).json(visibility.body);
+        }
+
+        const ai = await resolveCourseAi(req, res, courseId);
+        if (!ai) return;
 
         const downloadFilename = resolveDownloadFilename(document);
         setAttachmentHeaders(res, downloadFilename);

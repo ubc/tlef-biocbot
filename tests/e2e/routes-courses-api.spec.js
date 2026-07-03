@@ -105,7 +105,8 @@ test.describe('POST /api/courses (create)', () => {
             expect(res.status()).toBe(201);
             const body = await res.json();
             expect(body.success).toBe(true);
-            expect(body.data.id).toMatch(/^bioc-e2e-api-new-course-\d+$/);
+            // Course ids are now opaque UUIDs from createId('course'), not name-derived slugs.
+            expect(body.data.id).toMatch(/^course_[0-9a-f-]{36}$/);
             expect(body.data.weeks).toBe(3);
             expect(body.data.lecturesPerWeek).toBe(2);
             // Practice-quizzes special folder is in the returned structure

@@ -156,7 +156,7 @@ describe('academicRosterSync coverage: missing course and identifier-less studen
         // No puid/email/studentId → the existing-user lookup cannot match; a new
         // user is created with a generated username and the course preference set.
         expect(user.created).toBe(true);
-        expect(user.username).toMatch(/^user_\d+_/);
+        expect(user.username).toMatch(/^user_[0-9a-f-]{36}$/i);
         expect(user).toMatchObject({ displayName: 'Mystery Student', role: 'student', preferences: expect.objectContaining({ courseId: 'C1' }) });
     });
 

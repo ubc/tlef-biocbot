@@ -446,6 +446,16 @@ function applyMode(mode) {
         state.user = { ...baseUser, userId: 'inst', role: 'instructor' };
         CourseModel.userHasCourseAccess = async () => true;
     }
+    if (state.mode === 'qdrant-delete-fails' || state.mode === 'qdrant-delete-throws') {
+        // DELETE /api/qdrant/document/:documentId now resolves the document's
+        // course and 404s unless both the document and its course exist, so
+        // seed them for the service-failure branches to be reachable.
+        state.db = memoryDb({
+            users: new MemoryCollection([{ ...baseUser }]),
+            documents: new MemoryCollection([{ _id: 'doc-h', documentId: 'doc-h', courseId: 'BIOC-H' }]),
+            courses: new MemoryCollection([{ _id: 'BIOC-H', courseId: 'BIOC-H', instructorId: 'inst', instructors: ['inst'] }]),
+        });
+    }
     if (state.mode === 'chat-rag-topk') {
         state.user = { ...baseUser, userId: 'student-harness', role: 'student' };
         state.db = memoryDb({

@@ -94,11 +94,6 @@ async function requireInstructorCourse(req, res, courseId) {
     const db = req.app.locals.db;
     const user = req.user;
 
-    if (!db) {
-        res.status(503).json({ success: false, message: 'Database connection not available' });
-        return null;
-    }
-
     if (!user || user.role !== 'instructor') {
         res.status(403).json({ success: false, message: 'Only instructors can manage academic roster sync' });
         return null;

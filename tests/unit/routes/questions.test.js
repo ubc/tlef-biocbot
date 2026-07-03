@@ -115,6 +115,11 @@ describe('GET /stats', () => {
         expect((await request(app({ db: courseDb() })).get('/stats')).status).toBe(400);
     });
 
+    test('requires authentication and course access', async () => {
+        expect((await request(app({ db: courseDb() })).get('/stats?courseId=C1')).status).toBe(401);
+        expect((await request(app({ db: courseDb(), user: otherInstructor })).get('/stats?courseId=C1')).status).toBe(403);
+    });
+
     test('calculates totals and type breakdown from all lectures', async () => {
         const db = courseDb({ lectures: [
             { name: 'One', assessmentQuestions: [
@@ -123,8 +128,7 @@ describe('GET /stats', () => {
             ] },
             { name: 'Two', assessmentQuestions: [{ questionType: 'true-false', points: 3 }] },
         ] });
-        // Current route behavior: statistics are public; no req.user check runs.
-        const res = await request(app({ db })).get('/stats?courseId=C1');
+        const res = await request(app({ db, user: instructor })).get('/stats?courseId=C1');
         expect(res.status).toBe(200);
         expect(res.body.data.stats).toEqual({
             totalQuestions: 3,

@@ -1842,21 +1842,37 @@ test.describe('POST /api/flags — student flagging', () => {
         expect(row.studentId).not.toBe(OTHER_STUDENT_ID);
     });
 
-    test('non-student (instructor) sessions get 403', async ({ browser }) => {
+    test('instructor sessions can flag their own course but not a foreign one', async ({ browser }) => {
         const ctx = await browser.newContext({ storageState: storageStatePath('instructor') });
         const api = ctx.request;
-        const res = await api.post('/api/flags', {
+
+        // Instructors with course access may now create flags.
+        const ownRes = await api.post('/api/flags', {
             data: {
                 questionId: 'q_e2e_inst_flag',
                 courseId: STU_COURSE_ID,
                 unitName: 'Unit 1',
                 flagReason: 'incorrect',
-                flagDescription: 'Should not be allowed.',
+                flagDescription: 'Instructor flags their own course.',
             },
         });
-        // requireStudentEnrolled returns next() for non-students, then the
-        // route's role check returns 403. Acceptable: 403; not acceptable: 200.
-        expect(res.status()).not.toBe(200);
+        expect(ownRes.status()).toBe(200);
+
+        // A course the instructor has no access to is still rejected.
+        const foreignRes = await api.post('/api/flags', {
+            data: {
+                questionId: 'q_e2e_inst_flag',
+                courseId: 'BIOC-E2E-NOT-MY-COURSE',
+                unitName: 'Unit 1',
+                flagReason: 'incorrect',
+                flagDescription: 'Should not be allowed.',
+            },
+            failOnStatusCode: false,
+        });
+        expect([403, 404]).toContain(foreignRes.status());
+        await withDb((db) =>
+            db.collection('flaggedQuestions').deleteMany({ questionId: 'q_e2e_inst_flag' })
+        );
         await ctx.close();
     });
 });

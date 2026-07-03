@@ -49,11 +49,7 @@ router.post('/rule', (req, res) => {
     if (matchSystemPrompt === undefined && matchMessage === undefined) {
         return res.status(400).json({ success: false, message: 'Provide matchSystemPrompt or matchMessage' });
     }
-    try {
-        stub.addRule({ matchSystemPrompt, matchMessage, content });
-    } catch (err) {
-        return res.status(400).json({ success: false, message: err.message });
-    }
+    stub.addRule({ matchSystemPrompt, matchMessage, content });
     return res.json({ success: true, ruleCount: stub.rules.length });
 });
 

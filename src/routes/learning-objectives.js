@@ -3,25 +3,37 @@ const router = express.Router();
 
 // Import the Course model
 const CourseModel = require('../models/Course');
+const { hasSystemAdminAccess } = require('../services/authorization');
 
 // Middleware for JSON parsing
 router.use(express.json());
+
+async function canManageCourse(db, courseId, user) {
+    if (hasSystemAdminAccess(user)) return true;
+    if (user.role === 'instructor') {
+        return CourseModel.userHasCourseAccess(db, courseId, user.userId, 'instructor');
+    }
+    if (user.role === 'ta') {
+        return CourseModel.checkTAPermission(db, courseId, user.userId, 'courses');
+    }
+    return false;
+}
 
 /**
  * POST /api/learning-objectives
  * Save learning objectives for a specific lecture/unit
  */
 router.post('/', async (req, res) => {
-    const { week, lectureName, objectives, instructorId, courseId } = req.body;
+    const { week, lectureName, objectives, courseId } = req.body;
     
     // Use either week or lectureName (for backward compatibility)
     const unitName = lectureName || week;
     
     // Validate required fields
-    if (!unitName || !objectives || !Array.isArray(objectives) || !instructorId || !courseId) {
+    if (!unitName || !objectives || !Array.isArray(objectives) || !courseId) {
         return res.status(400).json({
             success: false,
-            message: 'Missing required fields: unitName/lectureName, objectives (array), instructorId, courseId'
+            message: 'Missing required fields: unitName/lectureName, objectives (array), courseId'
         });
     }
     
@@ -34,6 +46,20 @@ router.post('/', async (req, res) => {
                 message: 'Database connection not available'
             });
         }
+
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        const course = await CourseModel.getCourseById(db, courseId);
+        if (!course) {
+            return res.status(404).json({ success: false, message: 'Course not found' });
+        }
+
+        if (!await canManageCourse(db, courseId, user)) {
+            return res.status(403).json({ success: false, message: 'No access to modify this course' });
+        }
         
         // Update the learning objectives in MongoDB
         const result = await CourseModel.updateLearningObjectives(
@@ -41,10 +67,18 @@ router.post('/', async (req, res) => {
             courseId, 
             unitName, 
             objectives, 
-            instructorId
+            user.userId
         );
+
+        if (!result.success) {
+            const status = /not found/i.test(result.error || '') ? 404 : 400;
+            return res.status(status).json({
+                success: false,
+                message: result.error || 'Failed to update learning objectives'
+            });
+        }
         
-        console.log(`Learning objectives saved for ${unitName} by instructor ${instructorId}`);
+        console.log(`Learning objectives saved for ${unitName} by ${user.userId}`);
         
         res.json({
             success: true,
@@ -54,7 +88,7 @@ router.post('/', async (req, res) => {
                 objectives,
                 courseId,
                 updatedAt: new Date().toISOString(),
-                instructorId
+                instructorId: user.userId
             }
         });
         

@@ -103,7 +103,7 @@ describe('POST /attempt', () => {
         const res = await request(app({ db, user: student })).post('/attempt')
             .send({ courseId: 'C1', questionId: 'q1', lectureName: 'Unit 1', questionType: 'multiple-choice', studentAnswer: 'B', correct: true });
         expect(res.status).toBe(200);
-        expect(res.body.attemptId).toMatch(/^qa_\d+_/);
+        expect(res.body.attemptId).toMatch(/^qa_[0-9a-f-]{36}$/i);
         expect(await db.collection('quizAttempts').findOne({ studentId: 's1' })).toBeTruthy();
     });
 });

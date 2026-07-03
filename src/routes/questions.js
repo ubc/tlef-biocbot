@@ -93,10 +93,6 @@ function summarizeAutoLinkResults(matchedQuestions = []) {
 }
 
 async function canReadCourseQuestions(db, courseId, user) {
-    if (!user) {
-        return false;
-    }
-
     if (hasSystemAdminAccess(user)) {
         return true;
     }
@@ -109,10 +105,6 @@ async function canReadCourseQuestions(db, courseId, user) {
 }
 
 async function canMutateCourseQuestions(db, courseId, user) {
-    if (!user) {
-        return false;
-    }
-
     if (hasSystemAdminAccess(user)) {
         return true;
     }
@@ -598,18 +590,31 @@ router.get('/stats', async (req, res) => {
             });
         }
 
-        // Get course data to calculate statistics
+        if (!req.user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        // Get course data to calculate statistics only after authentication.
         const collection = db.collection('courses');
         const course = await collection.findOne({ courseId });
+
+        if (course && !(await canReadCourseQuestions(db, courseId, req.user))) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have permission to access questions for this course'
+            });
+        }
 
         if (!course || !course.lectures) {
             return res.json({
                 success: true,
                 data: {
                     courseId,
-                    totalQuestions: 0,
-                    totalPoints: 0,
-                    typeBreakdown: []
+                    stats: {
+                        totalQuestions: 0,
+                        totalPoints: 0,
+                        typeBreakdown: []
+                    }
                 }
             });
         }
@@ -843,13 +848,6 @@ router.get('/:questionId', async (req, res) => {
     try {
         const { questionId } = req.params;
         
-        if (!questionId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Missing required parameter: questionId'
-            });
-        }
-        
         // Get database instance from app.locals
         const db = req.app.locals.db;
         if (!db) {
@@ -914,7 +912,7 @@ router.put('/:questionId', async (req, res) => {
         const { questionId } = req.params;
         const { courseId, lectureName, instructorId, ...rawUpdateData } = req.body;
         
-        if (!questionId || !courseId || !lectureName || !instructorId) {
+        if (!courseId || !lectureName || !instructorId) {
             return res.status(400).json({
                 success: false,
                 message: 'Missing required fields: questionId, courseId, lectureName, instructorId'
@@ -940,41 +938,22 @@ router.put('/:questionId', async (req, res) => {
         const questionData = sanitizeQuestionPayload(rawUpdateData);
         questionData.questionId = questionId;
 
-        // PUT must not silently create a new record. Only 404 when the course
-        // and lecture exist but the question id doesn't — leave the model to
-        // surface "Course/Lecture not found" (→ 400) for the other cases.
-        const questionExists = await db.collection('courses').findOne(
-            { courseId, 'lectures.name': lectureName, 'lectures.assessmentQuestions.questionId': questionId },
-            { projection: { _id: 1 } }
-        );
-        if (!questionExists) {
-            const lectureExists = await db.collection('courses').findOne(
-                { courseId, 'lectures.name': lectureName },
-                { projection: { _id: 1 } }
-            );
-            if (lectureExists) {
-                return res.status(404).json({
-                    success: false,
-                    message: `Question ${questionId} not found on lecture ${lectureName}`
-                });
-            }
-            // Course or lecture missing — fall through to the model so the
-            // existing "Course not found" / "Lecture not found" → 400 path runs.
-        }
-
         // Update question in the course structure using Course model
         const result = await CourseModel.updateAssessmentQuestions(
             db,
             courseId,
             lectureName,
             questionData,
-            user.userId
+            user.userId,
+            { requireExisting: true }
         );
         
         if (!result.success) {
-            return res.status(400).json({
+            return res.status(result.notFound ? 404 : 400).json({
                 success: false,
-                message: result.error || 'Failed to update question'
+                message: result.notFound
+                    ? `Question ${questionId} not found on lecture ${lectureName}`
+                    : (result.error || 'Failed to update question')
             });
         }
         
@@ -1008,7 +987,7 @@ router.delete('/:questionId', async (req, res) => {
         const { questionId } = req.params;
         const { instructorId, courseId, lectureName } = req.body;
         
-        if (!questionId || !instructorId || !courseId || !lectureName) {
+        if (!instructorId || !courseId || !lectureName) {
             return res.status(400).json({
                 success: false,
                 message: 'Missing required fields: questionId, instructorId, courseId, lectureName'

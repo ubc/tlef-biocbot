@@ -118,7 +118,8 @@ test.describe('POST /api/courses/:courseId/content', () => {
             fileSize: 1234,
             status: 'processing',
         });
-        expect(body.data.id).toMatch(/^content-\d+$/);
+        // Content ids are now opaque UUIDs from createId('content').
+        expect(body.data.id).toMatch(/^content_[0-9a-f-]{36}$/);
     });
 });
 

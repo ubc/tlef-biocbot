@@ -429,11 +429,11 @@ updates by `_id` (e.g. systemAdmin revoke).
 Record real behavior discrepancies surfaced by tests. These are for a *later* deliberate
 pass, NOT to be fixed while writing tests.
 
-- **Quiz material routes do not verify that the requested lecture is published or quiz-testable.**
-  `GET /api/quiz/materials` accepts any `lectureName` once course-wide material access is enabled, and
-  the download route checks only course ownership. A student who can guess an unpublished lecture name
-  or document ID can therefore retrieve that course material. The quiz-question routes do enforce both
-  publication and `testableUnits`; the material routes do not. Not fixed in this test-only pass.
+- **✅ Fixed — Quiz material routes did not verify that the requested lecture was published or
+  quiz-testable.** Both `GET /api/quiz/materials` and the direct download route now require quiz
+  practice and material access to be enabled, and require the document's lecture to be published and
+  included in `testableUnits`. Focused route tests cover unpublished and excluded lectures for both
+  listing and guessed-document download paths.
 
 - **A GridFS quiz-material failure after piping starts cannot return the advertised JSON error.** The
   stream error handler falls back to ending the partially-started response once headers are sent, so the
@@ -456,37 +456,32 @@ pass, NOT to be fixed while writing tests.
   while `'Course 0'` → null (leading digit 0 is rejected). Edge behavior, almost certainly
   fine for real course names; characterized in `Course.pure.test.js`, not fixed.
 
-- **`FlaggedQuestion.createFlaggedQuestion` lets `flagData.flagId` override the stored ID.**
-  It generates a new `flagId` and returns that generated value, but spreads `flagData` after it
-  in the inserted document, so a caller-provided `flagId` is what actually gets stored. The
-  generated return ID then cannot retrieve the inserted flag. Characterized in
-  `FlaggedQuestion.test.js`; not fixed.
+- **✅ Fixed — `FlaggedQuestion.createFlaggedQuestion` let `flagData.flagId` override the stored ID.**
+  The generated ID is now applied after caller data, so the returned ID always identifies the inserted
+  flag. The model regression test verifies that a caller-provided ID is ignored.
 
-- **`flags` says instructors may create flags, but rejects them for every ordinary course.** The
-  route's initial role gate explicitly allows students and instructors, while
-  `canCreateFlagForCourse` returns false for an instructor unless it is a Super Course flag. Thus an
-  instructor receives 403 even for a course they own. Characterized in `tests/unit/routes/flags.test.js`;
-  not fixed.
+- **✅ Fixed — `flags` said instructors may create flags but rejected ordinary-course flags.**
+  Instructors may now create a flag only when `userHasCourseAccess` confirms that they teach the
+  requested course. Route tests cover both an owning instructor and an unrelated instructor.
 
-- **`PUT /api/flags/:flagId/status` accepts arbitrary non-empty status strings.** Neither the route nor
-  `FlaggedQuestion.updateFlagStatus` validates the status vocabulary, so values such as `"banana"` are
-  persisted and returned as successful. Characterized in `tests/unit/routes/flags.test.js`; not fixed.
+- **✅ Fixed — `PUT /api/flags/:flagId/status` accepted arbitrary non-empty status strings.**
+  Both status-only updates and response updates now accept only `pending`, `reviewed`, `resolved`, or
+  `dismissed`, with validation at both the route and model boundaries. Regression tests verify invalid
+  values are rejected without modifying the stored flag.
 
-- **`Onboarding.upsertOnboarding` overwrites `createdAt` during updates when omitted.**
-  The comment says `createdAt` is only set for new documents, but the implementation always places
-  `createdAt` in `$set` (`now` when the caller does not provide one). Updating an existing document
-  without `createdAt` therefore replaces the original creation timestamp. Characterized in
-  `Onboarding.test.js`; not fixed.
+- **✅ Fixed — `Onboarding.upsertOnboarding` overwrote `createdAt` during updates.**
+  `createdAt` now uses `$setOnInsert`, preserving the original timestamp on every update while still
+  initializing new records. The model regression test verifies the original date is unchanged.
 
-- **`PersistenceTopic.incrementStudentCount` builds a `RegExp` from unescaped topic text.**
-  A topic containing regex metacharacters can match a different stored topic, e.g. input
-  `'ATP.se'` matches stored topic `'atpase'` and increments that document instead of creating
-  a literal `atp.se` topic. Characterized in `PersistenceTopic.test.js`; not fixed.
+- **✅ Fixed — `PersistenceTopic.incrementStudentCount` built a `RegExp` from unescaped topic text.**
+  Topic text is now escaped before constructing the anchored case-insensitive expression, so regex
+  metacharacters are matched literally. The regression test verifies that input `'ATP.se'` creates a
+  distinct `atp.se` topic instead of incrementing an existing `atpase` topic.
 
-- **`User.authenticateUser` accepts a basic-auth user with `passwordHash: null`.**
-  The password check runs only when `authProvider === 'basic' && user.passwordHash`; if a basic
-  active user has no hash, any password is accepted and `lastLogin` is updated. Characterized in
-  `User.test.js`; not fixed.
+- **✅ Fixed — `User.authenticateUser` accepted a basic-auth user with `passwordHash: null`.**
+  Basic-auth accounts now fail closed when their password hash is missing, returning the same generic
+  invalid-credentials response used for unknown users and incorrect passwords. The regression test in
+  `User.test.js` also verifies that a rejected attempt does not update `lastLogin`.
 
 - **`GET /api/questions/stats` does not require authentication or course access.** Anyone who knows
   a `courseId` can retrieve aggregate question counts, points, and type breakdown. Characterized in
@@ -511,31 +506,23 @@ pass, NOT to be fixed while writing tests.
   maps any non-success to a 500 with no user-not-found branch. Characterized in
   `tests/unit/routes/student-tracker.test.js`; not fixed.
 
-- **`POST /api/lectures/publish` swallows the model's "lecture not found" on unpublish.**
-  `updateLecturePublishStatus` returns `{ success: false, error: 'Lecture not found' }` for an unknown
-  lecture name, but the route still responds HTTP 200 echoing the request (with `data.created` undefined).
-  So unpublishing a non-existent lecture looks successful to the client. Characterized in
-  `tests/unit/routes/lectures.test.js`; not fixed.
+- **✅ Fixed — `POST /api/lectures/publish` swallowed the model's "lecture not found" result.**
+  The route now checks the model result and returns 404 for an unknown course/lecture instead of
+  echoing a successful publish response. The focused route test covers the unknown-lecture path.
 
-- **`POST /api/learning-objectives` never inspects the model result.** `updateLearningObjectives`
-  returns `{ success: false, error: 'Course not found' / 'Lecture not found' }` for a missing course or
-  lecture, but the route discards `result` and always responds HTTP 200 success echoing the request. So
-  saving objectives to a non-existent course/lecture silently no-ops yet reports success. (The handler
-  also performs no auth/role check of its own — it trusts the body's `instructorId`; in production the
-  mount applies `requireAuth` + `requireActiveCourseForNonInstructors`.) Characterized in
-  `tests/unit/routes/learning-objectives.test.js`; not fixed.
+- **✅ Fixed — `POST /api/learning-objectives` ignored model failures and trusted body identity.**
+  The route now authorizes course-management access from `req.user`, uses the session user as the
+  mutation actor, and returns 404 when the course or lecture does not exist. Tests cover anonymous,
+  unauthorized, spoofed-identity, missing-course, missing-lecture, and successful writes.
 
 - **`user-agreement` handlers destructure `req.user` with no guard.** `GET /status` and `POST /agree`
   both do `const { userId, role } = req.user`, so an unauthenticated request throws and yields a 500
   rather than a 401. Not reachable in production (mounted behind `requireAuth`). Characterized in
   `tests/unit/routes/user-agreement.test.js`; not fixed.
 
-- **`POST /api/courses` 500s when `contentTypes` is omitted.** Every use treats `contentTypes` as
-  optional (`contentTypes || []`) EXCEPT the success-path call `generateCourseStructure(weeks,
-  lecturesPerWeek, contentTypes)`, which does `contentTypes.includes('practice-quizzes')` on the raw
-  (possibly undefined) value and throws — so a create request without `contentTypes` returns a 500 after
-  the course has already been written to Mongo. Characterized in `tests/unit/routes/courses.deep.test.js`
-  (the happy-path test passes `contentTypes`); not fixed.
+- **✅ Fixed — `POST /api/courses` 500ed after writing when `contentTypes` was omitted.** The route now
+  normalizes an omitted value to `[]` before persistence and response generation, and rejects supplied
+  non-array values with 400. Regression tests verify both the optional empty path and invalid input.
 
 - **`chat.js` contains private retrieval-analysis code that is unreachable from the exported router.**
   `analyzeChunkSources` and `checkLearningObjectivesMatch` (including their nested callbacks) are
@@ -550,6 +537,12 @@ pass, NOT to be fixed while writing tests.
 - **`POST /api/chat` assumes Qdrant search returns an array.** If `searchDocuments` resolves `null`
   instead of throwing or returning `[]`, later array operations fail and the route returns its generic
   500 response. Characterized in `tests/unit/routes/chat.additional.test.js`; not fixed.
+
+- **✅ Fixed — Assessment-question writers and evaluators used divergent data shapes.** Instructor and
+  onboarding writes now preserve boolean TF answers, ordered MCQ option arrays, and numeric MCQ answer
+  indexes. Quiz and chat share `services/objectiveAnswer.js`; instructor/student rendering handles
+  structured falsy answers such as index `0`; and `scripts/migrate-question-schema.js` provides dry-run
+  and explicit apply modes for existing records. Focused unit and browser tests cover the boundaries.
 
 - **The full Supertest suite has a known transient socket/parser flake.** During this pass, one complete
   run produced `ECONNRESET` / HTTP parse failures in unrelated route suites despite `maxWorkers: 1`;
@@ -580,14 +573,13 @@ pass, NOT to be fixed while writing tests.
   therefore overwrite protected fields such as `courseId` and `instructorId`, moving the record and
   transferring ownership. Characterized in `tests/unit/routes/onboarding.test.js`; not fixed.
 
-- **Onboarding unit-file updates report success for a missing unit.** The route verifies the course but
-  not `unitName`. A positional update matching no lecture returns `modifiedCount: 0`, yet the endpoint
-  responds HTTP 200 with `success: true`. Characterized in `onboarding.test.js`; not fixed.
+- **✅ Fixed — Onboarding unit-file updates reported success for a missing unit.** The route now verifies
+  that `unitName` exists in the course and returns 404 before attempting the positional update.
 
-- **Re-posting onboarding for an existing course reports an update without updating onboarding fields.**
-  The model returns `created: false, modifiedCount: 0`; the route says “updated successfully” and changes
-  only the LLM key, leaving submitted values such as `courseName` untouched. Characterized in
-  `onboarding.test.js`; not fixed.
+- **✅ Fixed — Re-posting onboarding reported an update without updating onboarding fields.** Existing
+  owned courses now receive the submitted safe onboarding fields and return the real modification
+  count. Reposts against another instructor's course return 403, and the API key/cache update follows
+  the actual course ID returned by the model.
 
 - **The student-facing saved-session routes have inconsistent authorization boundaries.**
   `GET /:courseId/:studentId/sessions/own` treats the mere existence of a course as sufficient
@@ -629,11 +621,11 @@ pass, NOT to be fixed while writing tests.
   fire-and-forget usage update when retrieved notes have no persistent IDs. Covered in
   `tests/unit/services/superCourseService.test.js`.
 
-- **Course code generation has a bounded-collision weakness.** `generateDistinctCourseCode` retries
-  at most 20 times but returns the final generated value without proving it is distinct. Under extreme
-  RNG collision (or deterministic mocking), an existing student/instructor code can still be returned.
-  The loop is now covered through `upsertCourse`; changing the failure contract requires a product-level
-  decision (throw, retry longer, or enforce/retry a database uniqueness constraint).
+- **✅ Fixed — Course code generation returned a known collision after exhausting retries.**
+  `generateDistinctCourseCode` now throws after 20 colliding candidates, preventing `upsertCourse` and
+  onboarding course creation from writing a course with duplicate student/instructor codes. Tests use
+  deterministic RNG collisions and verify that exhaustion rejects without inserting the course. A
+  database-wide unique constraint remains a possible future defense-in-depth improvement.
 
 - **Four empty-path-parameter guards in `src/routes/struggle-activity.js` are unreachable through the
   exported router.** The `if (!userId)` / `if (!courseId)` 400 branches in `/student/:userId`,
@@ -690,13 +682,18 @@ pass, NOT to be fixed while writing tests.
   (c) The empty-`questionId` guard at 847 (Express path-parameter pattern). These keep the file at
   ~98.6% lines; literal 100% would need production edits or coverage-ignore directives. Not fixed.
 
-- **Several Course positional-update helpers can report false success during a race.** Helpers such as
+- **✅ Fixed — Course positional-update helpers could report false success during a race.**
   `updateLecturePublishStatus`, `updateLearningObjectives`, `updatePassThreshold`,
-  `updateUnitDisplayName`, and `addDocumentToUnit` first read the course/unit and then perform a separate
-  positional update. They return `{ success: true }` without requiring `matchedCount > 0`; if the unit is
-  concurrently removed between those operations, the write matches nothing but the caller still sees
-  success. Unit tests cover their current contracts. A robust fix would make the update result authoritative
-  or use a single atomic conditional update.
+  `updateUnitDisplayName`, and both `addDocumentToUnit` branches now require the conditional write's
+  `matchedCount` to be nonzero. Focused model tests simulate the unit/document disappearing between the
+  initial read and write and verify that each helper fails instead of reporting success.
+
+- **✅ Fixed — PUT could recreate a missing assessment question.**
+  The question PUT route now selects the model's `requireExisting` mode, which returns 404 for an
+  unknown `questionId` and conditionally matches the existing embedded question during the write.
+  This prevents stale editors from silently recreating a deleted question; POST and bulk creation
+  continue to use the model's create-capable default. Route and model regression tests cover both
+  the HTTP response and the no-insert guarantee.
 
 ---
 

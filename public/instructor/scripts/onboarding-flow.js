@@ -417,7 +417,7 @@ function repopulateOnboardingAssessmentQuestions(serverQuestions) {
     const restored = (serverQuestions || []).map((q) => ({
         id: q.questionId || q.id || Date.now() + Math.random(),
         questionId: q.questionId,
-        type: q.questionType || q.type,
+        questionType: q.questionType || q.type,
         question: q.question,
         options: q.options,
         correctAnswer: q.correctAnswer,

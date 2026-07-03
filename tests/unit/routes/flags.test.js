@@ -50,6 +50,22 @@ describe('POST / — create a flag', () => {
         expect(res.body.data.flagId).toBeTruthy();
         expect(await db.collection('flaggedQuestions').findOne({ flagId: res.body.data.flagId })).toBeTruthy();
     });
+
+    test('allows an instructor to flag content in a course they teach', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', courseName: 'Bio', instructorId: 'i1' }] });
+
+        const res = await request(app({ db, user: instructor })).post('/').send(validFlag);
+
+        expect(res.status).toBe(200);
+        expect(await db.collection('flaggedQuestions').findOne({ flagId: res.body.data.flagId }))
+            .toMatchObject({ reporterRole: 'instructor', reporterId: 'i1' });
+    });
+
+    test('rejects an instructor who does not teach the course', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', courseName: 'Bio', instructorId: 'other' }] });
+
+        expect((await request(app({ db, user: instructor })).post('/').send(validFlag)).status).toBe(403);
+    });
 });
 
 describe('GET /my — student\'s own flags', () => {
@@ -97,14 +113,15 @@ describe('PUT /:flagId/status — instructor/TA review', () => {
         expect((await db.collection('flaggedQuestions').findOne({ flagId: 'f1' })).flagStatus).toBe('resolved');
     });
 
-    test('currently accepts and persists an arbitrary non-empty status', async () => {
+    test('rejects an arbitrary non-empty status without changing the flag', async () => {
         const db = memoryDb({
             courses: [{ courseId: 'C1', instructorId: 'i1' }],
             flaggedQuestions: [{ flagId: 'f1', courseId: 'C1', flagStatus: 'pending' }],
         });
         const res = await request(app({ db, user: instructor })).put('/f1/status').send({ status: 'banana' });
-        expect(res.status).toBe(200);
-        expect((await db.collection('flaggedQuestions').findOne({ flagId: 'f1' })).flagStatus).toBe('banana');
+        expect(res.status).toBe(400);
+        expect(res.body.message).toBe('Invalid flag status');
+        expect((await db.collection('flaggedQuestions').findOne({ flagId: 'f1' })).flagStatus).toBe('pending');
     });
 });
 
@@ -242,10 +259,12 @@ describe('POST / — validation, normalization, and Super Course flags', () => {
         expect(await db.collection('flaggedQuestions').findOne({ superchatId: 'sc1' })).toBeTruthy();
     });
 
-    test('an instructor cannot create an ordinary course flag', async () => {
+    test('an instructor can create an ordinary flag for a course they teach', async () => {
         const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1' }] });
         const res = await request(app({ db, user: instructor })).post('/').send(validFlag);
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(200);
+        expect(await db.collection('flaggedQuestions').findOne({ flagId: res.body.data.flagId }))
+            .toMatchObject({ reporterRole: 'instructor', courseId: 'C1' });
     });
 
     test('falls back through course code and course id for the stored course name', async () => {

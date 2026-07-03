@@ -7,6 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const MentalHealthFlag = require('../models/MentalHealthFlag');
+const CourseModel = require('../models/Course');
 const { hasSystemAdminAccess } = require('../services/authorization');
 
 /**
@@ -27,6 +28,30 @@ function anonymizeFlags(flags) {
     }));
 }
 
+async function requireCourseStaff(req, res, db, courseId) {
+    const user = req.user;
+    if (!user) {
+        res.status(401).json({ success: false, message: 'Authentication required' });
+        return false;
+    }
+    if (isAdmin(user)) return true;
+    if (user.role === 'instructor' &&
+        await CourseModel.userHasCourseAccess(db, courseId, user.userId, 'instructor')) return true;
+    if (user.role === 'ta' &&
+        await CourseModel.checkTAPermission(db, courseId, user.userId, 'courses')) return true;
+    res.status(403).json({ success: false, message: 'Access denied' });
+    return false;
+}
+
+async function requireFlagStaff(req, res, db, flagId) {
+    const flag = await db.collection('mentalHealthFlags').findOne({ flagId });
+    if (!flag) {
+        res.status(404).json({ success: false, message: 'Flag not found' });
+        return false;
+    }
+    return requireCourseStaff(req, res, db, flag.courseId);
+}
+
 /**
  * GET /api/mental-health-flags/course/:courseId
  * Get mental health flags for a course.
@@ -41,6 +66,8 @@ router.get('/course/:courseId', async (req, res) => {
 
         const { courseId } = req.params;
         const status = req.query.status || null;
+
+        if (!(await requireCourseStaff(req, res, db, courseId))) return;
 
         let flags = await MentalHealthFlag.getMentalHealthFlagsForCourse(db, courseId, status);
 
@@ -78,8 +105,10 @@ router.put('/:flagId/escalate', async (req, res) => {
         const { flagId } = req.params;
         const userId = req.user?.userId;
 
+        if (!(await requireFlagStaff(req, res, db, flagId))) return;
+
         const result = await MentalHealthFlag.updateFlagStatus(db, flagId, 'escalated', userId);
-        res.json(result);
+        res.status(result.success ? 200 : 404).json(result);
     } catch (error) {
         console.error('Error escalating mental health flag:', error);
         res.status(500).json({ success: false, message: 'Failed to escalate flag' });
@@ -100,8 +129,10 @@ router.put('/:flagId/dismiss', async (req, res) => {
         const { flagId } = req.params;
         const userId = req.user?.userId;
 
+        if (!(await requireFlagStaff(req, res, db, flagId))) return;
+
         const result = await MentalHealthFlag.updateFlagStatus(db, flagId, 'dismissed', userId);
-        res.json(result);
+        res.status(result.success ? 200 : 404).json(result);
     } catch (error) {
         console.error('Error dismissing mental health flag:', error);
         res.status(500).json({ success: false, message: 'Failed to dismiss flag' });
@@ -127,7 +158,7 @@ router.put('/:flagId/resolve', async (req, res) => {
         const userId = req.user?.userId;
 
         const result = await MentalHealthFlag.updateFlagStatus(db, flagId, 'resolved', userId);
-        res.json(result);
+        res.status(result.success ? 200 : 404).json(result);
     } catch (error) {
         console.error('Error resolving mental health flag:', error);
         res.status(500).json({ success: false, message: 'Failed to resolve flag' });
@@ -153,7 +184,7 @@ router.put('/:flagId/disregard', async (req, res) => {
         const userId = req.user?.userId;
 
         const result = await MentalHealthFlag.updateFlagStatus(db, flagId, 'disregarded', userId);
-        res.json(result);
+        res.status(result.success ? 200 : 404).json(result);
     } catch (error) {
         console.error('Error disregarding mental health flag:', error);
         res.status(500).json({ success: false, message: 'Failed to disregard flag' });

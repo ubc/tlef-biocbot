@@ -80,6 +80,7 @@ describe('POST /system-admins (grant) and /revoke', () => {
         const res = await request(app({ db, user: admin })).post('/system-admins/revoke').send({ email: 'admin@x.com' });
         expect(res.status).toBe(400);
         expect(res.body.error).toMatch(/last remaining system admin/i);
+        expect(res.body.message).toBe(res.body.error);
     });
 
     test('revoke succeeds when another admin remains', async () => {

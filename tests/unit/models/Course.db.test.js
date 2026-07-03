@@ -122,7 +122,7 @@ describe('Course.updateAssessmentQuestions (return contract; positional write no
         const res = await Course.updateAssessmentQuestions(db, 'C1', 'Unit 1', { question: 'Q?' }, 'i1');
         expect(res.success).toBe(true);
         expect(res.created).toBe(true);
-        expect(res.questionId).toMatch(/^q_\d+_[a-z0-9]+$/);
+        expect(res.questionId).toMatch(/^q_[0-9a-f-]{36}$/i);
     });
 
     test('reports created:false when the questionId already exists on the lecture', async () => {
@@ -131,6 +131,40 @@ describe('Course.updateAssessmentQuestions (return contract; positional write no
         });
         const res = await Course.updateAssessmentQuestions(db, 'C1', 'Unit 1', { questionId: 'q1', question: 'Edited' }, 'i1');
         expect(res).toMatchObject({ success: true, created: false, questionId: 'q1' });
+    });
+
+    test('requireExisting rejects an unknown question without inserting it', async () => {
+        const db = memoryDb({
+            courses: [{ courseId: 'C1', lectures: [{ name: 'Unit 1', assessmentQuestions: [] }] }],
+        });
+        const res = await Course.updateAssessmentQuestions(
+            db, 'C1', 'Unit 1', { questionId: 'missing', question: 'Must not be created' }, 'i1',
+            { requireExisting: true }
+        );
+        expect(res).toEqual({ success: false, notFound: true, error: 'Question not found' });
+        expect(await Course.getAssessmentQuestions(db, 'C1', 'Unit 1')).toEqual([]);
+    });
+
+    test('requireExisting reports not found when the question disappears before the write', async () => {
+        const collection = {
+            findOne: jest.fn().mockResolvedValue({
+                courseId: 'C1',
+                lectures: [{ name: 'Unit 1', assessmentQuestions: [{ questionId: 'q1', question: 'Old' }] }],
+            }),
+            updateOne: jest.fn().mockResolvedValue({ matchedCount: 0, modifiedCount: 0 }),
+        };
+        const db = { collection: jest.fn(() => collection) };
+
+        const res = await Course.updateAssessmentQuestions(
+            db, 'C1', 'Unit 1', { questionId: 'q1', question: 'Stale edit' }, 'i1',
+            { requireExisting: true }
+        );
+
+        expect(res).toEqual({ success: false, notFound: true, error: 'Question not found' });
+        expect(collection.updateOne).toHaveBeenCalledWith(
+            expect.objectContaining({ 'lectures.assessmentQuestions.questionId': 'q1' }),
+            expect.any(Object)
+        );
     });
 });
 
@@ -546,6 +580,22 @@ describe('Course.getCoursesForUser', () => {
         ] });
         const ids = (await Course.getCoursesForUser(db, 't1', 'ta')).map(c => c.courseId);
         expect(ids).toEqual(['C1']);
+    });
+});
+
+describe('Course lifecycle lookups', () => {
+    test('getCourseById hides soft-deleted courses', async () => {
+        const db = memoryDb({ courses: [
+            { courseId: 'ACTIVE', status: 'active' },
+            { courseId: 'DELETED', status: 'deleted' },
+        ] });
+        await expect(Course.getCourseById(db, 'ACTIVE')).resolves.toMatchObject({ courseId: 'ACTIVE' });
+        await expect(Course.getCourseById(db, 'DELETED')).resolves.toBeNull();
+    });
+
+    test('instructors cannot access a soft-deleted course through the shared helper', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1', status: 'deleted' }] });
+        await expect(Course.userHasCourseAccess(db, 'C1', 'i1', 'instructor')).resolves.toBe(false);
     });
 });
 

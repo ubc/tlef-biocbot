@@ -115,7 +115,7 @@ describe('catch blocks — generic 500s via a db that throws', () => {
     });
 
     test('GET /stats 500s when the db throws', async () => {
-        const res = await request(app({ db: malformedDb() })).get('/stats?courseId=C1');
+        const res = await request(app({ db: malformedDb(), user: instructor })).get('/stats?courseId=C1');
         expect(res.status).toBe(500);
     });
 
@@ -266,21 +266,21 @@ describe('GET /lecture and GET /stats — db unavailable / empty-course branches
     });
 
     test('GET /stats 503s when db is missing', async () => {
-        const res = await request(app({ db: null })).get('/stats?courseId=C1');
+        const res = await request(app({ db: null, user: instructor })).get('/stats?courseId=C1');
         expect(res.status).toBe(503);
     });
 
     test('GET /stats returns a zeroed payload (not nested under "stats") for an unknown course', async () => {
-        const res = await request(app({ db: memoryDb({ courses: [] }) })).get('/stats?courseId=ghost');
+        const res = await request(app({ db: memoryDb({ courses: [] }), user: instructor })).get('/stats?courseId=ghost');
         expect(res.status).toBe(200);
-        expect(res.body.data).toEqual({ courseId: 'ghost', totalQuestions: 0, totalPoints: 0, typeBreakdown: [] });
+        expect(res.body.data).toEqual({ courseId: 'ghost', stats: { totalQuestions: 0, totalPoints: 0, typeBreakdown: [] } });
     });
 
     test('GET /stats returns the same zeroed payload for a course with no lectures field', async () => {
         const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1' }] });
-        const res = await request(app({ db })).get('/stats?courseId=C1');
+        const res = await request(app({ db, user: instructor })).get('/stats?courseId=C1');
         expect(res.status).toBe(200);
-        expect(res.body.data.totalQuestions).toBe(0);
+        expect(res.body.data.stats.totalQuestions).toBe(0);
     });
 });
 

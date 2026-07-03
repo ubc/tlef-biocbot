@@ -1674,13 +1674,19 @@ test.describe('instructor.js focused browser coverage', () => {
             const missingMaterials = instructorWindow.checkCourseMaterialsAvailable('Missing Unit');
             const mcLabel = instructorWindow.getQuestionTypeLabel('multiple-choice');
             const tfAnswer = instructorWindow.getQuestionAnswerDisplay({ type: 'true-false', answer: 'true' });
+            const structuredTfAnswer = instructorWindow.getQuestionAnswerDisplay({ questionType: 'true-false', correctAnswer: true });
+            const structuredMcq = instructorWindow.getQuestionAnswerDisplay({
+                questionType: 'multiple-choice', options: ['Alpha', 'Beta'], correctAnswer: 1,
+            });
 
-            return { caseSensitiveMatches, missingMaterials, mcLabel, tfAnswer };
+            return { caseSensitiveMatches, missingMaterials, mcLabel, tfAnswer, structuredTfAnswer, structuredMcq };
         });
 
         expect(edgeResults.caseSensitiveMatches).toBeGreaterThan(0);
         expect(edgeResults.missingMaterials).toBe(false);
         expect(edgeResults.mcLabel).toBe('MCQ');
         expect(edgeResults.tfAnswer).toContain('True');
+        expect(edgeResults.structuredTfAnswer).toContain('True');
+        expect(edgeResults.structuredMcq).toContain('Beta');
     });
 });

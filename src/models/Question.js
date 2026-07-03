@@ -1,3 +1,5 @@
+const { createId } = require('../services/id');
+
 /**
  * Question Model for MongoDB
  * Stores assessment questions linked to courses and lectures
@@ -57,7 +59,7 @@ async function createQuestion(db, questionData) {
     };
     
     // Generate unique question ID
-    question.questionId = `q_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    question.questionId = createId('q');
     
     const result = await collection.insertOne(question);
     
@@ -205,7 +207,7 @@ async function bulkCreateQuestions(db, questionsData) {
         createdAt: now,
         updatedAt: now,
         isActive: true,
-        questionId: `q_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+        questionId: createId('q')
     }));
     
     const result = await collection.insertMany(questions);

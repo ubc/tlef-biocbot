@@ -61,6 +61,14 @@ router.post('/publish', async (req, res) => {
             isPublished,
             user.userId
         );
+
+        if (!result.success) {
+            const status = /not found/i.test(result.error || '') ? 404 : 400;
+            return res.status(status).json({
+                success: false,
+                message: result.error || 'Failed to update publish status'
+            });
+        }
         
         console.log(`Publish status updated for ${lectureName} by ${user.userId}: ${isPublished}`);
         

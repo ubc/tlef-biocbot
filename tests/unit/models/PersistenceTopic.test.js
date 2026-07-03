@@ -88,7 +88,7 @@ describe('PersistenceTopic.incrementStudentCount', () => {
             .resolves.toMatchObject({ studentIds: ['student-9'], studentCount: 1 });
     });
 
-    test('regex metacharacters in a topic can match a different stored topic', async () => {
+    test('treats regex metacharacters as literal topic text', async () => {
         const db = memoryDb({
             [COLL]: [{
                 _id: 'topic-1',
@@ -99,23 +99,23 @@ describe('PersistenceTopic.incrementStudentCount', () => {
             }],
         });
 
-        // Existing behavior: the model interpolates the normalized topic directly
-        // into RegExp, so "." is treated as a wildcard instead of a literal dot.
         const result = await PersistenceTopic.incrementStudentCount(db, 'C1', 'ATP.se', 'student-2');
 
         expect(result).toEqual({
             success: true,
-            topic: 'atpase',
-            count: 2,
-            isNew: false,
+            topic: 'atp.se',
+            count: 1,
+            isNew: true,
         });
-        expect(await db.collection(COLL).countDocuments({ courseId: 'C1' })).toBe(1);
+        expect(await db.collection(COLL).countDocuments({ courseId: 'C1' })).toBe(2);
         await expect(db.collection(COLL).findOne({ _id: 'topic-1' }))
             .resolves.toMatchObject({
                 topic: 'atpase',
-                studentIds: ['student-1', 'student-2'],
-                studentCount: 2,
+                studentIds: ['student-1'],
+                studentCount: 1,
             });
+        await expect(db.collection(COLL).findOne({ topic: 'atp.se' }))
+            .resolves.toMatchObject({ studentIds: ['student-2'], studentCount: 1 });
     });
 
     test('returns success with count zero when the returned document has no studentIds array', async () => {

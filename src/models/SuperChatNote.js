@@ -5,6 +5,7 @@
  * both in MongoDB (this model) and in a dedicated Qdrant collection (vectors).
  */
 
+const { createId } = require('../services/id');
 const COLLECTION_NAME = 'superchat_notes';
 const CONTENT_SOFT_LIMIT = 5000;
 
@@ -14,12 +15,10 @@ function getCollection(db) {
 
 /**
  * Generate a unique note ID
- * @returns {string} Note ID in format "note_[timestamp]_[random]"
+ * @returns {string} Prefixed collision-resistant note ID
  */
 function generateNoteId() {
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 11);
-    return `note_${timestamp}_${random}`;
+    return createId('note');
 }
 
 /**

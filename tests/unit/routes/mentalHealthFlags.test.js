@@ -12,6 +12,8 @@ const router = require('../../../src/routes/mentalHealthFlags');
 const instructor = { userId: 'i1', role: 'instructor' };
 const admin = { userId: 'a1', role: 'instructor', permissions: { systemAdmin: true } };
 const app = (opts) => makeRouteApp(router, opts);
+const course = { courseId: 'C1', instructorId: 'i1', tas: ['t1'] };
+const mentalDb = (data = {}) => memoryDb({ courses: [course], ...data });
 
 const flag = (over = {}) => ({
     flagId: 'mhf_1', studentId: 's1', studentName: 'Jane Student', courseId: 'C1',
@@ -31,8 +33,14 @@ describe('GET /course/:courseId', () => {
         expect(res.status).toBe(503);
     });
 
+    test('requires authentication and membership on the requested course', async () => {
+        const db = mentalDb({ mentalHealthFlags: [flag()] });
+        expect((await request(app({ db })).get('/course/C1')).status).toBe(401);
+        expect((await request(app({ db, user: { userId: 'i2', role: 'instructor' } })).get('/course/C1')).status).toBe(403);
+    });
+
     test('non-admin gets anonymized flags (no studentId, generic name) and isAdmin:false', async () => {
-        const db = memoryDb({ mentalHealthFlags: [flag()] });
+        const db = mentalDb({ mentalHealthFlags: [flag()] });
         const res = await request(app({ db, user: instructor })).get('/course/C1');
         expect(res.status).toBe(200);
         expect(res.body.isAdmin).toBe(false);
@@ -42,7 +50,7 @@ describe('GET /course/:courseId', () => {
     });
 
     test('admin sees real student identity and isAdmin:true', async () => {
-        const db = memoryDb({ mentalHealthFlags: [flag()] });
+        const db = mentalDb({ mentalHealthFlags: [flag()] });
         const res = await request(app({ db, user: admin })).get('/course/C1');
         expect(res.status).toBe(200);
         expect(res.body.isAdmin).toBe(true);
@@ -50,7 +58,7 @@ describe('GET /course/:courseId', () => {
     });
 
     test('status query param filters the returned flags', async () => {
-        const db = memoryDb({ mentalHealthFlags: [
+        const db = mentalDb({ mentalHealthFlags: [
             flag({ flagId: 'a', status: 'pending' }),
             flag({ flagId: 'b', status: 'escalated' }),
         ] });
@@ -62,7 +70,7 @@ describe('GET /course/:courseId', () => {
 
 describe('PUT /:flagId/escalate', () => {
     test('escalates a flag and records the escalating instructor', async () => {
-        const db = memoryDb({ mentalHealthFlags: [flag()] });
+        const db = mentalDb({ mentalHealthFlags: [flag()] });
         const res = await request(app({ db, user: instructor })).put('/mhf_1/escalate');
         expect(res.status).toBe(200);
         expect(res.body.success).toBe(true);
@@ -71,16 +79,22 @@ describe('PUT /:flagId/escalate', () => {
     });
 
     test('reports failure (success:false) when the flag does not exist', async () => {
-        const db = memoryDb({ mentalHealthFlags: [] });
+        const db = mentalDb({ mentalHealthFlags: [] });
         const res = await request(app({ db, user: instructor })).put('/missing/escalate');
-        expect(res.status).toBe(200);
+        expect(res.status).toBe(404);
         expect(res.body.success).toBe(false);
+    });
+
+    test('rejects anonymous and non-owning instructors', async () => {
+        const db = mentalDb({ mentalHealthFlags: [flag()] });
+        expect((await request(app({ db })).put('/mhf_1/escalate')).status).toBe(401);
+        expect((await request(app({ db, user: { userId: 'i2', role: 'instructor' } })).put('/mhf_1/escalate')).status).toBe(403);
     });
 });
 
 describe('PUT /:flagId/dismiss', () => {
     test('marks a flag dismissed', async () => {
-        const db = memoryDb({ mentalHealthFlags: [flag()] });
+        const db = mentalDb({ mentalHealthFlags: [flag()] });
         const res = await request(app({ db, user: instructor })).put('/mhf_1/dismiss');
         expect(res.status).toBe(200);
         expect((await db.collection('mentalHealthFlags').findOne({ flagId: 'mhf_1' })).status).toBe('dismissed');
@@ -124,7 +138,7 @@ describe('model failure paths (500)', () => {
 
     test('GET /course/:courseId 500 when the model throws', async () => {
         const spy = jest.spyOn(MentalHealthFlag, 'getMentalHealthFlagsForCourse').mockRejectedValueOnce(new Error('mongo down'));
-        const res = await request(app({ db: memoryDb({}), user: instructor })).get('/course/C1');
+        const res = await request(app({ db: mentalDb(), user: instructor })).get('/course/C1');
         expect(res.status).toBe(500);
         expect(res.body.message).toMatch(/Failed to fetch/i);
         spy.mockRestore();
@@ -137,7 +151,7 @@ describe('model failure paths (500)', () => {
         ['disregard', { userId: 'a1', role: 'instructor', permissions: { systemAdmin: true } }, /Failed to disregard/i],
     ])('PUT /:flagId/%s 500 when the model throws', async (action, user, message) => {
         const spy = jest.spyOn(MentalHealthFlag, 'updateFlagStatus').mockRejectedValueOnce(new Error('mongo down'));
-        const res = await request(app({ db: memoryDb({}), user })).put(`/mhf_1/${action}`);
+        const res = await request(app({ db: mentalDb({ mentalHealthFlags: [flag()] }), user })).put(`/mhf_1/${action}`);
         expect(res.status).toBe(500);
         expect(res.body.message).toMatch(message);
         spy.mockRestore();

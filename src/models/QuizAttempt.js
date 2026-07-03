@@ -3,6 +3,7 @@
  * Tracks individual quiz practice attempts by students
  */
 
+const { createId } = require('../services/id');
 const COLLECTION_NAME = 'quizAttempts';
 
 function getCollection(db) {
@@ -11,12 +12,10 @@ function getCollection(db) {
 
 /**
  * Generate a unique attempt ID
- * @returns {string} Attempt ID in format "qa_[timestamp]_[random]"
+ * @returns {string} Prefixed collision-resistant attempt ID
  */
 function generateAttemptId() {
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 11);
-    return `qa_${timestamp}_${random}`;
+    return createId('qa');
 }
 
 /**

@@ -29,6 +29,10 @@ const ta = { userId: 't1', role: 'ta' };
 const student = { userId: 's1', role: 'student' };
 const admin = { userId: 'a1', role: 'instructor', permissions: { systemAdmin: true } };
 const app = options => makeRouteApp(router, options);
+const maintenanceDb = (data = {}) => memoryDb({
+    courses: [{ courseId: 'C1', instructorId: 'i1', tas: ['t1'] }],
+    ...data,
+});
 
 beforeAll(() => {
     jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -189,20 +193,30 @@ describe('document processing and search with mocked AI/vector service', () => {
 
 describe('maintenance operations', () => {
     test('document deletion initializes and reports success or failure', async () => {
-        let res = await request(app({ user: instructor })).delete('/document/d1');
+        const db = maintenanceDb({ documents: [{ documentId: 'd1', courseId: 'C1' }] });
+        let res = await request(app({ db, user: instructor })).delete('/document/d1');
         expect(res.status).toBe(200);
         expect(res.body.data).toEqual({ documentId: 'd1', deletedCount: 2 });
+        expect(mockService.deleteDocumentChunks).toHaveBeenCalledWith('d1', 'C1');
         mockService.client = mockClient;
         mockService.deleteDocumentChunks.mockResolvedValueOnce({ success: false, error: 'delete failed' });
-        res = await request(app({ user: instructor })).delete('/document/d1');
+        res = await request(app({ db, user: instructor })).delete('/document/d1');
         expect(res.status).toBe(500);
     });
 
     test('document deletion maps service exceptions', async () => {
         mockService.deleteDocumentChunks.mockRejectedValueOnce(new Error('delete exploded'));
-        const res = await request(app({ user: instructor })).delete('/document/d1');
+        const res = await request(app({ db: maintenanceDb({ documents: [{ documentId: 'd1', courseId: 'C1' }] }), user: instructor })).delete('/document/d1');
         expect(res.status).toBe(500);
         expect(res.body.error).toBe('delete exploded');
+    });
+
+    test('document deletion requires a known document and access to its course', async () => {
+        expect((await request(app({ db: maintenanceDb(), user: instructor })).delete('/document/missing')).status).toBe(404);
+        Course.userHasCourseAccess.mockResolvedValueOnce(false);
+        const db = maintenanceDb({ documents: [{ documentId: 'd1', courseId: 'C1' }] });
+        expect((await request(app({ db, user: instructor })).delete('/document/d1')).status).toBe(403);
+        expect(mockService.deleteDocumentChunks).not.toHaveBeenCalled();
     });
 
     test('collection stats require staff and return mocked stats', async () => {
@@ -284,7 +298,7 @@ describe('maintenance operations', () => {
             next_page_offset: null,
         });
         mockService.deleteDocumentChunks.mockResolvedValueOnce({ success: true, deletedCount: 3 });
-        const db = memoryDb({ documents: [{ _id: 'mongo-id', documentId: 'valid', courseId: 'C1' }] });
+        const db = maintenanceDb({ documents: [{ _id: 'mongo-id', documentId: 'valid', courseId: 'C1' }] });
         const res = await request(app({ db, user: instructor })).post('/cleanup-vectors').send({ courseId: 'C1' });
         expect(res.status).toBe(200);
         expect(res.body.data).toMatchObject({ validMongoDocs: 2, qdrantDocs: 2, orphanedDocs: 1, deletedChunks: 3, deletedDocIds: ['orphan'] });
@@ -302,7 +316,7 @@ describe('maintenance operations', () => {
             .mockResolvedValueOnce({ points: [{}, { payload: {} }, { payload: { documentId: 'orphan' } }], next_page_offset: 'next' })
             .mockResolvedValueOnce({ points: null, next_page_offset: null });
         mockService.deleteDocumentChunks.mockResolvedValueOnce({ success: false, error: 'retained' });
-        const res = await request(app({ db: memoryDb({ documents: [] }), user: instructor })).post('/cleanup-vectors').send({ courseId: 'C1' });
+        const res = await request(app({ db: maintenanceDb({ documents: [] }), user: instructor })).post('/cleanup-vectors').send({ courseId: 'C1' });
         expect(res.status).toBe(200);
         expect(res.body.data).toMatchObject({ orphanedDocs: 1, deletedChunks: 0, deletedDocIds: [] });
         expect(mockService.initialize).toHaveBeenCalled();
@@ -312,8 +326,15 @@ describe('maintenance operations', () => {
     test('cleanup maps scroll failures', async () => {
         mockService.client = mockClient;
         mockClient.scroll.mockRejectedValueOnce(new Error('scroll exploded'));
-        const res = await request(app({ db: memoryDb({ documents: [] }), user: instructor })).post('/cleanup-vectors').send({ courseId: 'C1' });
+        const res = await request(app({ db: maintenanceDb({ documents: [] }), user: instructor })).post('/cleanup-vectors').send({ courseId: 'C1' });
         expect(res.status).toBe(500);
         expect(res.body.error).toBe('scroll exploded');
+    });
+
+    test('cleanup rejects an unknown course before scanning vectors', async () => {
+        const res = await request(app({ db: memoryDb({ courses: [] }), user: instructor }))
+            .post('/cleanup-vectors').send({ courseId: 'missing' });
+        expect(res.status).toBe(404);
+        expect(mockClient.scroll).not.toHaveBeenCalled();
     });
 });

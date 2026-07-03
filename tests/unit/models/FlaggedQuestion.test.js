@@ -46,7 +46,7 @@ describe('FlaggedQuestion.createFlaggedQuestion', () => {
         });
 
         expect(result).toMatchObject({ success: true, insertedId: 'mem-1' });
-        expect(result.flagId).toMatch(/^flag_\d+_[a-z0-9]+$/);
+        expect(result.flagId).toMatch(/^flag_[0-9a-f-]{36}$/i);
 
         const stored = await FlaggedQuestion.getFlaggedQuestionById(db, result.flagId);
         expect(stored).toMatchObject({
@@ -86,7 +86,7 @@ describe('FlaggedQuestion.createFlaggedQuestion', () => {
             .resolves.toMatchObject({ priority: 'low' });
     });
 
-    test('stores caller-provided flagId while returning the generated id', async () => {
+    test('ignores a caller-provided flagId and stores the generated id', async () => {
         const db = memoryDb({});
 
         const result = await FlaggedQuestion.createFlaggedQuestion(db, {
@@ -97,13 +97,11 @@ describe('FlaggedQuestion.createFlaggedQuestion', () => {
             flagReason: 'unclear',
         });
 
-        // Existing behavior: spread order lets flagData.flagId overwrite the stored
-        // generated id, but the function still returns the generated id.
-        expect(result.flagId).toMatch(/^flag_\d+_[a-z0-9]+$/);
+        expect(result.flagId).toMatch(/^flag_[0-9a-f-]{36}$/i);
         expect(result.flagId).not.toBe('caller-id');
-        await expect(FlaggedQuestion.getFlaggedQuestionById(db, result.flagId)).resolves.toBeNull();
-        await expect(FlaggedQuestion.getFlaggedQuestionById(db, 'caller-id'))
-            .resolves.toMatchObject({ flagId: 'caller-id', questionId: 'q1' });
+        await expect(FlaggedQuestion.getFlaggedQuestionById(db, result.flagId))
+            .resolves.toMatchObject({ flagId: result.flagId, questionId: 'q1' });
+        await expect(FlaggedQuestion.getFlaggedQuestionById(db, 'caller-id')).resolves.toBeNull();
     });
 });
 
@@ -218,6 +216,19 @@ describe('FlaggedQuestion.updateInstructorResponse', () => {
             error: 'Flag not found or no changes made',
         });
     });
+
+    test('rejects an invalid explicit status without changing the flag', async () => {
+        const db = memoryDb({ [COLL]: [flag({ flagId: 'flag-a' })] });
+
+        await expect(FlaggedQuestion.updateInstructorResponse(db, 'flag-a', {
+            response: 'Invalid transition',
+            instructorId: 'i1',
+            flagStatus: 'banana',
+        })).resolves.toEqual({ success: false, error: 'Invalid flag status' });
+
+        await expect(FlaggedQuestion.getFlaggedQuestionById(db, 'flag-a'))
+            .resolves.toMatchObject({ flagStatus: 'pending' });
+    });
 });
 
 describe('FlaggedQuestion.updateFlagStatus', () => {
@@ -253,6 +264,16 @@ describe('FlaggedQuestion.updateFlagStatus', () => {
                 success: false,
                 error: 'Flag not found or no changes made',
             });
+    });
+
+    test('rejects an invalid status without changing the flag', async () => {
+        const db = memoryDb({ [COLL]: [flag({ flagId: 'flag-a' })] });
+
+        await expect(FlaggedQuestion.updateFlagStatus(db, 'flag-a', 'banana', 'i1'))
+            .resolves.toEqual({ success: false, error: 'Invalid flag status' });
+
+        await expect(FlaggedQuestion.getFlaggedQuestionById(db, 'flag-a'))
+            .resolves.toMatchObject({ flagStatus: 'pending' });
     });
 });
 

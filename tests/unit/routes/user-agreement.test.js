@@ -41,15 +41,18 @@ describe('GET /status', () => {
         expect(res.body.data).toMatchObject({ hasAgreed: true, agreementVersion: '2.0' });
     });
 
-    test('500 when there is no authenticated user (handler destructures req.user)', async () => {
-        // The handler reads `const { userId, role } = req.user` with no guard; in
-        // production the mount applies requireAuth. Characterized, not fixed.
+    test('401 when there is no authenticated user', async () => {
         const res = await request(app({ db: memoryDb({}) })).get('/status');
-        expect(res.status).toBe(500);
+        expect(res.status).toBe(401);
+        expect(res.body.message).toBe('Authentication required');
     });
 });
 
 describe('POST /agree', () => {
+    test('401 when there is no authenticated user', async () => {
+        const res = await request(app({ db: memoryDb({}) })).post('/agree').send({});
+        expect(res.status).toBe(401);
+    });
     test('503 when the db is unavailable', async () => {
         const res = await request(app({ db: null, user: student })).post('/agree').send({});
         expect(res.status).toBe(503);

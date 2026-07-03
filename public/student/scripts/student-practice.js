@@ -176,7 +176,8 @@ async function submitPracticeAnswer(practiceId) {
                 const optionText = label.querySelector('.practice-option-text').innerHTML;
                 const value = radio.value;
                 const wasSelected = radio.checked;
-                const isCorrectAnswer = correctAnswer && value.toLowerCase() === correctAnswer.trim().toLowerCase();
+                const isCorrectAnswer = correctAnswer !== null && correctAnswer !== undefined
+                    && String(value).toLowerCase() === String(correctAnswer).trim().toLowerCase();
 
                 let extraClass = 'practice-option-disabled';
                 if (isCorrectAnswer && wasSelected) extraClass += ' practice-option-correct';
@@ -428,7 +429,8 @@ async function submitStruggleResetAnswer(practiceId) {
                 const optionText = label.querySelector('.practice-option-text').innerHTML;
                 const value = radio.value;
                 const wasSelected = radio.checked;
-                const isCorrectAnswer = correctAnswer && value.toLowerCase() === correctAnswer.trim().toLowerCase();
+                const isCorrectAnswer = correctAnswer !== null && correctAnswer !== undefined
+                    && String(value).toLowerCase() === String(correctAnswer).trim().toLowerCase();
 
                 let extraClass = 'practice-option-disabled';
                 if (isCorrectAnswer && wasSelected) extraClass += ' practice-option-correct';

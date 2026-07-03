@@ -5,6 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { normalizeErrorResponses } = require('../middleware/apiResponse');
 const prompts = require('../services/prompts');
 const CourseModel = require('../models/Course');
 const SuperchatModel = require('../models/Superchat');
@@ -20,6 +21,8 @@ const {
     grantSystemAdminByEmail,
     revokeSystemAdminByEmail
 } = require('../services/systemAdmin');
+
+router.use(normalizeErrorResponses);
 const { isAcademicApiEnabled } = require('../services/academicApi');
 
 function requireSystemAdmin(req, res) {

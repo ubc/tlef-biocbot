@@ -1,3 +1,5 @@
+const { createId } = require('../services/id');
+
 /**
  * Mental Health Flag Model for MongoDB
  * Stores AI-detected mental health concern flags from student conversations.
@@ -45,7 +47,7 @@ function getCollection(db) {
 async function createMentalHealthFlag(db, flagData) {
     const collection = getCollection(db);
     const now = new Date();
-    const flagId = `mhf_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const flagId = createId('mhf');
 
     const flag = {
         flagId,

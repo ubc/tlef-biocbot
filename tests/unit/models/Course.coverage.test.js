@@ -111,6 +111,47 @@ describe('Course code migration and collection access', () => {
         expect((await collisionDb.collection('courses').findOne({ courseId: 'C2' })).courseCode).not.toBe('AAAAAA');
         sequence.mockRestore();
     });
+
+    test('fails without writing when every generated code collides', async () => {
+        const random = jest.spyOn(Math, 'random').mockReturnValue(0);
+        const db = memoryDb({ courses: [] });
+        let error;
+
+        try {
+            await Course.upsertCourse(db, {
+                courseId: 'C1', instructorCourseCode: 'AAAAAA',
+            });
+        } catch (caught) {
+            error = caught;
+        } finally {
+            random.mockRestore();
+        }
+
+        expect(error).toBeInstanceOf(Error);
+        expect(error.message).toBe('Unable to generate a distinct course code after 20 attempts');
+        expect(await db.collection('courses').findOne({ courseId: 'C1' })).toBeNull();
+    });
+
+    test('course onboarding does not insert when instructor-code generation exhausts collisions', async () => {
+        const random = jest.spyOn(Math, 'random').mockReturnValue(0);
+        const db = memoryDb({ courses: [] });
+        let error;
+
+        try {
+            await Course.createCourseFromOnboarding(db, {
+                courseId: 'C1', courseName: 'BIOC 101', instructorId: 'i1',
+                courseStructure: { weeks: 1, lecturesPerWeek: 1 },
+            });
+        } catch (caught) {
+            error = caught;
+        } finally {
+            random.mockRestore();
+        }
+
+        expect(error).toBeInstanceOf(Error);
+        expect(error.message).toBe('Unable to generate a distinct course code after 20 attempts');
+        expect(await db.collection('courses').findOne({ courseId: 'C1' })).toBeNull();
+    });
 });
 
 describe('Course lecture metadata writes', () => {
@@ -125,6 +166,20 @@ describe('Course lecture metadata writes', () => {
         await expect(fn(memoryDb({ courses: [] }), 'missing', 'Unit 1', ...tail)).resolves.toMatchObject({ success: false, error: 'Course not found' });
         await expect(fn(seeded(), 'C1', 'missing', ...tail)).resolves.toMatchObject({ success: false, error: expect.stringMatching(/Lecture not found/) });
         await expect(fn(seeded(), 'C1', 'Unit 1', ...tail)).resolves.toMatchObject({ success: true, created: false });
+    });
+
+    test.each([
+        ['updateLecturePublishStatus', [true, 'i1']],
+        ['updateLearningObjectives', [['LO1'], 'i1']],
+        ['updatePassThreshold', [3, 'i1']],
+    ])('%s fails when the lecture disappears before the positional write', async (method, tail) => {
+        const collection = {
+            findOne: jest.fn().mockResolvedValue({ courseId: 'C1', lectures: [{ name: 'Unit 1' }] }),
+            updateOne: jest.fn().mockResolvedValue({ matchedCount: 0, modifiedCount: 0 }),
+        };
+
+        await expect(Course[method]({ collection: () => collection }, 'C1', 'Unit 1', ...tail))
+            .resolves.toEqual({ success: false, error: 'Course or lecture no longer exists' });
     });
 });
 
@@ -165,6 +220,17 @@ describe('Course onboarding/unit lifecycle', () => {
             .resolves.toMatchObject({ success: true, displayName: 'New name' });
         await expect(Course.updateUnitDisplayName(db, 'C1', 'Unit 1', '   ', 'i1'))
             .resolves.toMatchObject({ success: true, displayName: null });
+    });
+
+    test('updateUnitDisplayName fails when its positional write no longer matches', async () => {
+        const collection = {
+            findOne: jest.fn().mockResolvedValue({ courseId: 'C1', lectures: [{ name: 'Unit 1' }] }),
+            updateOne: jest.fn().mockResolvedValue({ matchedCount: 0, modifiedCount: 0 }),
+        };
+
+        await expect(Course.updateUnitDisplayName(
+            { collection: () => collection }, 'C1', 'Unit 1', 'New', 'i1'
+        )).resolves.toEqual({ success: false, error: 'Course or unit no longer exists' });
     });
 });
 
@@ -227,6 +293,22 @@ describe('Course document lifecycle', () => {
             .resolves.toMatchObject({ success: true, created: false });
         await expect(Course.addDocumentToUnit(db, 'C1', 'Unit 1', { documentId: 'd2' }, 'i1'))
             .resolves.toMatchObject({ success: true, created: true });
+    });
+
+    test.each([
+        ['an existing document', [{ documentId: 'd1' }], 'Document or unit no longer exists'],
+        ['a new document', [], 'Course or unit no longer exists'],
+    ])('addDocumentToUnit fails when %s disappears before the write', async (_case, documents, error) => {
+        const collection = {
+            findOne: jest.fn().mockResolvedValue({
+                courseId: 'C1', lectures: [{ name: 'Unit 1', documents }],
+            }),
+            updateOne: jest.fn().mockResolvedValue({ matchedCount: 0, modifiedCount: 0 }),
+        };
+
+        await expect(Course.addDocumentToUnit(
+            { collection: () => collection }, 'C1', 'Unit 1', { documentId: 'd1' }, 'i1'
+        )).resolves.toEqual({ success: false, error });
     });
 
     test('removeDocumentFromAnyUnit handles missing course/document and removes all matches', async () => {

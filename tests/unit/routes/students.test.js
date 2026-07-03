@@ -144,7 +144,7 @@ describe('GET /:courseId/:studentId/sessions/own — student access', () => {
     });
 
     test('200 when a student requests their own sessions in an existing course', async () => {
-        const db = memoryDb({ courses: [{ courseId: 'C1' }], chat_sessions: [] });
+        const db = memoryDb({ courses: [{ courseId: 'C1', studentEnrollment: { s1: { enrolled: true } } }], chat_sessions: [] });
         const res = await request(makeRouteApp(studentsRouter, { db, user: student('s1') }))
             .get('/C1/s1/sessions/own');
         expect(res.status).toBe(200);
@@ -160,7 +160,7 @@ describe('GET /:courseId/:studentId/sessions/own — student access', () => {
             { type: 'bot', timestamp: end },
         ] });
         const db = memoryDb({
-            courses: [{ courseId: 'C1' }],
+            courses: [{ courseId: 'C1', studentEnrollment: { s1: { enrolled: true } } }],
             chat_sessions: [
                 { sessionId: 'new', courseId: 'C1', studentId: 's1', studentName: 'Alice', savedAt: new Date('2026-02-01'), chatData: messages('2026-01-01T02:03:04Z') },
                 { sessionId: 'old', courseId: 'C1', studentId: 's1', studentName: 'Alice', savedAt: new Date('2026-01-01'), chatData: messages('2026-01-01T00:00:09Z') },
@@ -177,6 +177,13 @@ describe('GET /:courseId/:studentId/sessions/own — student access', () => {
             { sessionId: 'new', duration: '2h 3m 4s' },
             { sessionId: 'old', duration: '9s' },
         ]);
+    });
+
+    test('403 when the student is not enrolled in the course', async () => {
+        const db = memoryDb({ courses: [{ courseId: 'C1', studentEnrollment: {} }], chat_sessions: [] });
+        const res = await request(makeRouteApp(studentsRouter, { db, user: student('s1') }))
+            .get('/C1/s1/sessions/own');
+        expect(res.status).toBe(403);
     });
 
     test('allows a system admin only when they own the course', async () => {
@@ -211,6 +218,17 @@ describe('PUT /:courseId/:studentId/sessions/:sessionId/title — rename', () =>
         const res = await request(makeRouteApp(studentsRouter, { db: memoryDb({}), user: student('s1') }))
             .put('/C1/s2/sessions/sess1/title').send({ title: 'x' });
         expect(res.status).toBe(403);
+    });
+
+    test('403 when an instructor does not own the session course', async () => {
+        const db = memoryDb({
+            courses: [{ courseId: 'C1', instructorId: 'other' }],
+            chat_sessions: [{ sessionId: 'sess1', courseId: 'C1', studentId: 's1' }],
+        });
+        const res = await request(makeRouteApp(studentsRouter, { db, user: plainInstructor }))
+            .put('/C1/s1/sessions/sess1/title').send({ title: 'x' });
+        expect(res.status).toBe(403);
+        expect((await db.collection('chat_sessions').findOne({ sessionId: 'sess1' })).title).toBeUndefined();
     });
 
     test('401 without a user and 403 for an unsupported role', async () => {

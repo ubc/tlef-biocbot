@@ -120,7 +120,8 @@ test.describe('onboarding Unit 1 persistence and notification branches', () => {
         expect(captures.questionSaves[0]).toEqual(expect.objectContaining({
             questionType: 'multiple-choice',
             question: 'Why ATP?',
-            correctAnswer: 'A',
+            options: ['Option A', 'Option B', 'Option C', 'Option D'],
+            correctAnswer: 0,
         }));
     });
 
@@ -138,8 +139,8 @@ test.describe('onboarding Unit 1 persistence and notification branches', () => {
         }, { instructorId: INSTRUCTOR_ID });
 
         expect(captures.questionSaves[0]).toEqual(expect.objectContaining({
-            options: { A: 'Alpha', B: 'Beta', D: 'Delta' },
-            correctAnswer: 'B',
+            options: ['Alpha', 'Beta', 'Delta'],
+            correctAnswer: 1,
         }));
     });
 
@@ -162,7 +163,7 @@ test.describe('onboarding Unit 1 persistence and notification branches', () => {
 
         expect(captures.questionSaves[0]).toEqual(expect.objectContaining({
             questionType: 'true-false',
-            correctAnswer: 'true',
+            correctAnswer: true,
         }));
         expect(captures.questionSaves[1]).toEqual(expect.objectContaining({
             questionType: 'short-answer',
