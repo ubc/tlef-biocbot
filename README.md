@@ -164,7 +164,6 @@ tlef-biocbot/
 │   ├── routes/                 # API route handlers
 │   ├── services/               # Business logic (LLM, Qdrant, auth, tracker)
 │   └── server.js               # Main server entry point
-└── documents/                  # Project documentation
 ```
 
 ### Key Models
