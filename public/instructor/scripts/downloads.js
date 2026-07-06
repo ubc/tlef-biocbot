@@ -952,6 +952,84 @@ function stripHtmlForText(html) {
 }
 
 /**
+ * Return a copy of a messages array sorted oldest-first (chronological).
+ * Ordering is stable: messages with an equal or missing timestamp keep their
+ * existing relative order, and if any message lacks a usable timestamp the
+ * original order (already chronological insertion order) is preserved.
+ * @param {Array} messages - Array of message objects
+ * @returns {Array} Chronologically ordered messages
+ */
+function sortMessagesChronologically(messages) {
+    if (!Array.isArray(messages) || messages.length < 2) {
+        return messages;
+    }
+
+    const withTimes = messages.map((msg, index) => {
+        const raw = msg && (msg.timestamp || msg.time || msg.createdAt);
+        const value = raw ? new Date(raw).getTime() : NaN;
+        return { msg, index, value };
+    });
+
+    if (withTimes.some(entry => isNaN(entry.value))) {
+        return messages;
+    }
+
+    withTimes.sort((a, b) => (a.value - b.value) || (a.index - b.index));
+    return withTimes.map(entry => entry.msg);
+}
+
+/**
+ * Return a deep copy of export data with every message array normalized to
+ * chronological (oldest-first) order, regardless of export shape (single
+ * session, per-student combined, or course/superchat-wide).
+ * @param {Object} data - Chat export data
+ * @returns {Object} Normalized copy
+ */
+function normalizeChatExportOrder(data) {
+    if (!data || typeof data !== 'object') {
+        return data;
+    }
+
+    let clone;
+    try {
+        clone = JSON.parse(JSON.stringify(data));
+    } catch (error) {
+        // If the data can't be safely cloned, fall back to the original
+        return data;
+    }
+
+    const sortSession = (session) => {
+        if (!session || typeof session !== 'object') return;
+        if (session.chatData && Array.isArray(session.chatData.messages)) {
+            session.chatData.messages = sortMessagesChronologically(session.chatData.messages);
+        } else if (Array.isArray(session.messages)) {
+            session.messages = sortMessagesChronologically(session.messages);
+        }
+    };
+
+    // Course / superchat-wide export: students[].sessions[]
+    if (Array.isArray(clone.students)) {
+        clone.students.forEach(student => {
+            if (Array.isArray(student.sessions)) {
+                student.sessions.forEach(sortSession);
+            }
+        });
+    }
+
+    // Combined single-student export: sessions[]
+    if (Array.isArray(clone.sessions)) {
+        clone.sessions.forEach(sortSession);
+    }
+
+    // Single session export: messages[]
+    if (Array.isArray(clone.messages)) {
+        clone.messages = sortMessagesChronologically(clone.messages);
+    }
+
+    return clone;
+}
+
+/**
  * Download a specific session
  * @param {string} sessionId - Session ID to download
  * @param {string} format - Download format: 'json' or 'txt'
@@ -1100,7 +1178,7 @@ async function downloadAllSessions(format = 'json') {
  * @param {string} fileName - Name of the file
  */
 function downloadJSON(data, fileName) {
-    const jsonString = JSON.stringify(data, null, 2);
+    const jsonString = JSON.stringify(normalizeChatExportOrder(data), null, 2);
     const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
 
@@ -1230,7 +1308,7 @@ function formatSingleSessionText(session) {
  * @param {string} fileName - Name of the file (will replace .json with .txt)
  */
 function downloadTXT(data, fileName) {
-    const textContent = formatChatAsText(data);
+    const textContent = formatChatAsText(normalizeChatExportOrder(data));
     const blob = new Blob([textContent], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
 

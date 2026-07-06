@@ -10,8 +10,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         accuracyPrompt: 'Has BIOCBOT been presenting accurate and appropriate content?',
         satisfactionPrompt: 'Are you satisfied with your learning experience using BIOCBOT?',
         allowFreeText: false,
+        summaryTriggerMessageCount: 25,
         minTriggerMessageCount: 2,
-        maxTriggerMessageCount: 30
+        maxTriggerMessageCount: 30,
+        minSummaryTriggerMessageCount: 2,
+        maxSummaryTriggerMessageCount: 40
     };
 
     const settingsHub = document.getElementById('settings-hub');
@@ -962,6 +965,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const accuracyInput = document.getElementById('chat-survey-accuracy-input');
         const satisfactionInput = document.getElementById('chat-survey-satisfaction-input');
         const freeTextToggle = document.getElementById('chat-survey-free-text-toggle');
+        const summaryTriggerInput = document.getElementById('chat-summary-trigger-input');
 
         if (enabledToggle) enabledToggle.checked = merged.enabled === true;
         if (triggerInput) {
@@ -974,6 +978,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (accuracyInput) accuracyInput.value = merged.accuracyPrompt || DEFAULT_CHAT_SURVEY_SETTINGS.accuracyPrompt;
         if (satisfactionInput) satisfactionInput.value = merged.satisfactionPrompt || DEFAULT_CHAT_SURVEY_SETTINGS.satisfactionPrompt;
         if (freeTextToggle) freeTextToggle.checked = merged.allowFreeText === true;
+        if (summaryTriggerInput) {
+            summaryTriggerInput.min = merged.minSummaryTriggerMessageCount || DEFAULT_CHAT_SURVEY_SETTINGS.minSummaryTriggerMessageCount;
+            summaryTriggerInput.max = merged.maxSummaryTriggerMessageCount || DEFAULT_CHAT_SURVEY_SETTINGS.maxSummaryTriggerMessageCount;
+            summaryTriggerInput.value = merged.summaryTriggerMessageCount || DEFAULT_CHAT_SURVEY_SETTINGS.summaryTriggerMessageCount;
+        }
     }
 
     async function loadChatSurveySettings() {
@@ -1004,6 +1013,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             throw new Error(`Survey trigger must be a whole number from ${min} to ${max}`);
         }
 
+        const summaryTriggerInput = document.getElementById('chat-summary-trigger-input');
+        const summaryTriggerMessageCount = Number(summaryTriggerInput?.value || DEFAULT_CHAT_SURVEY_SETTINGS.summaryTriggerMessageCount);
+        const summaryMin = Number(summaryTriggerInput?.min || DEFAULT_CHAT_SURVEY_SETTINGS.minSummaryTriggerMessageCount);
+        const summaryMax = Number(summaryTriggerInput?.max || DEFAULT_CHAT_SURVEY_SETTINGS.maxSummaryTriggerMessageCount);
+        if (!Number.isInteger(summaryTriggerMessageCount) || summaryTriggerMessageCount < summaryMin || summaryTriggerMessageCount > summaryMax) {
+            throw new Error(`Summary trigger must be a whole number from ${summaryMin} to ${summaryMax}`);
+        }
+
         return {
             enabled: document.getElementById('chat-survey-enabled-toggle')?.checked === true,
             triggerMessageCount,
@@ -1011,7 +1028,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             introText: document.getElementById('chat-survey-intro-input')?.value || DEFAULT_CHAT_SURVEY_SETTINGS.introText,
             accuracyPrompt: document.getElementById('chat-survey-accuracy-input')?.value || DEFAULT_CHAT_SURVEY_SETTINGS.accuracyPrompt,
             satisfactionPrompt: document.getElementById('chat-survey-satisfaction-input')?.value || DEFAULT_CHAT_SURVEY_SETTINGS.satisfactionPrompt,
-            allowFreeText: document.getElementById('chat-survey-free-text-toggle')?.checked === true
+            allowFreeText: document.getElementById('chat-survey-free-text-toggle')?.checked === true,
+            summaryTriggerMessageCount
         };
     }
 

@@ -1314,6 +1314,22 @@ test.describe('Student chat page — UI controls', () => {
 
         await loginAsStudent(page);
 
+        await page.route('**/api/chat/survey-settings**', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    success: true,
+                    data: {
+                        settings: { summaryTriggerMessageCount: 2 },
+                        defaults: { summaryTriggerMessageCount: 25 },
+                        settingsFingerprint: 'summary-e2e',
+                        response: null,
+                    },
+                }),
+            });
+        });
+
         await page.route('**/api/chat/summary', async (route) => {
             summaryRequestBody = route.request().postDataJSON();
             await route.fulfill({
@@ -2545,5 +2561,101 @@ test.describe('Chat history page — rename and continue', () => {
             db.collection('chat_sessions').findOne({ sessionId })
         );
         expect(stored?.title).toBe('Renamed!');
+    });
+});
+
+// ----------------------------------------------------------------------------
+// Export / feedback UX fixes (Bowen & Eden):
+//   - feedback thumb renders as a neutral monochrome SVG, not the coloured emoji,
+//     and is not "active" until pressed
+//   - captured/exported message content excludes the surrounding interface
+//     controls (Explain, feedback, flag menu, source, timestamp)
+//   - restored/continued messages keep their original timestamp instead of being
+//     re-stamped with the reopen time
+// ----------------------------------------------------------------------------
+test.describe('Chat export & feedback UX fixes', () => {
+    test.use({ storageState: storageStatePath('student') });
+
+    test.beforeEach(async ({ page }) => {
+        await setUserAgreement(studentId, true);
+        await page.addInitScript((id) => {
+            try { localStorage.setItem('selectedCourseId', id); } catch (_) {}
+        }, STU_COURSE_ID);
+        await page.goto('/student');
+        await expect(page.locator('#chat-messages')).toBeAttached({ timeout: 15_000 });
+    });
+
+    test('feedback thumb is a neutral monochrome SVG that is inactive until pressed', async ({ page }) => {
+        const info = await page.evaluate(() => {
+            const container = createMessageFeedbackControls();
+            const btn = container.querySelector('.message-feedback-btn');
+            const icon = btn.querySelector('svg.feedback-icon');
+            return {
+                hasSvg: !!icon,
+                // The coloured 👍 emoji must be gone
+                text: btn.textContent.trim(),
+                active: btn.classList.contains('active'),
+                ariaPressed: btn.getAttribute('aria-pressed'),
+            };
+        });
+        expect(info.hasSvg).toBe(true);
+        expect(info.text).toBe('');
+        expect(info.active).toBe(false);
+        expect(info.ariaPressed).toBe('false');
+    });
+
+    test('extractMessageContent excludes Explain / feedback / flag controls from a bot message', async ({ page }) => {
+        const extracted = await page.evaluate(() => {
+            const chat = document.getElementById('chat-messages');
+            chat.innerHTML = '';
+            // Render a bot message that carries every interface control: the
+            // Explain + "Ask me a question" buttons (detectedTopic), the feedback
+            // thumb (messageId), and the ⚑ flag menu with its labels.
+            addMessage(
+                'Photosynthesis converts light energy into ATP.',
+                'bot',
+                false, // withSource
+                true,  // skipAutoSave
+                null,  // sourceAttribution
+                false, // isHtml
+                null,  // activeStruggleTopic
+                'ATP', // detectedTopic -> Explain / practice buttons
+                'msg-export-1', // messageId -> feedback controls
+                null,  // feedbackRating
+                { timestamp: '2020-05-05T12:00:00.000Z' }
+            );
+            const content = document.querySelector('.bot-message .message-content');
+            return extractMessageContent(content);
+        });
+
+        expect(extracted).toBe('Photosynthesis converts light energy into ATP.');
+        for (const control of ['Explain', 'Ask me a question', 'Incorrect', 'Offensive', 'Flag']) {
+            expect(extracted).not.toContain(control);
+        }
+    });
+
+    test('a restored message keeps its original timestamp instead of the reopen time', async ({ page }) => {
+        const result = await page.evaluate(() => {
+            const chat = document.getElementById('chat-messages');
+            chat.innerHTML = '';
+            const original = '2019-03-04T08:30:00.000Z';
+            addMessage(
+                'An older answer from a previous session.',
+                'bot',
+                false, true, null, false, null, null,
+                'msg-old-1', null,
+                { timestamp: original }
+            );
+            const msg = document.querySelector('.bot-message');
+            return {
+                expected: new Date(original).getTime(),
+                datasetTs: Number(msg.dataset.timestamp),
+                nowTs: Date.now(),
+            };
+        });
+
+        // The rendered message must carry the original time, not "now".
+        expect(result.datasetTs).toBe(result.expected);
+        expect(Math.abs(result.nowTs - result.datasetTs)).toBeGreaterThan(60_000);
     });
 });

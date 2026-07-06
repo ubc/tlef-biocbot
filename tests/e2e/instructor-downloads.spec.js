@@ -123,6 +123,60 @@ test.describe('Instructor downloads page — system admin UI', () => {
         await expect(modal.locator('#sessions-list')).not.toContainText('Soft Deleted Download Chat');
     });
 
+    test('normalizeChatExportOrder sorts every export shape oldest-first, stably', async ({ page }) => {
+        await openDownloadsPage(page);
+
+        const result = await page.evaluate(() => {
+            // Single-session shape
+            const single = {
+                messages: [
+                    { type: 'bot', content: 'third', timestamp: '2026-01-15T10:10:00Z' },
+                    { type: 'user', content: 'first', timestamp: '2026-01-15T10:00:00Z' },
+                    { type: 'bot', content: 'second', timestamp: '2026-01-15T10:05:00Z' },
+                ],
+            };
+            // Combined single-student shape (sessions[].chatData.messages)
+            const combined = {
+                sessions: [
+                    { chatData: { messages: [
+                        { content: 'b', timestamp: '2026-01-15T11:00:00Z' },
+                        { content: 'a', timestamp: '2026-01-15T09:00:00Z' },
+                    ] } },
+                ],
+            };
+            // Course/superchat-wide shape (students[].sessions[].chatData.messages)
+            const wide = {
+                students: [
+                    { sessions: [
+                        { chatData: { messages: [
+                            { content: 'y', timestamp: '2026-01-15T12:00:00Z' },
+                            { content: 'x', timestamp: '2026-01-15T08:00:00Z' },
+                        ] } },
+                    ] },
+                ],
+            };
+            // When any message lacks a usable timestamp, original order is kept
+            const partial = {
+                messages: [
+                    { content: 'keep-1' },
+                    { content: 'keep-2', timestamp: '2020-01-01T00:00:00Z' },
+                ],
+            };
+
+            return {
+                single: normalizeChatExportOrder(single).messages.map((m) => m.content),
+                combined: normalizeChatExportOrder(combined).sessions[0].chatData.messages.map((m) => m.content),
+                wide: normalizeChatExportOrder(wide).students[0].sessions[0].chatData.messages.map((m) => m.content),
+                partial: normalizeChatExportOrder(partial).messages.map((m) => m.content),
+            };
+        });
+
+        expect(result.single).toEqual(['first', 'second', 'third']);
+        expect(result.combined).toEqual(['a', 'b']);
+        expect(result.wide).toEqual(['x', 'y']);
+        expect(result.partial).toEqual(['keep-1', 'keep-2']);
+    });
+
     test('preview strips HTML from chat messages before rendering inline', async ({ page }) => {
         await openDownloadsPage(page);
         const modal = await openStudentModal(page);

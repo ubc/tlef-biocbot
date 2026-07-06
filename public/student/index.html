@@ -78,17 +78,12 @@
 
                 <!-- Chat Input Area -->
                 <div class="chat-input-container">
+                    <div class="chat-disclaimer">
+                        <span>BiocBot can make mistakes. Verify important information with your instructor. Don't share personal, private, or copyrighted information.</span>
+                        <a href="#" id="view-rules-link">View Chat Rules</a>
+                    </div>
                     <form id="chat-form" autocomplete="off">
                         <input type="text" id="chat-input" placeholder="Type your message here..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="true" name="chat-message-input">
-                        <button type="submit" id="send-button">Send</button>
-                    </form>
-                    <div class="chat-footer">
-                        <div class="chat-disclaimer">
-                            BiocBot can make mistakes. Verify important information with your instructor. Don't share personal, private, or copyrighted information. <a href="#" id="view-rules-link" style="color: inherit; text-decoration: underline; margin-left: 8px;">View General Rules</a>
-                        </div>
-                        <button type="button" id="chat-summary-btn" class="chat-summary-button" title="Summarize this chat, end this session, and start a new same-unit chat" disabled>
-                            Summarize & Start New Chat
-                        </button>
                         <!-- Mode Toggle -->
                         <div class="mode-toggle-container">
                             <div class="mode-toggle">
@@ -100,6 +95,12 @@
                                 <span class="mode-label tutor-label active">Tutor</span>
                             </div>
                         </div>
+                        <button type="submit" id="send-button" aria-label="Send message">&uarr;</button>
+                    </form>
+                    <div id="chat-summary-actions" class="chat-summary-actions" hidden>
+                        <button type="button" id="chat-summary-btn" class="chat-summary-button" title="Summarize this chat, end this session, and start a new same-unit chat">
+                            Summarize &amp; Start New Chat
+                        </button>
                     </div>
                 </div>
             </div>
