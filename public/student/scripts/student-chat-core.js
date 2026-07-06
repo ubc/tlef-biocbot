@@ -336,7 +336,9 @@ function createMessageFeedbackControls(initialRating = null) {
     upButton.type = 'button';
     upButton.classList.add('message-feedback-btn');
     upButton.dataset.rating = 'up';
-    upButton.textContent = '👍';
+    // Use a monochrome SVG (inherits button color) instead of the coloured 👍 emoji,
+    // so the control stays neutral until the student actually presses it.
+    upButton.innerHTML = '<svg class="feedback-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>';
     upButton.title = 'This response was helpful';
     upButton.setAttribute('aria-label', 'Mark response as helpful');
     upButton.onclick = () => handleMessageFeedback(upButton, 'up');
@@ -453,8 +455,15 @@ function addMessage(content, sender, withSource = false, skipAutoSave = false, s
     const timestamp = document.createElement('span');
     timestamp.classList.add('timestamp');
 
-    // Create real timestamp
-    const messageTime = new Date();
+    // Use the message's original timestamp when one is supplied (e.g. restoring a
+    // saved/continued session) so old messages keep their real time instead of
+    // being re-stamped with the moment the conversation was reopened.
+    const providedTimestamp = messageOptions && messageOptions.timestamp
+        ? new Date(messageOptions.timestamp)
+        : null;
+    const messageTime = (providedTimestamp && !isNaN(providedTimestamp.getTime()))
+        ? providedTimestamp
+        : new Date();
     timestamp.textContent = formatTimestamp(messageTime);
 
     // Store timestamp in message div for future updates

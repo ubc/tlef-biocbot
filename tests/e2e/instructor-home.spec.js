@@ -441,6 +441,10 @@ test.describe('Instructor home dashboard', () => {
     });
 
     test('renders struggle panels, weekly chart, CSV export, and approved topic unit assignment', async ({ page }) => {
+        // The weekly fixture ends on May 11. Pin the browser clock so the
+        // production chart's gap-filling-through-today behavior does not move
+        // the fixture off the most-recent eight-week page as real time passes.
+        await page.clock.setFixedTime(new Date('2026-05-17T12:00:00.000Z'));
         const homeMock = await mockRichHomeEndpoints(page, { anonymize: true });
 
         await page.goto('/instructor/home?courseId=HOME-E2E-ALPHA');

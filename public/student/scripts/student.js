@@ -360,6 +360,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     let isSummaryInProgress = false;
+    const defaultSummaryTriggerMessageCount = 25;
     const summaryButtonDefaultText = 'Summarize & Start New Chat';
     const summaryConfirmationMessage = 'This will summarize the current chat, end this session, and start a new chat in the same unit and mode. The summary will be sent as your first message, and assessment questions will not carry over. Continue?';
 
@@ -396,11 +397,30 @@ document.addEventListener('DOMContentLoaded', async () => {
         summaryButton.textContent = isLoading ? 'Starting new chat...' : summaryButtonDefaultText;
     }
 
-    function updateChatSummaryButtonState() {
+    async function updateChatSummaryButtonState() {
         const summaryButton = document.getElementById('chat-summary-btn');
+        const summaryActions = document.getElementById('chat-summary-actions');
         if (!summaryButton || isSummaryInProgress) return;
 
         const messages = getSummarizableChatMessages();
+        let triggerMessageCount = defaultSummaryTriggerMessageCount;
+        if (typeof window.loadChatSurveySettingsForCourse === 'function') {
+            const payload = await window.loadChatSurveySettingsForCourse();
+            const configuredTrigger = Number(payload?.settings?.summaryTriggerMessageCount);
+            if (Number.isInteger(configuredTrigger)) {
+                triggerMessageCount = configuredTrigger;
+            }
+        }
+
+        const thresholdReached = messages.length >= triggerMessageCount;
+        if (summaryActions) summaryActions.hidden = !thresholdReached;
+        if (!thresholdReached) {
+            summaryButton.disabled = true;
+            summaryButton.textContent = summaryButtonDefaultText;
+            summaryButton.title = `Available after ${triggerMessageCount} student and BiocBot messages`;
+            return;
+        }
+
         const hasStudentMessage = messages.some(message => message.type === 'user');
         const hasBotMessage = messages.some(message => message.type === 'bot');
         const responseInProgress = !!currentController || !!document.getElementById('typing-indicator');
@@ -410,7 +430,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         summaryButton.textContent = summaryButtonDefaultText;
         summaryButton.title = canSummarize
             ? 'Summarize this chat, end this session, and start a new same-unit chat'
-            : 'Send and receive at least one chat message before starting a new chat from a summary';
+            : 'Wait for BiocBot to finish responding before summarizing this chat';
     }
 
     window.updateChatSummaryButtonState = updateChatSummaryButtonState;

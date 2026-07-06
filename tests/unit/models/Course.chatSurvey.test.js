@@ -15,11 +15,14 @@ describe('Course chat survey settings', () => {
                 introText: 'So BIOCBOT would like your help to improve the user and learning experience, if you are able to please rate your recent experience with BIOCBOT',
                 accuracyPrompt: 'Has BIOCBOT been presenting accurate and appropriate content?',
                 satisfactionPrompt: 'Are you satisfied with your learning experience using BIOCBOT?',
-                allowFreeText: false
+                allowFreeText: false,
+                summaryTriggerMessageCount: 25
             },
             defaults: {
                 minTriggerMessageCount: 2,
-                maxTriggerMessageCount: 30
+                maxTriggerMessageCount: 30,
+                minSummaryTriggerMessageCount: 2,
+                maxSummaryTriggerMessageCount: 40
             }
         });
     });
@@ -33,7 +36,8 @@ describe('Course chat survey settings', () => {
             introText: '  Please   rate your experience  ',
             accuracyPrompt: '  Was it accurate?  ',
             satisfactionPrompt: '  Are you   satisfied?  ',
-            allowFreeText: false
+            allowFreeText: false,
+            summaryTriggerMessageCount: 18
         }, 'i1');
 
         expect(result.success).toBe(true);
@@ -45,12 +49,14 @@ describe('Course chat survey settings', () => {
             accuracyPrompt: 'Was it accurate?',
             satisfactionPrompt: 'Are you satisfied?',
             allowFreeText: false,
+            summaryTriggerMessageCount: 18,
             updatedById: 'i1'
         });
         expect(result.settings.updatedAt).toBeInstanceOf(Date);
 
         const stored = await db.collection('courses').findOne({ courseId: 'C1' });
         expect(stored.chatSurveySettings.triggerMessageCount).toBe(12);
+        expect(stored.chatSurveySettings.summaryTriggerMessageCount).toBe(18);
         expect(stored.lastUpdatedById).toBe('i1');
     });
 
@@ -69,6 +75,14 @@ describe('Course chat survey settings', () => {
         })).resolves.toMatchObject({
             success: false,
             error: 'Survey trigger must be an integer from 2 to 30'
+        });
+
+        await expect(Course.updateChatSurveySettings(db, 'C1', {
+            triggerMessageCount: 10,
+            summaryTriggerMessageCount: 41
+        })).resolves.toMatchObject({
+            success: false,
+            error: 'Summary trigger must be an integer from 2 to 40'
         });
 
         const stored = await db.collection('courses').findOne({ courseId: 'C1' });

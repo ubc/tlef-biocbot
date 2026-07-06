@@ -343,6 +343,9 @@ const MIN_RAG_TOP_K = 1;
 const MAX_RAG_TOP_K = 20;
 const MIN_CHAT_SURVEY_TRIGGER_MESSAGES = 2;
 const MAX_CHAT_SURVEY_TRIGGER_MESSAGES = 30;
+const DEFAULT_CHAT_SUMMARY_TRIGGER_MESSAGES = 25;
+const MIN_CHAT_SUMMARY_TRIGGER_MESSAGES = 2;
+const MAX_CHAT_SUMMARY_TRIGGER_MESSAGES = 40;
 const DEFAULT_CHAT_SURVEY_SETTINGS = Object.freeze({
     enabled: false,
     triggerMessageCount: 10,
@@ -350,7 +353,8 @@ const DEFAULT_CHAT_SURVEY_SETTINGS = Object.freeze({
     introText: 'So BIOCBOT would like your help to improve the user and learning experience, if you are able to please rate your recent experience with BIOCBOT',
     accuracyPrompt: 'Has BIOCBOT been presenting accurate and appropriate content?',
     satisfactionPrompt: 'Are you satisfied with your learning experience using BIOCBOT?',
-    allowFreeText: false
+    allowFreeText: false,
+    summaryTriggerMessageCount: DEFAULT_CHAT_SUMMARY_TRIGGER_MESSAGES
 });
 
 function normalizeRagTopK(value, fallback = DEFAULT_STUDENT_RAG_TOP_K) {
@@ -387,6 +391,19 @@ function normalizeChatSurveyTriggerMessageCount(value, fallback = DEFAULT_CHAT_S
     return parsed;
 }
 
+function normalizeChatSummaryTriggerMessageCount(value, fallback = DEFAULT_CHAT_SUMMARY_TRIGGER_MESSAGES) {
+    const parsed = Number(value);
+    if (
+        !Number.isInteger(parsed)
+        || parsed < MIN_CHAT_SUMMARY_TRIGGER_MESSAGES
+        || parsed > MAX_CHAT_SUMMARY_TRIGGER_MESSAGES
+    ) {
+        return fallback;
+    }
+
+    return parsed;
+}
+
 function normalizeChatSurveyPrompt(value, fallback) {
     if (typeof value !== 'string') return fallback;
     const normalized = value.replace(/\s+/g, ' ').trim();
@@ -405,6 +422,7 @@ function resolveChatSurveySettings(courseDoc = {}) {
         introText: normalizeChatSurveyPrompt(settings.introText, DEFAULT_CHAT_SURVEY_SETTINGS.introText),
         accuracyPrompt: normalizeChatSurveyPrompt(settings.accuracyPrompt, DEFAULT_CHAT_SURVEY_SETTINGS.accuracyPrompt),
         satisfactionPrompt: normalizeChatSurveyPrompt(settings.satisfactionPrompt, DEFAULT_CHAT_SURVEY_SETTINGS.satisfactionPrompt),
+        summaryTriggerMessageCount: normalizeChatSummaryTriggerMessageCount(settings.summaryTriggerMessageCount),
         allowFreeText: settings.allowFreeText !== undefined
             ? settings.allowFreeText === true
             : DEFAULT_CHAT_SURVEY_SETTINGS.allowFreeText
@@ -428,7 +446,9 @@ async function getChatSurveySettings(db, courseId) {
         defaults: {
             ...DEFAULT_CHAT_SURVEY_SETTINGS,
             minTriggerMessageCount: MIN_CHAT_SURVEY_TRIGGER_MESSAGES,
-            maxTriggerMessageCount: MAX_CHAT_SURVEY_TRIGGER_MESSAGES
+            maxTriggerMessageCount: MAX_CHAT_SURVEY_TRIGGER_MESSAGES,
+            minSummaryTriggerMessageCount: MIN_CHAT_SUMMARY_TRIGGER_MESSAGES,
+            maxSummaryTriggerMessageCount: MAX_CHAT_SUMMARY_TRIGGER_MESSAGES
         }
     };
 }
@@ -447,6 +467,19 @@ async function updateChatSurveySettings(db, courseId, settings = {}, updatedById
         };
     }
 
+    const hasSummaryTriggerMessageCount = settings.summaryTriggerMessageCount !== undefined
+        && settings.summaryTriggerMessageCount !== null
+        && settings.summaryTriggerMessageCount !== '';
+    const summaryTriggerMessageCount = hasSummaryTriggerMessageCount
+        ? normalizeChatSummaryTriggerMessageCount(settings.summaryTriggerMessageCount, null)
+        : DEFAULT_CHAT_SUMMARY_TRIGGER_MESSAGES;
+    if (summaryTriggerMessageCount === null) {
+        return {
+            success: false,
+            error: `Summary trigger must be an integer from ${MIN_CHAT_SUMMARY_TRIGGER_MESSAGES} to ${MAX_CHAT_SUMMARY_TRIGGER_MESSAGES}`
+        };
+    }
+
     const now = new Date();
     const chatSurveySettings = {
         enabled: settings.enabled === true,
@@ -455,6 +488,7 @@ async function updateChatSurveySettings(db, courseId, settings = {}, updatedById
         introText: normalizeChatSurveyPrompt(settings.introText, DEFAULT_CHAT_SURVEY_SETTINGS.introText),
         accuracyPrompt: normalizeChatSurveyPrompt(settings.accuracyPrompt, DEFAULT_CHAT_SURVEY_SETTINGS.accuracyPrompt),
         satisfactionPrompt: normalizeChatSurveyPrompt(settings.satisfactionPrompt, DEFAULT_CHAT_SURVEY_SETTINGS.satisfactionPrompt),
+        summaryTriggerMessageCount,
         allowFreeText: settings.allowFreeText !== undefined
             ? settings.allowFreeText === true
             : DEFAULT_CHAT_SURVEY_SETTINGS.allowFreeText,

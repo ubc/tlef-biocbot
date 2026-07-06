@@ -1066,13 +1066,21 @@ function extractMessageData(messageElement, index) {
  * @returns {string} Extracted content text
  */
 function extractMessageContent(contentElement) {
-    const paragraph = contentElement.querySelector('p');
+    // Work on a clone so we can strip the surrounding interface controls that are
+    // visually part of the message (flag menu, Explain / feedback buttons, source
+    // attribution, timestamp). These must never leak into saved or exported text.
+    const clone = contentElement.cloneNode(true);
+    clone.querySelectorAll(
+        '.message-footer, .message-footer-right, .message-flag-container, .flag-button, .flag-menu, .message-feedback-container, .message-action-btn, .message-source, .timestamp'
+    ).forEach(el => el.remove());
+
+    const paragraph = clone.querySelector('p');
     if (paragraph) {
-        return paragraph.textContent || paragraph.innerText || '';
+        return (paragraph.textContent || paragraph.innerText || '').trim();
     }
 
-    // Fallback to all text content
-    return contentElement.textContent || contentElement.innerText || '';
+    // Fallback to the remaining text content once controls have been removed
+    return (clone.textContent || clone.innerText || '').trim();
 }
 
 /**
