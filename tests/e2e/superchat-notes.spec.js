@@ -6,7 +6,8 @@
  *   - /api/superchat-notes  CRUD (create / list / get / update / delete)
  *   - Authorization: an instructor can edit/delete ONLY their own notes; a
  *     second instructor is denied (403) and the data is not mutated.
- *   - Role gating: students and TAs cannot reach the notes API at all.
+ *   - Role gating: students cannot reach the shared instructor/TA surfaces,
+ *     while TAs can use them when Instructor Super Chat is configured.
  *   - Duplicate detection probe (/check-similar).
  *   - Super Chat retrieval behavior with the LLM + embeddings STUBBED (no
  *     OpenAI traffic): notes blend into instructor answers when enabled, are
@@ -40,6 +41,7 @@ const NOTES_INSTRUCTOR_COURSE_ID = 'BIOC-E2E-NOTES-INSTRUCTOR-COURSE';
 let instructorId;
 let instructorFreshId;
 let studentId;
+let taId;
 let originalSuperCourseSettings = null;
 let originalNotesLlmSettings = null;
 
@@ -72,6 +74,7 @@ async function setNotesSettings(overrides = {}) {
                     noteMinScore: 0.1,
                     instructorPrompt: 'E2E instructor super prompt',
                     studentPrompt: 'E2E student super prompt',
+                    llmApiKey: createValidLlmApiKey('instructor-superchat'),
                     updatedAt: new Date(),
                     ...overrides,
                 },
@@ -115,13 +118,13 @@ async function seedInstructorSuperchatContext(overrides = {}) {
     });
 }
 
-// Remove every note authored by the two test instructors from Mongo so list
+// Remove every note authored by the test instructors and TA from Mongo so list
 // assertions and counts stay deterministic across runs. (Qdrant stub vectors
 // use distinctive per-test tokens, so any residue can't cause false matches.)
 async function cleanupTestNotes() {
     await withDb((db) =>
         db.collection('superchat_notes').deleteMany({
-            authorId: { $in: [instructorId, instructorFreshId].filter(Boolean) },
+            authorId: { $in: [instructorId, instructorFreshId, taId].filter(Boolean) },
         })
     );
 }
@@ -134,6 +137,7 @@ test.beforeAll(async () => {
     instructorId = await getUserIdByUsername(TEST_USERS.instructor.username);
     instructorFreshId = await getUserIdByUsername(TEST_USERS.instructor_fresh.username);
     studentId = await getUserIdByUsername(TEST_USERS.student.username);
+    taId = await getUserIdByUsername(TEST_USERS.ta.username);
     originalSuperCourseSettings = await readSetting(SETTINGS_ID);
     originalNotesLlmSettings = await readSetting(NOTES_LLM_SETTINGS_ID);
 });
@@ -298,10 +302,10 @@ test.describe('Super Chat Notes authorization', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Section 3 — Role gating (notes API is instructor-only)
+// Section 3 — Role gating (shared instructor/TA surface)
 // ---------------------------------------------------------------------------
 test.describe('Super Chat Notes role gating', () => {
-    for (const role of ['student', 'ta']) {
+    for (const role of ['student']) {
         test(`${role} cannot list or create notes`, async ({ baseURL }) => {
             const api = await ctx(baseURL, role);
             try {
@@ -318,6 +322,48 @@ test.describe('Super Chat Notes role gating', () => {
             }
         });
     }
+
+    test('a TA can use configured Super Chat and shared notes', async ({ baseURL }) => {
+        await setNotesSettings();
+        await seedInstructorSuperchatContext();
+        const api = await ctx(baseURL, 'ta');
+        try {
+            const poolRes = await api.get('/api/instructor/chat/pool');
+            expect(poolRes.status()).toBe(200);
+            expect((await poolRes.json()).courses).toEqual(expect.arrayContaining([
+                expect.objectContaining({ courseId: NOTES_INSTRUCTOR_COURSE_ID }),
+            ]));
+
+            const createRes = await api.post(NOTES, {
+                data: { content: 'TA-authored note for shared Super Chat access.' },
+            });
+            expect(createRes.status()).toBe(201);
+            expect((await createRes.json()).note).toMatchObject({ authorId: taId, isOwn: true });
+        } finally {
+            await api.dispose();
+        }
+    });
+});
+
+test.describe('TA Super Chat navigation', () => {
+    test.use({ storageState: storageStatePath('ta') });
+
+    test('keeps Super Chat and Super Chat Notes available from the TA dashboard', async ({ page }) => {
+        await setNotesSettings();
+        await seedInstructorSuperchatContext();
+
+        await page.goto('/ta');
+        await expect(page.getByRole('link', { name: 'Super Chat', exact: true })).toBeVisible();
+        await expect(page.getByRole('link', { name: 'Super Chat Notes', exact: true })).toBeVisible();
+
+        await page.getByRole('link', { name: 'Super Chat', exact: true }).click();
+        await expect(page).toHaveURL(/\/instructor\/chat$/);
+        await expect(page.locator('#instructor-chat-input')).toBeVisible();
+        await expect(page.locator('#super-course-pool-list')).toContainText('BIOC 202 Notes Instructor');
+
+        await page.goto('/instructor/notes');
+        await expect(page.locator('#new-note-btn')).toBeVisible();
+    });
 });
 
 // ---------------------------------------------------------------------------

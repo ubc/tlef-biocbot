@@ -2,8 +2,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     await waitForAuthReady();
 
     const user = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
-    if (user && user.role !== 'instructor') {
-        window.location.href = user.role === 'ta' ? '/ta' : '/login';
+    if (user && user.role !== 'instructor' && user.role !== 'ta') {
+        window.location.href = '/login';
         return;
     }
 

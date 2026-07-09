@@ -10,6 +10,36 @@
     overflow: hidden;
 }
 
+/*
+ * The Super Course view has a header plus a long-lived chat surface. Giving
+ * the chat a second viewport-based height makes the app shell scroll and can
+ * leave the composer partially off-screen. Let the page's flex layout assign
+ * the remaining space instead, with only the messages pane scrolling.
+ */
+.super-course-main-content {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.super-course-main-content .instructor-super-chat {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+}
+
+.super-course-main-content .messages {
+    min-height: 0;
+}
+
+/* Student Super Course uses the regular student-chat composer layout: input
+ * on the first row, answer depth on the lower left, and an arrow send button
+ * anchored on the lower right. */
+.super-course-main-content #chat-form .answer-level-selector {
+    margin-right: auto;
+}
+
 .instructor-super-chat-header {
     gap: 16px;
 }
