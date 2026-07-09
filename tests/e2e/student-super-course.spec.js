@@ -131,6 +131,29 @@ test.describe('Super Course nav + page gating', () => {
         const poolList = page.locator('#super-course-pool-list');
         await expect(poolList).toContainText('BIOC 202 Opted In', { timeout: 10_000 });
         await expect(poolList).not.toContainText('BIOC 250 Inactive');
+        await expect(page.locator('#chat-input')).toHaveAttribute('placeholder', 'Type your message here...');
+        await expect(page.locator('#send-button')).toHaveText('↑');
+
+        const layout = await page.evaluate(() => {
+            const main = document.querySelector('.super-course-main-content');
+            const chat = document.querySelector('.instructor-super-chat');
+            const composer = document.querySelector('.chat-input-container');
+            const answerLevel = document.querySelector('.answer-level-selector');
+            const sendButton = document.querySelector('#send-button');
+            if (!main || !chat || !composer || !answerLevel || !sendButton) return null;
+            return {
+                mainBottom: main.getBoundingClientRect().bottom,
+                chatBottom: chat.getBoundingClientRect().bottom,
+                composerBottom: composer.getBoundingClientRect().bottom,
+                viewportHeight: window.innerHeight,
+                answerLevelLeft: answerLevel.getBoundingClientRect().left,
+                sendButtonLeft: sendButton.getBoundingClientRect().left,
+            };
+        });
+        if (!layout) throw new Error('Super Course layout elements are missing');
+        expect(layout.chatBottom).toBeLessThanOrEqual(layout.mainBottom + 1);
+        expect(layout.composerBottom).toBeLessThanOrEqual(layout.viewportHeight + 1);
+        expect(layout.sendButtonLeft).toBeGreaterThan(layout.answerLevelLeft);
     });
 
     test('redirects back to /student when no bucket is accessible', async ({ page }) => {

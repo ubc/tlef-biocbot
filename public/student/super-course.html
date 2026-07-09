@@ -41,7 +41,7 @@
             </div>
         </aside>
 
-        <main class="main-content">
+        <main class="main-content super-course-main-content">
             <header class="chat-header instructor-super-chat-header">
                 <h1>Super Course Chat</h1>
                 <div class="current-course">
@@ -81,14 +81,11 @@
                 </div>
 
                 <div class="chat-input-container">
+                    <div class="chat-disclaimer">
+                        BiocBot can make mistakes. Verify important information with your instructor. Don't share personal, private, or copyrighted information.
+                    </div>
                     <form id="chat-form" autocomplete="off">
-                        <input type="text" id="chat-input" placeholder="Ask about biochemistry course material..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="true" name="super-course-chat-message-input">
-                        <button type="submit" id="send-button">Send</button>
-                    </form>
-                    <div class="chat-footer">
-                        <div class="chat-disclaimer">
-                            BiocBot can make mistakes. Verify important information with your instructor. Don't share personal information.
-                        </div>
+                        <input type="text" id="chat-input" placeholder="Type your message here..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="true" name="super-course-chat-message-input">
                         <div class="answer-level-selector">
                             <label for="answer-level">Answer level</label>
                             <select id="answer-level" name="answer-level">
@@ -97,7 +94,8 @@
                                 <option value="graduate">Graduate</option>
                             </select>
                         </div>
-                    </div>
+                        <button type="submit" id="send-button" aria-label="Send message">&uarr;</button>
+                    </form>
                 </div>
             </div>
         </main>

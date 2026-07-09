@@ -310,7 +310,7 @@ function setupProtectedRoutes() {
         res.sendFile(path.join(__dirname, '../public/instructor/student-hub.html'));
     });
 
-    app.get('/instructor/chat.html', authMiddleware.requireInstructor, (req, res) => {
+    app.get('/instructor/chat.html', authMiddleware.requireInstructorOrTA, (req, res) => {
         res.sendFile(path.join(__dirname, '../public/instructor/chat.html'));
     });
 
@@ -429,12 +429,12 @@ function setupProtectedRoutes() {
         res.sendFile(path.join(__dirname, '../public/instructor/home.html'));
     });
 
-    app.get('/instructor/chat', authMiddleware.requireInstructor, (req, res) => {
+    app.get('/instructor/chat', authMiddleware.requireInstructorOrTA, (req, res) => {
         res.sendFile(path.join(__dirname, '../public/instructor/chat.html'));
     });
 
     // Super Chat Notes — shared instructor knowledge layer
-    app.get('/instructor/notes', authMiddleware.requireInstructor, (req, res) => {
+    app.get('/instructor/notes', authMiddleware.requireInstructorOrTA, (req, res) => {
         res.sendFile(path.join(__dirname, '../public/instructor/notes.html'));
     });
 
@@ -573,8 +573,8 @@ function setupAPIRoutes() {
     app.use('/api/onboarding', authMiddleware.requireAuth, onboardingRoutes);
     app.use('/api/qdrant', authMiddleware.requireAuth, qdrantRoutes);
     app.use('/api/chat', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireActiveCourseForNonInstructors, authMiddleware.requireStudentEnrolled, chatRoutes);
-    app.use('/api/instructor/chat', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, instructorChatRoutes);
-    app.use('/api/superchat-notes', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, superChatNotesRoutes);
+    app.use('/api/instructor/chat', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructorOrTA, instructorChatRoutes);
+    app.use('/api/superchat-notes', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructorOrTA, superChatNotesRoutes);
     app.use('/api/superchats', authMiddleware.requireAuth, authMiddleware.populateUser, superchatsRoutes);
     app.use('/api/academic-sync', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, academicSyncRoutes);
     app.use('/api/student/super-course', authMiddleware.requireAuth, authMiddleware.populateUser, studentSuperCourseRoutes);

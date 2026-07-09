@@ -190,7 +190,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     function setBusy(isBusy) {
         sendButton.disabled = isBusy;
         input.disabled = isBusy;
-        sendButton.textContent = isBusy ? 'Sending...' : 'Send';
+        sendButton.setAttribute('aria-label', isBusy ? 'Sending message' : 'Send message');
+        sendButton.title = isBusy ? 'Sending message' : 'Send message';
     }
 
     function addMessage(content, sender, options = {}) {
