@@ -218,25 +218,34 @@ function createDocumentParser(options = {}) {
     return new DocumentParsingModule({
         logger: new ConsoleLogger(),
         debug: true,
-        // Describe embedded slide images in parallel so image-heavy PowerPoint
-        // decks finish quickly instead of one-call-at-a-time.
-        imageConcurrency: 8,
+        // Describe embedded images in parallel so image-heavy documents finish
+        // quickly instead of one-call-at-a-time. Kept modest so bursts of large
+        // vision payloads don't trip provider per-minute rate limits (which
+        // would otherwise drop images); describeImage also retries transient
+        // failures with backoff.
+        imageConcurrency: 4,
         onSlide: options.onSlide,
         // `imageDescriber` is provider-agnostic. BiocBot's LLM service decides
         // which configured multimodal provider/model actually handles the image.
+        // Covers images embedded in PPTX slides, DOCX documents and PDF pages.
         imageDescriber: async (image) => {
             try {
                 if (!llmService || typeof llmService.isReady !== 'function' || !llmService.isReady()) {
                     return null;
                 }
                 return await llmService.describeImage(image.data, image.mimeType, {
-                    slideNumber: image.slideNumber
+                    slideNumber: image.slideNumber,
+                    pageNumber: image.pageNumber,
+                    source: image.source
                 });
             } catch (err) {
                 if (err && err.name === 'LlmKeyError') {
                     throw err;
                 }
-                console.warn(`⚠️ imageDescriber failed (slide ${image.slideNumber}): ${err.message}`);
+                const where = image.slideNumber
+                    ? `slide ${image.slideNumber}`
+                    : (image.pageNumber ? `page ${image.pageNumber}` : `image ${image.imageIndex}`);
+                console.warn(`⚠️ imageDescriber failed (${where}): ${err.message}`);
                 return null;
             }
         }
