@@ -245,7 +245,9 @@ function updatePracticeQuestionInAutoSave(practiceId, completedHtml) {
             }
         }
 
+        chatData.lastActivityTimestamp = new Date().toISOString();
         localStorage.setItem(autoSaveKey, JSON.stringify(chatData));
+        scheduleChatSessionExpiration(chatData);
     } catch (error) {
         console.error('Error updating practice question in auto-save:', error);
     }

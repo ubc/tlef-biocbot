@@ -140,12 +140,12 @@ describe('student course view and TA course listing', () => {
             courseId: 'C1', courseName: 'BIOC 301', status: 'active', llmApiKey: { status: 'valid' },
             studentEnrollment: { s1: { enrolled: true } },
             courseStructure: { weeks: 2, lecturesPerWeek: 2 }, approvedStruggleTopics: ['ATP'],
-            prompts: { studentIdleTimeout: 90 }, isAdditiveRetrieval: true,
+            prompts: { studentIdleTimeout: 90, studentSessionTimeout: 3600 }, isAdditiveRetrieval: true,
             lectures: [{ id: 'u1', name: 'Unit 1', displayName: 'Energy', isPublished: true, documents: [{ documentId: 'd1' }], questions: ['q'], passThreshold: 3 }],
         }] });
         const res = await request(app({ db, user: student })).get('/C1');
         expect(res.status).toBe(200);
-        expect(res.body.data).toMatchObject({ id: 'C1', name: 'BIOC 301', yearLevel: 3, studentIdleTimeout: 90, isAdditiveRetrieval: true });
+        expect(res.body.data).toMatchObject({ id: 'C1', name: 'BIOC 301', yearLevel: 3, studentIdleTimeout: 90, studentSessionTimeout: 3600, isAdditiveRetrieval: true });
         expect(res.body.data.lectures[0]).toMatchObject({ id: 'u1', displayName: 'Energy', isPublished: true, passThreshold: 3 });
         expect(res.body.data.structure.weeks[0]).toMatchObject({ id: 'week-1', documents: 1 });
     });

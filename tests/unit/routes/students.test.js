@@ -92,6 +92,31 @@ describe('GET /:courseId — instructor-admin student list', () => {
         expect(byId.e.sessions[0].duration).toBe('1h 2m 3s');
     });
 
+    test('does not count a startup welcome appended during a later visit', async () => {
+        const db = memoryDb({
+            courses: [{ courseId: 'C1', instructorId: 'i1' }],
+            chat_sessions: [{
+                sessionId: 'stale-reopen',
+                courseId: 'C1',
+                studentId: 's1',
+                savedAt: new Date('2026-07-13T23:02:26Z'),
+                chatData: { messages: [
+                    { type: 'user', timestamp: '2026-07-12T21:32:09.744Z' },
+                    { type: 'bot', content: 'Real response', timestamp: '2026-07-12T21:40:31.708Z' },
+                    {
+                        type: 'bot',
+                        content: '<strong>Welcome to BiocBot!</strong> I can see you have access to published units.',
+                        timestamp: '2026-07-13T23:02:26.177Z',
+                    },
+                ] },
+            }],
+        });
+
+        const res = await request(makeRouteApp(studentsRouter, { db, user: adminInstructor })).get('/C1');
+        const session = res.body.data.students[0].sessions[0];
+        expect(session.duration).toBe('8m 21s');
+    });
+
     test('500 when a database read fails', async () => {
         const db = { collection: () => ({ findOne: async () => { throw new Error('db down'); } }) };
         const res = await request(makeRouteApp(studentsRouter, { db, user: adminInstructor })).get('/C1');

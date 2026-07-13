@@ -383,6 +383,92 @@ async function openStudentScriptHarness(page, options = {}) {
 }
 
 test.describe('Course/unit initialization and saved state', () => {
+    test('rotates an autosave beyond the configured inactivity window', async ({ page }) => {
+        const oldSessionId = 'e2e_stale_local_session';
+        const staleChat = {
+            metadata: {
+                courseId: STU_COURSE_ID,
+                courseName: 'BIOC E2E Student Chat',
+                studentId,
+                studentName: 'E2E Student',
+                unitName: 'Unit 1',
+                currentMode: 'tutor',
+                totalMessages: 2,
+                version: '1.0',
+            },
+            messages: [
+                { type: 'user', content: 'old question', timestamp: '2026-01-01T00:00:00Z' },
+                { type: 'bot', content: 'old answer', timestamp: '2026-01-01T00:00:05Z' },
+            ],
+            practiceTests: null,
+            studentAnswers: { answers: [] },
+            sessionInfo: {
+                sessionId: oldSessionId,
+                startTime: '2026-01-01T00:00:00Z',
+                duration: '5s',
+            },
+            lastActivityTimestamp: '2026-01-01T00:00:05Z',
+        };
+
+        await openStudentChat(page, { chatData: staleChat });
+
+        await expect.poll(() => page.evaluate((studentId) => {
+            const raw = localStorage.getItem(`biocbot_current_chat_${studentId}`);
+            return raw ? JSON.parse(raw).sessionInfo?.sessionId : null;
+        }, studentId)).not.toBe(oldSessionId);
+        await expect.poll(() => page.evaluate(({ studentId, courseId }) =>
+            localStorage.getItem(`biocbot_session_${studentId}_${courseId}_Unit 1`),
+        { studentId, courseId: STU_COURSE_ID })).not.toBe(oldSessionId);
+        await expect(page.locator('#chat-messages')).not.toContainText('old question');
+    });
+
+    test('starts a visibly new session when the student returns to a stale tab', async ({ page }) => {
+        await openStudentChat(page);
+        await waitForDirectChatReady(page);
+
+        const oldSessionId = 'e2e_background_tab_session';
+        await page.evaluate(({ studentId, courseId, oldSessionId }) => {
+            const staleChat = {
+                metadata: {
+                    courseId,
+                    courseName: 'BIOC E2E Student Chat',
+                    studentId,
+                    studentName: 'E2E Student',
+                    unitName: 'Unit 1',
+                    currentMode: 'tutor',
+                    totalMessages: 2,
+                    version: '1.0',
+                },
+                messages: [
+                    { type: 'user', content: 'STALE TAB QUESTION', timestamp: '2026-01-01T00:00:00Z' },
+                    { type: 'bot', content: 'STALE TAB ANSWER', timestamp: '2026-01-01T00:00:05Z' },
+                ],
+                practiceTests: null,
+                studentAnswers: { answers: [] },
+                sessionInfo: { sessionId: oldSessionId, startTime: '2026-01-01T00:00:00Z', duration: '5s' },
+                lastActivityTimestamp: '2026-01-01T00:00:05Z',
+            };
+            localStorage.setItem(`biocbot_current_chat_${studentId}`, JSON.stringify(staleChat));
+            localStorage.setItem(`biocbot_session_${studentId}_${courseId}_Unit 1`, oldSessionId);
+            document.getElementById('chat-messages').innerHTML = '<div>STALE TAB QUESTION</div>';
+            const w = /** @type {any} */ (window);
+            w.setChatSessionTimeoutSeconds(30);
+            window.dispatchEvent(new Event('focus'));
+        }, { studentId, courseId: STU_COURSE_ID, oldSessionId });
+
+        await expect(page.locator('#chat-messages')).not.toContainText('STALE TAB QUESTION');
+        await expect(page.locator('#chat-messages')).toContainText(
+            'Your previous session ended after 30 seconds of inactivity. A new session has started.'
+        );
+        await expect(page.locator('.notification.info')).toContainText(
+            'Previous session expired — new chat session started'
+        );
+        await expect.poll(() => page.evaluate((studentId) => {
+            const raw = localStorage.getItem(`biocbot_current_chat_${studentId}`);
+            return raw ? JSON.parse(raw).sessionInfo?.sessionId : null;
+        }, studentId)).not.toBe(oldSessionId);
+    });
+
     test('a unit with no assessment questions enables direct chat and preserves the selected unit', async ({ page }) => {
         await openStudentChat(page);
 

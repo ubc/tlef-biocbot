@@ -843,6 +843,15 @@ test.describe('Pure helpers via window globals', () => {
                 fallbackNoTimestamps: w.calculateDurationFromChatData({ messages: [
                     { type: 'user', content: 'q', timestamp: null },
                 ] }),
+                staleWelcome: w.calculateDurationFromChatData({ messages: [
+                    { type: 'user', content: 'q', timestamp: '2026-07-12T21:32:09.744Z' },
+                    { type: 'bot', content: 'real answer', timestamp: '2026-07-12T21:40:31.708Z' },
+                    {
+                        type: 'bot',
+                        content: '<strong>Welcome to BiocBot!</strong> I can see you have access to published units.',
+                        timestamp: '2026-07-13T23:02:26.177Z',
+                    },
+                ] }),
             };
         });
         expect(out.empty).toBe('0s');
@@ -853,6 +862,7 @@ test.describe('Pure helpers via window globals', () => {
         expect(out.hours).toMatch(/^\d+h \d+m \d+s$/);
         expect(out.fallbackLast).toMatch(/^\d+s$/);
         expect(out.fallbackNoTimestamps).toBe('0s');
+        expect(out.staleWelcome).toBe('8m 21s');
     });
 
     test('debug helpers expose data without throwing', async ({ page }) => {

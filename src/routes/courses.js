@@ -1483,6 +1483,7 @@ async function getCourseForStudent(req, res, courseId) {
                 ?? CourseModel.parseYearLevelFromName(course.courseName),
             isAdditiveRetrieval: !!course.isAdditiveRetrieval,
             studentIdleTimeout: course.prompts?.studentIdleTimeout || 240, // Default 4 minutes
+            studentSessionTimeout: course.prompts?.studentSessionTimeout || 1800, // Default 30 minutes
             createdAt: course.createdAt?.toISOString() || new Date().toISOString(),
             status: course.status || 'active',
             // Include lectures array that students expect

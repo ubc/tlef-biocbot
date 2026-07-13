@@ -84,6 +84,7 @@ test.describe('prompts (course-level)', () => {
                     quizHelp: 'COURSE_QUIZ_HELP',
                     chatSummary: 'COURSE_CHAT_SUMMARY',
                     studentIdleTimeout: 180,
+                    studentSessionTimeout: 3600,
                 },
             },
         });
@@ -94,6 +95,7 @@ test.describe('prompts (course-level)', () => {
         expect(body.prompts.base).toBe('COURSE_BASE');
         expect(body.prompts.chatSummary).toBe('COURSE_CHAT_SUMMARY');
         expect(body.prompts.studentIdleTimeout).toBe(180);
+        expect(body.prompts.studentSessionTimeout).toBe(3600);
     });
 
     test('POST /prompts 400 when courseId missing', async ({ request: api }) => {
@@ -200,6 +202,7 @@ test.describe('prompts (course-level)', () => {
                 additiveRetrieval: true,
                 additionalMaterialSecondarySearch: true,
                 studentIdleTimeout: 300,
+                studentSessionTimeout: 2700,
             },
         });
         expect(res.ok()).toBeTruthy();
@@ -211,6 +214,7 @@ test.describe('prompts (course-level)', () => {
         expect(doc.isAdditiveRetrieval).toBe(true);
         expect(doc.additionalMaterialSecondarySearch).toBe(true);
         expect(doc.prompts.studentIdleTimeout).toBe(300);
+        expect(doc.prompts.studentSessionTimeout).toBe(2700);
     });
 
     test('GET /prompts defaults additionalMaterialSecondarySearch to false when unset', async ({ request: api }) => {

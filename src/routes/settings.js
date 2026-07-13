@@ -608,7 +608,9 @@ router.get('/prompts', async (req, res) => {
             // Course-level secondary search for additional materials (off by default)
             additionalMaterialSecondarySearch: course ? !!course.additionalMaterialSecondarySearch : false,
             // Student idle timeout (seconds), default to 4 minutes (240s)
-            studentIdleTimeout: coursePrompts.studentIdleTimeout || 240
+            studentIdleTimeout: coursePrompts.studentIdleTimeout || 240,
+            // Chat session inactivity boundary (seconds), default to 30 minutes
+            studentSessionTimeout: coursePrompts.studentSessionTimeout || 1800
         };
 
         res.json({
@@ -637,7 +639,7 @@ router.post('/prompts', async (req, res) => {
             return res.status(503).json({ success: false, message: 'Database connection not available' });
         }
 
-        const { base, protege, tutor, explain, directive, quizHelp, chatSummary, additiveRetrieval, additionalMaterialSecondarySearch, studentIdleTimeout, courseId } = req.body;
+        const { base, protege, tutor, explain, directive, quizHelp, chatSummary, additiveRetrieval, additionalMaterialSecondarySearch, studentIdleTimeout, studentSessionTimeout, courseId } = req.body;
 
         if (!courseId) {
             return res.status(400).json({ success: false, message: 'courseId is required to save settings' });
@@ -668,6 +670,14 @@ router.post('/prompts', async (req, res) => {
              }
         }
 
+        let sessionTimeoutVal = 1800; // Default 30 minutes
+        if (studentSessionTimeout !== undefined) {
+            sessionTimeoutVal = parseInt(studentSessionTimeout);
+            if (isNaN(sessionTimeoutVal) || sessionTimeoutVal < 30 || sessionTimeoutVal > 86400) {
+                return res.status(400).json({ success: false, message: 'Invalid chat session timeout value' });
+            }
+        }
+
         // Update the course document directly
         await db.collection('courses').updateOne(
             { courseId: courseId },
@@ -681,6 +691,7 @@ router.post('/prompts', async (req, res) => {
                     'prompts.quizHelp': quizHelp || prompts.DEFAULT_PROMPTS.quizHelp,
                     'prompts.chatSummary': chatSummary && chatSummary.trim() ? chatSummary : prompts.DEFAULT_PROMPTS.chatSummary,
                     'prompts.studentIdleTimeout': timeoutVal,
+                    'prompts.studentSessionTimeout': sessionTimeoutVal,
                     isAdditiveRetrieval: !!additiveRetrieval,
                     additionalMaterialSecondarySearch: !!additionalMaterialSecondarySearch,
                     updatedAt: new Date()

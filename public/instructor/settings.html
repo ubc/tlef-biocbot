@@ -553,6 +553,15 @@
                                             <input type="number" id="idle-timeout-input" class="number-input" min="0.5" max="20" step="0.5" value="4" aria-labelledby="idle-timeout-label" aria-describedby="idle-timeout-desc">
                                         </div>
                                     </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <h4 id="session-timeout-label">Chat session inactivity timeout (minutes)</h4>
+                                            <p id="session-timeout-desc">After this much inactivity, returning students automatically start a new chat and repeat the unit assessment. Their previous chat remains in History. Default is 30 minutes.</p>
+                                        </div>
+                                        <div class="setting-controls">
+                                            <input type="number" id="session-timeout-input" class="number-input" min="0.5" max="1440" step="0.5" value="30" aria-labelledby="session-timeout-label" aria-describedby="session-timeout-desc">
+                                        </div>
+                                    </div>
                                 </div>
                                 <div class="settings-section-actions">
                                     <span class="settings-dirty-note" hidden>Unsaved changes</span>

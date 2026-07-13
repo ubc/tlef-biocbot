@@ -183,6 +183,7 @@ function buildSettingsCourse({
             quizHelp: 'Seed quiz help prompt',
             chatSummary: 'Seed chat summary prompt',
             studentIdleTimeout: 180,
+            studentSessionTimeout: 1800,
         };
         course.isAdditiveRetrieval = false;
         course.quizSettings = {
@@ -525,6 +526,7 @@ async function setupMockedSettingsRoutes(page, options = {}) {
                         chatSummary: 'Default chat summary prompt',
                         additiveRetrieval: true,
                         studentIdleTimeout: 240,
+                        studentSessionTimeout: 1800,
                     },
                 }));
                 return;
@@ -542,6 +544,7 @@ async function setupMockedSettingsRoutes(page, options = {}) {
                     chatSummary: 'Mock chat summary prompt',
                     additiveRetrieval: true,
                     studentIdleTimeout: 300,
+                    studentSessionTimeout: 1800,
                 },
             }));
             return;
@@ -943,6 +946,7 @@ test.describe('Instructor settings UI', () => {
 
         await openSettingsPanel(page, 'privacy');
         await expect(page.locator('#idle-timeout-input')).toHaveValue('3');
+        await expect(page.locator('#session-timeout-input')).toHaveValue('30');
         await expect(page.locator('#anonymize-students-toggle')).not.toBeChecked();
 
         await openSettingsPanel(page, 'quiz');
@@ -986,6 +990,7 @@ test.describe('Instructor settings UI', () => {
 
         await openSettingsPanel(page, 'privacy');
         await page.locator('#idle-timeout-input').fill('5.5');
+        await page.locator('#session-timeout-input').fill('45');
         await setInputChecked(page, '#anonymize-students-toggle', true);
         await page.locator('#save-privacy-settings').click();
         await expect(page.locator('.notification.success', { hasText: 'Privacy settings saved' })).toBeVisible({
@@ -1012,6 +1017,7 @@ test.describe('Instructor settings UI', () => {
                 quizHelp: course.prompts?.quizHelp,
                 chatSummary: course.prompts?.chatSummary,
                 studentIdleTimeout: course.prompts?.studentIdleTimeout,
+                studentSessionTimeout: course.prompts?.studentSessionTimeout,
                 isAdditiveRetrieval: course.isAdditiveRetrieval,
                 additionalMaterialSecondarySearch: course.additionalMaterialSecondarySearch,
                 allowSourceAttributionDownloads: course.quizSettings?.allowSourceAttributionDownloads,
@@ -1026,6 +1032,7 @@ test.describe('Instructor settings UI', () => {
             quizHelp: 'Updated quiz help prompt from settings UI',
             chatSummary: 'Updated chat summary prompt from settings UI',
             studentIdleTimeout: 330,
+            studentSessionTimeout: 2700,
             isAdditiveRetrieval: true,
             additionalMaterialSecondarySearch: true,
             allowSourceAttributionDownloads: true,
@@ -1220,10 +1227,12 @@ test.describe('Instructor settings UI', () => {
 
         await openSettingsPanel(page, 'privacy');
         await page.locator('#idle-timeout-input').fill('9');
+        await page.locator('#session-timeout-input').fill('60');
         await setInputChecked(page, '#anonymize-students-toggle', true);
         page.once('dialog', (dialog) => dialog.accept());
         await page.locator('#reset-privacy-settings').click();
         await expect(page.locator('#idle-timeout-input')).toHaveValue('4');
+        await expect(page.locator('#session-timeout-input')).toHaveValue('30');
         await expect(page.locator('#anonymize-students-toggle')).not.toBeChecked();
         await expect(page.locator('.notification.success', { hasText: 'Privacy settings reset to defaults' })).toBeVisible();
 

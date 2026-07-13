@@ -342,6 +342,96 @@ test('restores a recent saved unit without starting a fresh assessment', async (
     await expect(page.locator('#chat-messages')).not.toContainText('Most recent unit should not replace saved unit?');
 });
 
+test('honors a course session window longer than the 30-minute default', async ({ page }) => {
+    const savedMessage = 'SAVED_MESSAGE_45_MINUTES_AGO';
+    const savedAt = new Date(Date.now() - (45 * 60 * 1000)).toISOString();
+    const chatData = baseChatData('Unit 1', [{
+        type: 'bot',
+        content: savedMessage,
+        messageType: 'regular-chat',
+        timestamp: savedAt,
+    }]);
+    chatData.lastActivityTimestamp = savedAt;
+
+    await openStudentWithMocks(page, {
+        chatData,
+        course: courseDoc({
+            studentSessionTimeout: 60 * 60,
+            lectures: [unit('Unit 1', {
+                assessmentQuestions: [question({ question: 'Assessment should wait for the configured hour?' })],
+            })],
+        }),
+    });
+
+    await expect(page.locator('#unit-select')).toHaveValue('Unit 1', { timeout: 10_000 });
+    await expect(page.locator('#chat-messages')).toContainText(savedMessage);
+    await expect(page.locator('#chat-messages')).not.toContainText('Assessment should wait for the configured hour?');
+});
+
+test('returning after session inactivity starts a fresh assessment for the same unit', async ({ page }) => {
+    const savedMessage = 'SESSION_BEFORE_INACTIVITY';
+    await openStudentWithMocks(page, {
+        chatData: baseChatData('Unit 1', [{
+            type: 'bot',
+            content: savedMessage,
+            messageType: 'regular-chat',
+            timestamp: new Date().toISOString(),
+        }]),
+        course: courseDoc({
+            studentSessionTimeout: 30,
+            lectures: [unit('Unit 1', {
+                assessmentQuestions: [question({ question: 'Fresh assessment after inactivity?' })],
+            })],
+        }),
+    });
+
+    await expect(page.locator('#chat-messages')).toContainText(savedMessage, { timeout: 10_000 });
+
+    await page.evaluate((studentId) => {
+        const key = `biocbot_current_chat_${studentId}`;
+        const chatData = JSON.parse(localStorage.getItem(key));
+        chatData.lastActivityTimestamp = '2026-01-01T00:00:00Z';
+        localStorage.setItem(key, JSON.stringify(chatData));
+        window.dispatchEvent(new Event('focus'));
+    }, STUDENT_ID);
+
+    await expect(page.locator('#chat-messages')).not.toContainText(savedMessage);
+    await expect(page.locator('#chat-messages')).toContainText('Fresh assessment after inactivity?');
+    await expect(page.locator('#chat-input')).toBeHidden();
+});
+
+test('expires a session while the page remains visible and focused', async ({ page }) => {
+    const savedMessage = 'SESSION_LEFT_OPEN_ON_FOCUSED_PAGE';
+    await openStudentWithMocks(page, {
+        chatData: baseChatData('Unit 1', [{
+            type: 'bot',
+            content: savedMessage,
+            messageType: 'regular-chat',
+            timestamp: new Date().toISOString(),
+        }]),
+        course: courseDoc({
+            studentSessionTimeout: 30,
+            lectures: [unit('Unit 1', {
+                assessmentQuestions: [question({ question: 'Focused-page assessment restart?' })],
+            })],
+        }),
+    });
+
+    await expect(page.locator('#chat-messages')).toContainText(savedMessage, { timeout: 10_000 });
+
+    await page.evaluate((studentId) => {
+        const key = `biocbot_current_chat_${studentId}`;
+        const chatData = JSON.parse(localStorage.getItem(key));
+        chatData.lastActivityTimestamp = '2026-01-01T00:00:00Z';
+        localStorage.setItem(key, JSON.stringify(chatData));
+        scheduleChatSessionExpiration(chatData);
+    }, STUDENT_ID);
+
+    await expect(page.locator('#chat-messages')).not.toContainText(savedMessage);
+    await expect(page.locator('#chat-messages')).toContainText('Focused-page assessment restart?');
+    await expect(page.locator('#chat-input')).toBeHidden();
+});
+
 test('loads API fallback questions when selected unit has no embedded questions', async ({ page }) => {
     await openStudentWithMocks(page, {
         questionsResponse: {

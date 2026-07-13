@@ -127,15 +127,16 @@ describe('course tutoring prompt settings', () => {
         explain: 'explain', directive: 'directive', quizHelp: 'quiz',
         chatSummary: 'summary', additiveRetrieval: true,
         additionalMaterialSecondarySearch: true, studentIdleTimeout: 300,
+        studentSessionTimeout: 2700,
     };
 
     test('GET returns global defaults or stored course prompts', async () => {
         let res = await request(app({ db: memoryDb({}) })).get('/prompts');
         expect(res.status).toBe(200);
         expect(res.body).toMatchObject({ success: true, isCourseSpecific: false });
-        const db = memoryDb({ courses: [{ courseId: 'C1', prompts: { base: 'custom', studentIdleTimeout: 90 }, isAdditiveRetrieval: true }] });
+        const db = memoryDb({ courses: [{ courseId: 'C1', prompts: { base: 'custom', studentIdleTimeout: 90, studentSessionTimeout: 3600 }, isAdditiveRetrieval: true }] });
         res = await request(app({ db })).get('/prompts?courseId=C1');
-        expect(res.body.prompts).toMatchObject({ base: 'custom', studentIdleTimeout: 90, additiveRetrieval: true });
+        expect(res.body.prompts).toMatchObject({ base: 'custom', studentIdleTimeout: 90, studentSessionTimeout: 3600, additiveRetrieval: true });
     });
 
     test('POST requires course ownership and valid prompt/timeout formats', async () => {
@@ -145,6 +146,8 @@ describe('course tutoring prompt settings', () => {
         expect((await request(app({ db, user: student })).post('/prompts').send(promptBody)).status).toBe(403);
         expect((await request(app({ db, user: instructor })).post('/prompts').send({ ...promptBody, base: 4 })).status).toBe(400);
         expect((await request(app({ db, user: instructor })).post('/prompts').send({ ...promptBody, studentIdleTimeout: 10 })).status).toBe(400);
+        expect((await request(app({ db, user: instructor })).post('/prompts').send({ ...promptBody, studentSessionTimeout: 10 })).status).toBe(400);
+        expect((await request(app({ db, user: instructor })).post('/prompts').send({ ...promptBody, studentSessionTimeout: 86401 })).status).toBe(400);
     });
 
     test('POST saves prompts and reset removes them', async () => {
@@ -152,7 +155,7 @@ describe('course tutoring prompt settings', () => {
         let res = await request(app({ db, user: instructor })).post('/prompts').send(promptBody);
         expect(res.status).toBe(200);
         expect(await db.collection('courses').findOne({ courseId: 'C1' })).toMatchObject({
-            prompts: { base: 'base', chatSummary: 'summary', studentIdleTimeout: 300 },
+            prompts: { base: 'base', chatSummary: 'summary', studentIdleTimeout: 300, studentSessionTimeout: 2700 },
             isAdditiveRetrieval: true, additionalMaterialSecondarySearch: true,
         });
         res = await request(app({ db, user: instructor })).post('/prompts/reset').send({ courseId: 'C1' });

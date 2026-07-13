@@ -282,6 +282,7 @@ test.describe('GET /api/courses/:courseId (student → getCourseForStudent)', ()
             const body = await res.json();
             expect(body.data.id).toBe(COURSE_BR_A);
             expect(body.data.studentIdleTimeout).toBe(240); // default
+            expect(body.data.studentSessionTimeout).toBe(1800); // default 30 minutes
             expect(body.data.lectures).toHaveLength(1);
             expect(body.data.lectures[0].isPublished).toBe(true);
             expect(body.data.structure.specialFolders[0]).toEqual({
@@ -295,12 +296,13 @@ test.describe('GET /api/courses/:courseId (student → getCourseForStudent)', ()
             await seedCourse({
                 courseId: COURSE_BR_A,
                 instructorId,
-                overrides: { prompts: { studentIdleTimeout: 600 } },
+                overrides: { prompts: { studentIdleTimeout: 600, studentSessionTimeout: 3600 } },
             });
             await setStudentEnrollment(COURSE_BR_A, studentId, true);
             const res = await api.get(`/api/courses/${COURSE_BR_A}`);
             const body = await res.json();
             expect(body.data.studentIdleTimeout).toBe(600);
+            expect(body.data.studentSessionTimeout).toBe(3600);
         });
 
         test('403 with course_inactive reason when the course is inactive (caught upstream by middleware)', async ({ request: api }) => {

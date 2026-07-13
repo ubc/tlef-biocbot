@@ -3,6 +3,127 @@
  * chat-data collection/serialization.
  */
 
+const DEFAULT_CHAT_SESSION_TIMEOUT_SECONDS = 30 * 60;
+const MIN_CHAT_SESSION_TIMEOUT_SECONDS = 30;
+const MAX_CHAT_SESSION_TIMEOUT_SECONDS = 24 * 60 * 60;
+let chatSessionContinueWindowMs = DEFAULT_CHAT_SESSION_TIMEOUT_SECONDS * 1000;
+let chatSessionTimeoutLastLoadedAt = 0;
+let chatSessionExpirationTimer = null;
+
+function setChatSessionTimeoutSeconds(value) {
+    const seconds = Number(value);
+    const normalized = Number.isFinite(seconds) &&
+        seconds >= MIN_CHAT_SESSION_TIMEOUT_SECONDS &&
+        seconds <= MAX_CHAT_SESSION_TIMEOUT_SECONDS
+        ? Math.round(seconds)
+        : DEFAULT_CHAT_SESSION_TIMEOUT_SECONDS;
+    chatSessionContinueWindowMs = normalized * 1000;
+    return normalized;
+}
+
+function getChatSessionTimeoutSeconds() {
+    return Math.round(chatSessionContinueWindowMs / 1000);
+}
+
+function formatChatSessionTimeout() {
+    const seconds = getChatSessionTimeoutSeconds();
+    if (seconds % 60 === 0) {
+        const minutes = seconds / 60;
+        return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+    }
+    return `${seconds} second${seconds === 1 ? '' : 's'}`;
+}
+
+async function refreshChatSessionTimeoutForSelectedCourse(force = false) {
+    const courseId = localStorage.getItem('selectedCourseId');
+    if (!courseId) return getChatSessionTimeoutSeconds();
+
+    const now = Date.now();
+    if (!force && now - chatSessionTimeoutLastLoadedAt < 60 * 1000) {
+        return getChatSessionTimeoutSeconds();
+    }
+
+    try {
+        const response = await fetch(`/api/courses/${courseId}`, { credentials: 'include' });
+        if (!response.ok) return getChatSessionTimeoutSeconds();
+        const result = await response.json();
+        chatSessionTimeoutLastLoadedAt = now;
+        return setChatSessionTimeoutSeconds(result?.data?.studentSessionTimeout);
+    } catch (error) {
+        console.warn('Could not load chat session timeout; using the current/default value:', error);
+        return getChatSessionTimeoutSeconds();
+    }
+}
+
+function getSavedChatLastActivityMs(chatData) {
+    const explicitActivity = new Date(chatData?.lastActivityTimestamp).getTime();
+    if (Number.isFinite(explicitActivity)) return explicitActivity;
+
+    const messages = Array.isArray(chatData?.messages) ? chatData.messages : [];
+    for (let index = messages.length - 1; index >= 0; index--) {
+        const messageTime = new Date(messages[index]?.timestamp).getTime();
+        if (Number.isFinite(messageTime)) return messageTime;
+    }
+
+    return null;
+}
+
+function isSavedChatSessionStale(chatData, nowMs = Date.now()) {
+    const lastActivityMs = getSavedChatLastActivityMs(chatData);
+    return lastActivityMs !== null && nowMs - lastActivityMs >= chatSessionContinueWindowMs;
+}
+
+function hasSavedChatSessionContent(chatData) {
+    const hasMessages = Array.isArray(chatData?.messages) && chatData.messages.length > 0;
+    const hasAssessment = Array.isArray(chatData?.practiceTests?.questions) &&
+        chatData.practiceTests.questions.length > 0;
+    return hasMessages || hasAssessment;
+}
+
+function clearChatSessionExpirationTimer() {
+    if (chatSessionExpirationTimer !== null) {
+        clearTimeout(chatSessionExpirationTimer);
+        chatSessionExpirationTimer = null;
+    }
+}
+
+/**
+ * Schedule expiration from persisted activity time. Return/focus handlers are
+ * still required because browsers may throttle timers in sleeping/background tabs.
+ */
+function scheduleChatSessionExpiration(chatData = getCurrentChatData()) {
+    clearChatSessionExpirationTimer();
+    if (!hasSavedChatSessionContent(chatData)) return;
+
+    const lastActivityMs = getSavedChatLastActivityMs(chatData);
+    if (lastActivityMs === null) return;
+
+    const delayMs = Math.max(0, lastActivityMs + chatSessionContinueWindowMs - Date.now());
+    chatSessionExpirationTimer = setTimeout(async () => {
+        chatSessionExpirationTimer = null;
+        if (document.hidden) return;
+
+        const rotated = await checkForExpiredSessionOnReturn();
+        if (!rotated) {
+            // The course timeout may have changed while this timer was waiting.
+            scheduleChatSessionExpiration();
+        }
+    }, delayMs);
+}
+
+function removeSessionKeyForChat(chatData) {
+    const metadata = chatData?.metadata;
+    if (!metadata?.studentId || !metadata?.courseId || !metadata?.unitName) return;
+    localStorage.removeItem(
+        `biocbot_session_${metadata.studentId}_${metadata.courseId}_${metadata.unitName}`
+    );
+}
+
+function discardStaleCurrentChat(chatData, autoSaveKey) {
+    removeSessionKeyForChat(chatData);
+    localStorage.removeItem(autoSaveKey);
+}
+
 /**
  * Initialize auto-save system for chat
  * Creates an empty chat data structure that will be updated with each message
@@ -33,7 +154,13 @@ async function initializeAutoSave() {
             const hasAssessment = (parsedData.practiceTests && parsedData.practiceTests.questions && parsedData.practiceTests.questions.length > 0) || 
                                  (parsedData.studentAnswers && parsedData.studentAnswers.answers && parsedData.studentAnswers.answers.length > 0);
 
-            if (hasMessages || hasAssessment) {
+            if ((hasMessages || hasAssessment) && isSavedChatSessionStale(parsedData)) {
+                // A stale autosave is a completed session, not a session that should
+                // receive messages from this page load. It has already been synced
+                // after each message; rotate the local session before startup UI is
+                // allowed to autosave anything new.
+                discardStaleCurrentChat(parsedData, autoSaveKey);
+            } else if (hasMessages || hasAssessment) {
 
 
                 // Ensure the session ID is properly restored if it exists in localStorage
@@ -60,6 +187,10 @@ async function initializeAutoSave() {
         }
 
         // Create initial empty chat data structure only if no existing data
+        const initialSessionId = `autosave_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const sessionKey = `biocbot_session_${studentId}_${courseId}_${unitName}`;
+        localStorage.setItem(sessionKey, initialSessionId);
+
         const initialChatData = {
             metadata: {
                 exportDate: new Date().toISOString(),
@@ -78,14 +209,17 @@ async function initializeAutoSave() {
                 answers: []
             },
             sessionInfo: {
+                sessionId: initialSessionId,
                 startTime: new Date().toISOString(),
                 endTime: null,
                 duration: '0 minutes'
-            }
+            },
+            lastActivityTimestamp: new Date().toISOString()
         };
 
         // Store in localStorage for auto-save updates
         localStorage.setItem(autoSaveKey, JSON.stringify(initialChatData));
+        scheduleChatSessionExpiration(initialChatData);
 
 
 
@@ -112,6 +246,16 @@ function autoSaveMessage(content, sender, withSource = false, sourceAttribution 
 
         // Get current chat data
         let currentChatData = JSON.parse(localStorage.getItem(autoSaveKey) || '{}');
+
+        // Browser timers and authentication sessions can survive sleep/reload in
+        // surprising ways. Enforce the chat boundary from persisted activity time
+        // immediately before writing, not only during page initialization.
+        if (currentChatData.messages && isSavedChatSessionStale(currentChatData)) {
+            // Do not silently create a new persisted chat behind the old UI.
+            // The full rotation clears the UI and restarts the assessment.
+            void checkForExpiredSessionOnReturn();
+            return;
+        }
 
 
         // If no current chat data exists, initialize it
@@ -207,6 +351,7 @@ function autoSaveMessage(content, sender, withSource = false, sourceAttribution 
 
         // Save to localStorage
         localStorage.setItem(autoSaveKey, JSON.stringify(currentChatData));
+        scheduleChatSessionExpiration(currentChatData);
 
 
         // Debug: Log the current auto-save data structure
@@ -267,6 +412,7 @@ function getCurrentSessionId(chatData) {
         const autoSaveKey = `biocbot_current_chat_${studentIdFromData}`;
         try {
             localStorage.setItem(autoSaveKey, JSON.stringify(chatData));
+            scheduleChatSessionExpiration(chatData);
 
         } catch (error) {
             console.warn('🔄 [SESSION] Could not update session ID in chat data:', error);
@@ -625,8 +771,7 @@ function showAutoContinueNotification() {
 }
 
 /**
- * Check if we should auto-continue the chat based on 30-minute window
- * This function checks if the last activity was within 30 minutes and auto-loads the chat
+ * Check if we should auto-continue the chat based on the course inactivity window.
  * @returns {boolean} True if chat was auto-continued, false otherwise
  */
 function checkForAutoContinue() {
@@ -648,16 +793,8 @@ function checkForAutoContinue() {
             return false;
         }
 
-        // Calculate time difference
-        const lastActivity = new Date(chatData.lastActivityTimestamp);
-        const now = new Date();
-        const diffMs = now - lastActivity;
-        const diffMinutes = Math.floor(diffMs / (1000 * 60));
-
-
-
-        // Check if within 30 minutes
-        if (diffMinutes <= 30) {
+        // Continue only while the saved chat is inside the configured course window.
+        if (!isSavedChatSessionStale(chatData)) {
 
 
             // For auto-continue, we don't load the chat data into the interface
@@ -725,6 +862,7 @@ function checkForAutoContinue() {
  */
 function clearCurrentChatData() {
     try {
+        clearChatSessionExpirationTimer();
         const studentId = getCurrentStudentId();
         if (studentId) {
             const autoSaveKey = `biocbot_current_chat_${studentId}`;
@@ -757,11 +895,48 @@ function initializeNewSessionButton() {
     }
 }
 
+let isRotatingInactiveSession = false;
+
+/**
+ * Start a clean session when a student returns to a tab after the continuation
+ * window has elapsed. Browser timers may pause while a tab or computer sleeps,
+ * so this is driven by persisted activity timestamps on return.
+ */
+async function checkForExpiredSessionOnReturn() {
+    if (document.hidden || isRotatingInactiveSession) return false;
+
+    isRotatingInactiveSession = true;
+    try {
+        await refreshChatSessionTimeoutForSelectedCourse();
+        const chatData = getCurrentChatData();
+        if (!chatData || !isSavedChatSessionStale(chatData)) return false;
+
+        await handleNewSession({ reason: 'inactivity' });
+        return true;
+    } finally {
+        isRotatingInactiveSession = false;
+    }
+}
+
+function initializeSessionReturnMonitor() {
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) checkForExpiredSessionOnReturn();
+    });
+    window.addEventListener('focus', checkForExpiredSessionOnReturn);
+    window.addEventListener('pageshow', checkForExpiredSessionOnReturn);
+}
+
 /**
  * Handle new session button click
  */
-async function handleNewSession() {
+async function handleNewSession(options = {}) {
     try {
+
+        const reason = options?.reason === 'inactivity' ? 'inactivity' : 'manual';
+
+        // Stop an old in-flight response before its result can be rendered into
+        // the newly rotated session/assessment.
+        window.dispatchEvent(new CustomEvent('chat-session:rotating', { detail: { reason } }));
 
 
         // Clear any existing session data
@@ -835,6 +1010,7 @@ async function handleNewSession() {
         // Reset flags
         window.autoContinued = false;
         window.loadingFromHistory = false;
+        window.forceFreshAssessment = true;
 
         // Update course display to ensure header and other elements are synced
         if (courseName) {
@@ -851,11 +1027,21 @@ async function handleNewSession() {
         }
 
         // Show notification
-        showNewSessionNotification();
+        showNewSessionNotification(reason);
+
+        if (reason === 'inactivity') {
+            addMessage(
+                `Your previous session ended after ${formatChatSessionTimeout()} of inactivity. A new session has started.`,
+                'bot',
+                false,
+                false,
+                { source: 'System', description: 'System notification' }
+            );
+        }
 
         // Trigger the full initialization process including assessment questions
 
-        checkPublishedUnitsAndLoadQuestions();
+        await checkPublishedUnitsAndLoadQuestions();
 
 
 
@@ -867,7 +1053,7 @@ async function handleNewSession() {
 /**
  * Show a notification that a new session was started
  */
-function showNewSessionNotification() {
+function showNewSessionNotification(reason = 'manual') {
     try {
         // Find or create notification container
         let container = document.querySelector('.notification-container');
@@ -884,7 +1070,9 @@ function showNewSessionNotification() {
         notification.innerHTML = `
             <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="font-size: 16px;">✨</span>
-                <span>New chat session started</span>
+                <span>${reason === 'inactivity'
+                    ? 'Previous session expired — new chat session started'
+                    : 'New chat session started'}</span>
             </div>
             <button class="notification-close" aria-label="Close notification">&times;</button>
         `;
@@ -1279,11 +1467,25 @@ function calculateSessionDuration(chatData) {
         return '0s';
     }
 
-    // Find the last bot message
-    const lastBotMessage = chatData.messages.slice().reverse().find(msg => msg.type === 'bot');
+    // Startup and system UI can be appended on a later page load. They are not a
+    // response in the conversation and must not extend the measured session.
+    const isSyntheticBotMessage = (msg) => {
+        if (!msg || msg.type !== 'bot') return false;
+        if (msg.sourceAttribution?.source === 'System') return true;
+        const content = typeof msg.content === 'string' ? msg.content : '';
+        return content.includes('Welcome to BiocBot!') &&
+            content.includes('I can see you have access to published units');
+    };
+
+    // Find the last real bot response
+    const lastBotMessage = chatData.messages.slice().reverse().find(
+        msg => msg.type === 'bot' && !isSyntheticBotMessage(msg)
+    );
     if (!lastBotMessage || !lastBotMessage.timestamp) {
-        // If no bot message found, use the last message
-        const lastMessage = chatData.messages[chatData.messages.length - 1];
+        // If no real bot message exists, use the last non-synthetic message.
+        const lastMessage = chatData.messages.slice().reverse().find(
+            msg => !isSyntheticBotMessage(msg)
+        );
         if (!lastMessage || !lastMessage.timestamp) {
             return '0s';
         }
