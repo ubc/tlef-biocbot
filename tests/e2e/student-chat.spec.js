@@ -2762,4 +2762,132 @@ test.describe('Chat export & feedback UX fixes', () => {
         expect(result.datasetTs).toBe(result.expected);
         expect(Math.abs(result.nowTs - result.datasetTs)).toBeGreaterThan(60_000);
     });
+
+    test('closing the tab and logging back in preserves all older message timing', async ({ browser }) => {
+        await resetStudentChatData({ instructorId });
+        await setUserAgreement(studentId, true);
+        const context = await browser.newContext();
+        const api = context.request;
+        const login = async () => api.post('/api/auth/login', {
+            data: { username: TEST_USERS.student.username, password: studentPassword },
+        });
+
+        try {
+            expect((await login()).ok()).toBeTruthy();
+            const originalMessages = [
+                {
+                    type: 'bot', content: 'ORIGINAL ASSESSMENT START', messageType: 'assessment-start', isHtml: true,
+                    timestamp: '2025-02-03T04:05:06.000Z', elapsedTime: 0, elapsedTimeDerived: true,
+                },
+                {
+                    type: 'bot', content: 'ORIGINAL ASSESSMENT QUESTION', messageType: 'practice-test-question',
+                    timestamp: '2025-02-03T04:05:08.500Z', elapsedTime: 2500, elapsedTimeDerived: false,
+                    questionData: {
+                        questionIndex: 0,
+                        questionText: 'ORIGINAL ASSESSMENT QUESTION',
+                        options: [{ text: 'A. Original option', isSelected: true }],
+                        studentAnswer: 'A',
+                    },
+                },
+                {
+                    type: 'bot', content: 'ORIGINAL MODE RESULT', messageType: 'mode-result',
+                    timestamp: '2025-02-03T04:05:11.500Z', elapsedTime: 3000, elapsedTimeDerived: true,
+                    htmlContent: '<div class="mode-explanation">ORIGINAL MODE RESULT</div>',
+                },
+                {
+                    type: 'user', content: 'ORIGINAL STUDENT MESSAGE', messageType: 'regular-chat',
+                    timestamp: '2025-02-03T04:05:15.500Z', elapsedTime: 4000, elapsedTimeDerived: false,
+                },
+                {
+                    type: 'bot', content: 'ORIGINAL BOT RESPONSE', messageType: 'regular-chat',
+                    timestamp: '2025-02-03T04:05:20.500Z', elapsedTime: 5000, elapsedTimeDerived: false,
+                },
+            ];
+            const sessionId = `timing_relogin_${Date.now()}`;
+            const chatData = {
+                metadata: {
+                    exportDate: new Date().toISOString(), courseId: STU_COURSE_ID,
+                    courseName: STU_COURSE_NAME, studentId, studentName: 'E2E Student',
+                    unitName: 'Unit 1', currentMode: 'tutor', totalMessages: originalMessages.length,
+                    version: '1.0',
+                },
+                messages: originalMessages,
+                practiceTests: null,
+                studentAnswers: { answers: [] },
+                sessionInfo: {
+                    sessionId, startTime: originalMessages[0].timestamp,
+                    endTime: originalMessages.at(-1).timestamp, duration: '5s',
+                },
+                lastActivityTimestamp: new Date().toISOString(),
+            };
+
+            const firstTab = await context.newPage();
+            await firstTab.goto('/student');
+            await firstTab.evaluate(({ studentId, courseId, sessionId, chatData }) => {
+                localStorage.setItem('selectedCourseId', courseId);
+                localStorage.setItem('selectedCourseName', 'BIOC E2E Student Chat');
+                localStorage.setItem('selectedUnitName', 'Unit 1');
+                localStorage.setItem('studentMode', 'tutor');
+                localStorage.setItem(`biocbot_current_chat_${studentId}`, JSON.stringify(chatData));
+                localStorage.setItem(`biocbot_session_${studentId}_${courseId}_Unit 1`, sessionId);
+            }, { studentId, courseId: STU_COURSE_ID, sessionId, chatData });
+            await firstTab.reload();
+            await expect(firstTab.locator('#chat-messages')).toContainText('ORIGINAL BOT RESPONSE', { timeout: 15_000 });
+
+            await firstTab.evaluate(() => {
+                addMessage('NEW MESSAGE AFTER FIRST RESTORE', 'user');
+            });
+            await expect(firstTab.locator('#chat-messages')).toContainText('NEW MESSAGE AFTER FIRST RESTORE');
+            await firstTab.close();
+
+            const logout = await api.post('/api/auth/logout', { maxRedirects: 0 });
+            expect([200, 302]).toContain(logout.status());
+            expect((await login()).ok()).toBeTruthy();
+
+            const reopenedTab = await context.newPage();
+            await reopenedTab.goto('/student');
+            await expect(reopenedTab.locator('#chat-messages')).toContainText('ORIGINAL BOT RESPONSE', { timeout: 15_000 });
+            await expect(reopenedTab.locator('#chat-messages')).toContainText('NEW MESSAGE AFTER FIRST RESTORE');
+
+            const afterRelogin = await reopenedTab.evaluate(({ studentId, expectedMessages }) => {
+                const stored = JSON.parse(localStorage.getItem(`biocbot_current_chat_${studentId}`));
+                const fields = (/** @type {any} */ message) => ({
+                    messageType: message.messageType,
+                    timestamp: message.timestamp,
+                    elapsedTime: message.elapsedTime,
+                    elapsedTimeDerived: message.elapsedTimeDerived,
+                });
+                const rendered = expectedMessages.map((expected) => {
+                    const element = /** @type {HTMLElement|undefined} */ (
+                        Array.from(document.querySelectorAll('#chat-messages .message'))
+                            .find(message => message.textContent.includes(expected.content))
+                    );
+                    return {
+                        timestamp: element?.dataset.timestamp,
+                        elapsedTime: element?.dataset.elapsedTime,
+                        elapsedTimeDerived: element?.dataset.elapsedTimeDerived,
+                    };
+                });
+                return {
+                    stored: stored.messages.slice(0, expectedMessages.length).map(fields),
+                    rendered,
+                };
+            }, { studentId, expectedMessages: originalMessages });
+
+            expect(afterRelogin.stored).toEqual(originalMessages.map((message) => ({
+                messageType: message.messageType,
+                timestamp: message.timestamp,
+                elapsedTime: message.elapsedTime,
+                elapsedTimeDerived: message.elapsedTimeDerived,
+            })));
+            expect(afterRelogin.rendered).toEqual(originalMessages.map((message) => ({
+                timestamp: String(new Date(message.timestamp).getTime()),
+                elapsedTime: String(message.elapsedTime),
+                elapsedTimeDerived: String(message.elapsedTimeDerived),
+            })));
+            await reopenedTab.close();
+        } finally {
+            await context.close();
+        }
+    });
 });
