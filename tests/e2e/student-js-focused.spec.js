@@ -1042,9 +1042,9 @@ test.describe('student.js compact browser harness', () => {
         expect(timing.first).toEqual(timing.expected);
         expect(timing.second).toEqual(timing.expected);
         expect(timing.firstDom.every((message) =>
-            /^\d+$/.test(message.timestamp)
-            && /^\d+$/.test(message.elapsedTime)
-            && /^(true|false)$/.test(message.elapsedTimeDerived)
+            /^\d+$/.test(String(message.timestamp))
+            && /^\d+$/.test(String(message.elapsedTime))
+            && /^(true|false)$/.test(String(message.elapsedTimeDerived))
         )).toBe(true);
     });
 

@@ -539,7 +539,10 @@ test('loadAvailableCourses renders no-courses and fetch-error empty states', asy
 
     harness.setAvailableCourses({ status: 500, body: { success: false, message: 'Nope' } });
     await page.evaluate(() => {
-        document.getElementById('chat-messages').innerHTML = '';
+        const chatMessages = document.getElementById('chat-messages');
+        if (chatMessages) {
+            chatMessages.innerHTML = '';
+        }
         const w = /** @type {any} */ (window);
         return w.loadAvailableCourses();
     });
