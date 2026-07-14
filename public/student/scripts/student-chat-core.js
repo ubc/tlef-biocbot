@@ -130,7 +130,7 @@ function renderRevokedAccessUI() {
  * @param {string} text - The message text to explain
  * @param {string|null} topic - The detected topic associated with this message
  */
-async function handleExplainAction(text, topic = null) {
+async function handleExplainAction(text, topic = null, sourceMessageId = null) {
     if (!text) return;
     
     // Check if we already have an ongoing request
@@ -141,6 +141,15 @@ async function handleExplainAction(text, topic = null) {
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = text;
     const cleanText = tempDiv.innerText;
+    let resolvedSourceMessageId = sourceMessageId || null;
+    if (!resolvedSourceMessageId && typeof getCurrentChatData === 'function') {
+        const chatData = getCurrentChatData();
+        const messages = chatData && Array.isArray(chatData.messages) ? chatData.messages : [];
+        const matchingSource = messages.slice().reverse().find(message =>
+            message && message.type === 'bot' && message.messageId && message.content === text
+        );
+        resolvedSourceMessageId = matchingSource ? matchingSource.messageId : null;
+    }
 
     // prompt construction moved to backend
     
@@ -157,7 +166,23 @@ async function handleExplainAction(text, topic = null) {
         removeTypingIndicator();
         
         // Add bot response
-        addMessage(response.message, 'bot', true, false, response.sourceAttribution, false, null, null, response.messageId);
+        addMessage(
+            response.message,
+            'bot',
+            true,
+            false,
+            response.sourceAttribution,
+            false,
+            null,
+            null,
+            response.messageId,
+            null,
+            {
+                triggeredBy: 'explain_button',
+                actionStatus: 'success',
+                sourceMessageId: resolvedSourceMessageId
+            }
+        );
         if (typeof maybeShowChatSurvey === 'function') {
             maybeShowChatSurvey();
         }
@@ -384,10 +409,33 @@ function addMessage(content, sender, withSource = false, skipAutoSave = false, s
 
     const messageDiv = document.createElement('div');
     messageDiv.classList.add('message', sender + '-message');
+    const restoredMessageClass = {
+        'assessment-start': 'assessment-start',
+        'unit-selection': 'unit-selection-welcome'
+    }[messageOptions && messageOptions.messageType];
+    if (restoredMessageClass) {
+        messageDiv.classList.add(restoredMessageClass);
+    }
     const consumeSummarySeedFlag = sender === 'user' && window.summarySeedForNextUserMessage === true;
     const isSummarySeed = consumeSummarySeedFlag || !!(messageOptions && messageOptions.isSummarySeed === true);
+    const triggeredBy = (messageOptions && messageOptions.triggeredBy)
+        || (isSummarySeed ? 'summarize_button' : null);
+    const actionStatus = (messageOptions && messageOptions.actionStatus)
+        || (triggeredBy ? 'success' : null);
+    const sourceMessageId = messageOptions && messageOptions.sourceMessageId
+        ? messageOptions.sourceMessageId
+        : null;
     if (isSummarySeed) {
         messageDiv.dataset.summarySeed = 'true';
+    }
+    if (triggeredBy) {
+        messageDiv.dataset.triggeredBy = triggeredBy;
+    }
+    if (actionStatus) {
+        messageDiv.dataset.actionStatus = actionStatus;
+    }
+    if (sourceMessageId) {
+        messageDiv.dataset.sourceMessageId = sourceMessageId;
     }
     if (messageId) {
         messageDiv.dataset.messageId = messageId;
@@ -500,7 +548,11 @@ function addMessage(content, sender, withSource = false, skipAutoSave = false, s
                 explainButton.title += ` (Topic: ${detectedTopic})`;
             }
             explainButton.style.marginRight = '8px'; // Add some spacing
-            explainButton.onclick = () => handleExplainAction(content, detectedTopic);
+            explainButton.onclick = () => handleExplainAction(
+                content,
+                detectedTopic,
+                messageDiv.dataset.messageId || messageId || null
+            );
             rightContainer.appendChild(explainButton);
 
             // Add "Ask me a question" button when a topic is detected
@@ -577,7 +629,22 @@ function addMessage(content, sender, withSource = false, skipAutoSave = false, s
     // Auto-save the message
     // Only auto-save if not explicitly skipped
     if (!skipAutoSave) {
-        autoSaveMessage(content, sender, withSource, sourceAttribution, isHtml, activeStruggleTopic, messageId, feedbackRating, { isSummarySeed });
+        const savedMessage = autoSaveMessage(content, sender, withSource, sourceAttribution, isHtml, activeStruggleTopic, messageId, feedbackRating, {
+            isSummarySeed,
+            triggeredBy,
+            actionStatus,
+            sourceMessageId,
+            timestamp: messageTime.toISOString()
+        });
+        if (savedMessage) {
+            messageDiv.dataset.elapsedTime = String(savedMessage.elapsedTime);
+            messageDiv.dataset.elapsedTimeDerived = String(savedMessage.elapsedTimeDerived === true);
+        }
+    } else if (messageOptions && messageOptions.elapsedTime !== null
+        && messageOptions.elapsedTime !== undefined
+        && Number.isFinite(Number(messageOptions.elapsedTime))) {
+        messageDiv.dataset.elapsedTime = String(Math.max(0, Math.round(Number(messageOptions.elapsedTime))));
+        messageDiv.dataset.elapsedTimeDerived = String(messageOptions.elapsedTimeDerived === true);
     }
 
     if (consumeSummarySeedFlag) {

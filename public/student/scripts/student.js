@@ -526,6 +526,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             const summary = await requestChatSummary(messages, courseId, unitName, mode);
             const courseName = localStorage.getItem('selectedCourseName');
 
+            // The summary belongs to a fresh session, so record the successful
+            // button action on the old session before its local state is cleared.
+            const previousChatData = getCurrentChatData();
+            if (previousChatData) {
+                recordChatActionEvent(previousChatData, 'summarize_button');
+                syncAutoSaveWithServer(previousChatData);
+            }
+
             clearCurrentChatData();
             resetAssessmentStateForSummarySession();
             sessionStorage.removeItem('isContinuingChat');

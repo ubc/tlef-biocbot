@@ -343,11 +343,6 @@ function showUnitSelectionDropdown(publishedUnits) {
                          sessionStorage.getItem('isContinuingChat') === 'true' || 
                          window.autoContinued;
     
-    // Only show welcome message if NOT loading from history
-    if (!isHistoryLoad) {
-        showUnitSelectionWelcomeMessage();
-    }
-
     // Hide chat input and mode toggle until assessment is completed
     // BUT ONLY if we are NOT loading from history or auto-continuing a chat
     // If we are loading history, the chat is already established so we need the input
@@ -613,6 +608,7 @@ function showNoQuestionsForUnitMessage(unitName) {
         chatMessages.innerHTML = '';
     }
     clearCurrentChatData();
+    showUnitSelectionWelcomeMessage();
 
     // Add message to chat
     const noQuestionsMessage = document.createElement('div');
@@ -637,6 +633,8 @@ function showNoQuestionsForUnitMessage(unitName) {
     timestamp.classList.add('timestamp');
     timestamp.textContent = 'Just now';
     contentDiv.appendChild(timestamp);
+
+    noQuestionsMessage.dataset.timestamp = Date.now().toString();
 
     noQuestionsMessage.appendChild(avatarDiv);
     noQuestionsMessage.appendChild(contentDiv);
@@ -698,6 +696,9 @@ function startAssessmentWithQuestions(questions, passThreshold = 0) {
     if (!window.autoContinued) {
         chatMessages.innerHTML = '';
         clearCurrentChatData();
+        // A genuinely fresh assessment/session starts with the original
+        // BiocBot welcome. Continued sessions bypass this clearing branch.
+        showUnitSelectionWelcomeMessage();
     }
 
     // Add message about starting assessment for the selected unit
@@ -723,6 +724,11 @@ function startAssessmentWithQuestions(questions, passThreshold = 0) {
     timestamp.classList.add('timestamp');
     timestamp.textContent = 'Just now';
     contentDiv.appendChild(timestamp);
+
+    // Preserve when the assessment actually began. Without this dataset value,
+    // export collection assigns the current time and can place this message
+    // after questions that were displayed later.
+    assessmentStartMessage.dataset.timestamp = Date.now().toString();
 
     assessmentStartMessage.appendChild(avatarDiv);
     assessmentStartMessage.appendChild(contentDiv);

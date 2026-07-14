@@ -316,10 +316,20 @@ function autoSaveMessage(content, sender, withSource = false, sourceAttribution 
         }
 
         // Create new message object
+        // Backfill older messages once, before capturing the new value. Their
+        // derived flag makes the provenance explicit in future exports.
+        ensureMessageElapsedTimes(currentChatData.messages);
+
+        const requestedTimestamp = messageOptions && messageOptions.timestamp
+            ? new Date(messageOptions.timestamp)
+            : null;
+        const messageTimestamp = requestedTimestamp && Number.isFinite(requestedTimestamp.getTime())
+            ? requestedTimestamp.toISOString()
+            : new Date().toISOString();
         const newMessage = {
             type: sender,
             content: content,
-            timestamp: new Date().toISOString(),
+            timestamp: messageTimestamp,
             hasFlagButton: sender === 'bot' && withSource,
             messageType: 'regular-chat',
             messageType: 'regular-chat',
@@ -329,8 +339,29 @@ function autoSaveMessage(content, sender, withSource = false, sourceAttribution 
             messageId: messageId || null,
             feedbackRating: feedbackRating || null
         };
+        if (messageOptions && messageOptions.elapsedTime !== null
+            && messageOptions.elapsedTime !== undefined
+            && Number.isFinite(Number(messageOptions.elapsedTime))) {
+            newMessage.elapsedTime = Math.max(0, Math.round(Number(messageOptions.elapsedTime)));
+            newMessage.elapsedTimeDerived = messageOptions.elapsedTimeDerived === true;
+        } else {
+            const previousMessage = currentChatData.messages[currentChatData.messages.length - 1];
+            const previousTimestamp = previousMessage ? new Date(previousMessage.timestamp).getTime() : NaN;
+            const currentTimestamp = new Date(messageTimestamp).getTime();
+            newMessage.elapsedTime = Number.isFinite(previousTimestamp)
+                ? Math.max(0, Math.round(currentTimestamp - previousTimestamp))
+                : 0;
+            newMessage.elapsedTimeDerived = false;
+        }
         if (messageOptions && messageOptions.isSummarySeed === true) {
             newMessage.isSummarySeed = true;
+        }
+        if (messageOptions && messageOptions.triggeredBy) {
+            newMessage.triggeredBy = messageOptions.triggeredBy;
+            newMessage.actionStatus = messageOptions.actionStatus || 'success';
+        }
+        if (messageOptions && messageOptions.sourceMessageId) {
+            newMessage.sourceMessageId = messageOptions.sourceMessageId;
         }
 
         // Add message to messages array
@@ -340,6 +371,7 @@ function autoSaveMessage(content, sender, withSource = false, sourceAttribution 
         currentChatData.metadata.totalMessages = currentChatData.messages.length;
         currentChatData.metadata.exportDate = new Date().toISOString();
         currentChatData.metadata.currentMode = localStorage.getItem('studentMode') || 'tutor'; // Update current mode
+        currentChatData.sessionInfo.startTime = getSessionStartTime(currentChatData.messages);
         currentChatData.sessionInfo.endTime = new Date().toISOString();
         currentChatData.sessionInfo.duration = calculateSessionDuration(currentChatData);
 
@@ -365,8 +397,11 @@ function autoSaveMessage(content, sender, withSource = false, sourceAttribution 
 
         syncAutoSaveWithServer(currentChatData);
 
+        return newMessage;
+
     } catch (error) {
         console.error('Error auto-saving message:', error);
+        return null;
     }
 }
 
@@ -877,6 +912,45 @@ function clearCurrentChatData() {
 }
 
 /**
+ * Record a successful UI action that affects a chat session without creating a
+ * synthetic transcript message.
+ * @param {Object} chatData - The session receiving the event
+ * @param {string} triggeredBy - Stable action identifier used in exports
+ * @returns {Object|null} The recorded event
+ */
+function recordChatActionEvent(chatData, triggeredBy) {
+    if (!chatData || !triggeredBy) return null;
+
+    ensureMessageElapsedTimes(chatData.messages);
+
+    if (!Array.isArray(chatData.events)) {
+        chatData.events = [];
+    }
+
+    const event = {
+        type: 'button_action',
+        triggeredBy,
+        actionStatus: 'success',
+        timestamp: new Date().toISOString()
+    };
+    chatData.events.push(event);
+    chatData.lastActivityTimestamp = event.timestamp;
+    if (chatData.metadata) {
+        chatData.metadata.exportDate = event.timestamp;
+    }
+    if (chatData.sessionInfo) {
+        chatData.sessionInfo.endTime = event.timestamp;
+    }
+
+    const studentId = chatData.metadata && chatData.metadata.studentId;
+    if (studentId) {
+        localStorage.setItem(`biocbot_current_chat_${studentId}`, JSON.stringify(chatData));
+    }
+
+    return event;
+}
+
+/**
  * Initialize the new session button functionality
  */
 function initializeNewSessionButton() {
@@ -1133,6 +1207,7 @@ async function collectAllChatData() {
             messages.push(messageData);
         }
     });
+    ensureMessageElapsedTimes(messages);
 
     // Collect practice test data
     const practiceTestData = collectPracticeTestData();
@@ -1217,6 +1292,20 @@ function extractMessageData(messageElement, index) {
         if (messageElement.dataset.summarySeed === 'true') {
             messageData.isSummarySeed = true;
         }
+        if (messageElement.dataset.triggeredBy) {
+            messageData.triggeredBy = messageElement.dataset.triggeredBy;
+            messageData.actionStatus = messageElement.dataset.actionStatus || 'success';
+        }
+        if (messageElement.dataset.sourceMessageId) {
+            messageData.sourceMessageId = messageElement.dataset.sourceMessageId;
+        }
+        if (messageElement.dataset.elapsedTime !== undefined) {
+            const elapsedTime = Number(messageElement.dataset.elapsedTime);
+            if (Number.isFinite(elapsedTime)) {
+                messageData.elapsedTime = Math.max(0, Math.round(elapsedTime));
+                messageData.elapsedTimeDerived = messageElement.dataset.elapsedTimeDerived === 'true';
+            }
+        }
 
         // Extract additional data for specific message types
         if (isCalibrationQuestion) {
@@ -1246,6 +1335,37 @@ function extractMessageData(messageElement, index) {
         console.error('Error extracting message data:', error);
         return null;
     }
+}
+
+/**
+ * Ensure every exported message has a stable elapsed time in milliseconds.
+ * Missing values are derived from the current timestamps and explicitly marked
+ * so consumers can distinguish them from values captured when the message was
+ * created.
+ * @param {Array} messages - Ordered exported messages
+ * @returns {Array} The same array with timing fields populated
+ */
+function ensureMessageElapsedTimes(messages) {
+    if (!Array.isArray(messages)) return messages;
+
+    messages.forEach((message, index) => {
+        if (message.elapsedTime !== null && message.elapsedTime !== undefined
+            && Number.isFinite(Number(message.elapsedTime))) {
+            message.elapsedTime = Math.max(0, Math.round(Number(message.elapsedTime)));
+            message.elapsedTimeDerived = message.elapsedTimeDerived === true;
+            return;
+        }
+
+        const previousMessage = index > 0 ? messages[index - 1] : null;
+        const previousTimestamp = previousMessage ? new Date(previousMessage.timestamp).getTime() : NaN;
+        const currentTimestamp = new Date(message.timestamp).getTime();
+        message.elapsedTime = Number.isFinite(previousTimestamp) && Number.isFinite(currentTimestamp)
+            ? Math.max(0, Math.round(currentTimestamp - previousTimestamp))
+            : 0;
+        message.elapsedTimeDerived = true;
+    });
+
+    return messages;
 }
 
 /**
@@ -1421,30 +1541,27 @@ function collectStudentAnswersData() {
 }
 
 /**
- * Get session start time (approximate)
+ * Get the session start time from the earliest valid message timestamp.
  * @param {Array} messages - Optional messages array
  * @returns {string} Session start time ISO string
  */
 function getSessionStartTime(messages) {
-    // Try to get the timestamp from the provided messages
     if (messages && messages.length > 0) {
-        // Find the first user message (student message)
-        const firstUserMessage = messages.find(msg => msg.type === 'user');
-        if (firstUserMessage && firstUserMessage.timestamp) {
-            return firstUserMessage.timestamp;
-        }
-
-        // If no user message found, use the first message
-        const firstMessage = messages[0];
-        if (firstMessage && firstMessage.timestamp) {
-            return firstMessage.timestamp;
+        const timestamps = messages
+            .map(message => new Date(message && message.timestamp).getTime())
+            .filter(timestamp => Number.isFinite(timestamp));
+        if (timestamps.length > 0) {
+            return new Date(Math.min(...timestamps)).toISOString();
         }
     }
 
-    // Try to get from DOM as fallback
-    const firstMessage = document.querySelector('.message');
-    if (firstMessage && firstMessage.dataset.timestamp) {
-        return new Date(parseInt(firstMessage.dataset.timestamp)).toISOString();
+    // Try all rendered messages as a fallback. DOM order can differ from
+    // chronological order after restoring or sorting an exported session.
+    const domTimestamps = Array.from(document.querySelectorAll('.message[data-timestamp]'))
+        .map(message => Number(message.dataset.timestamp))
+        .filter(timestamp => Number.isFinite(timestamp));
+    if (domTimestamps.length > 0) {
+        return new Date(Math.min(...domTimestamps)).toISOString();
     }
 
     // Last resort fallback to current time minus estimated duration
@@ -1461,9 +1578,9 @@ function calculateSessionDuration(chatData) {
         return '0s';
     }
 
-    // Find the first user message (student message)
-    const firstUserMessage = chatData.messages.find(msg => msg.type === 'user');
-    if (!firstUserMessage || !firstUserMessage.timestamp) {
+    const messages = chatData.messages;
+    const firstUserIndex = messages.findIndex(msg => msg.type === 'user');
+    if (firstUserIndex === -1) {
         return '0s';
     }
 
@@ -1477,25 +1594,11 @@ function calculateSessionDuration(chatData) {
             content.includes('I can see you have access to published units');
     };
 
-    // Find the last real bot response
-    const lastBotMessage = chatData.messages.slice().reverse().find(
-        msg => msg.type === 'bot' && !isSyntheticBotMessage(msg)
-    );
-    if (!lastBotMessage || !lastBotMessage.timestamp) {
-        // If no real bot message exists, use the last non-synthetic message.
-        const lastMessage = chatData.messages.slice().reverse().find(
-            msg => !isSyntheticBotMessage(msg)
-        );
-        if (!lastMessage || !lastMessage.timestamp) {
-            return '0s';
-        }
-        const start = new Date(firstUserMessage.timestamp);
-        const end = new Date(lastMessage.timestamp);
-        const diffMs = end - start;
-
-        const hours = Math.floor(diffMs / (1000 * 60 * 60));
-        const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+    const formatDuration = (diffMs) => {
+        const safeDiffMs = Math.max(0, Math.round(diffMs));
+        const hours = Math.floor(safeDiffMs / (1000 * 60 * 60));
+        const minutes = Math.floor((safeDiffMs % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((safeDiffMs % (1000 * 60)) / 1000);
 
         if (hours > 0) {
             return `${hours}h ${minutes}m ${seconds}s`;
@@ -1504,23 +1607,48 @@ function calculateSessionDuration(chatData) {
         } else {
             return `${seconds}s`;
         }
+    };
+
+    // Find the last real bot response. If there is none, retain the existing
+    // behavior of measuring through the last non-synthetic message.
+    let endIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index--) {
+        if (messages[index].type === 'bot' && !isSyntheticBotMessage(messages[index])) {
+            endIndex = index;
+            break;
+        }
+    }
+    if (endIndex === -1) {
+        for (let index = messages.length - 1; index >= 0; index--) {
+            if (!isSyntheticBotMessage(messages[index])) {
+                endIndex = index;
+                break;
+            }
+        }
+    }
+    if (endIndex < firstUserIndex) return '0s';
+
+    // elapsedTime measures the interval since the preceding message. Begin
+    // after the first user message so welcome/assessment startup time remains
+    // excluded from the established duration definition. Derived intervals are
+    // intentionally valid here: their provenance remains visible separately in
+    // elapsedTimeDerived.
+    const elapsedIntervals = messages
+        .slice(firstUserIndex + 1, endIndex + 1)
+        .map(message => message.elapsedTime !== null
+            && message.elapsedTime !== undefined
+            && message.elapsedTime !== ''
+            ? Number(message.elapsedTime)
+            : NaN);
+    if (elapsedIntervals.every(value => Number.isFinite(value) && value >= 0)) {
+        return formatDuration(elapsedIntervals.reduce((total, value) => total + value, 0));
     }
 
-    const start = new Date(firstUserMessage.timestamp);
-    const end = new Date(lastBotMessage.timestamp);
-    const diffMs = end - start;
-
-    const hours = Math.floor(diffMs / (1000 * 60 * 60));
-    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-    const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
-
-    if (hours > 0) {
-        return `${hours}h ${minutes}m ${seconds}s`;
-    } else if (minutes > 0) {
-        return `${minutes}m ${seconds}s`;
-    } else {
-        return `${seconds}s`;
-    }
+    // Legacy fallback for sessions without a complete elapsed-time sequence.
+    const start = new Date(messages[firstUserIndex].timestamp).getTime();
+    const end = new Date(messages[endIndex].timestamp).getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return '0s';
+    return formatDuration(end - start);
 }
 
 /**

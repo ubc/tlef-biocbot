@@ -474,6 +474,8 @@ test.describe('Course/unit initialization and saved state', () => {
 
         await expect(page.locator('#unit-select')).toHaveValue('Unit 1', { timeout: 15_000 });
         await waitForDirectChatReady(page);
+        await expect(page.locator('#chat-messages')).toContainText('Welcome to BiocBot!');
+        await expect(page.locator('.bot-message').filter({ hasText: 'Welcome to BiocBot!' })).toHaveCount(1);
         await expect.poll(() => page.evaluate(() => localStorage.getItem('selectedUnitName'))).toBe('Unit 1');
     });
 
@@ -816,6 +818,7 @@ test.describe('Assessment calibration', () => {
 
         await openStudentChat(page);
 
+        await expect(page.locator('.assessment-start')).toHaveAttribute('data-timestamp', /^\d+$/);
         await expect(page.locator('#calibration-question-0')).toContainText('Which letter is correct?', { timeout: 15_000 });
         await page.locator('#calibration-question-0 .calibration-option', { hasText: 'B. Incorrect' }).click();
 
@@ -961,6 +964,88 @@ test.describe('student.js compact browser harness', () => {
         expect(collected.byIdFound).toBe(true);
         expect(collected.updatedHasActivity).toBe(true);
         expect(collected.currentCleared).toBe(true);
+    });
+
+    test('preserves timestamps and elapsed timing through repeated history reloads', async ({ page }) => {
+        await openStudentScriptHarness(page);
+
+        const timing = await page.evaluate(async () => {
+            const w = /** @type {any} */ (window);
+            const originalMessages = [
+                {
+                    type: 'user', content: 'Original question', messageType: 'regular-chat',
+                    timestamp: '2025-01-02T03:04:05.000Z', elapsedTime: 0, elapsedTimeDerived: false,
+                },
+                {
+                    type: 'bot', content: '<strong>Starting assessment</strong>', messageType: 'assessment-start', isHtml: true,
+                    timestamp: '2025-01-02T03:04:06.250Z', elapsedTime: 1250, elapsedTimeDerived: true,
+                },
+                {
+                    type: 'bot', content: 'Saved assessment question', messageType: 'practice-test-question',
+                    timestamp: '2025-01-02T03:04:08.750Z', elapsedTime: 2500, elapsedTimeDerived: false,
+                    questionData: {
+                        questionIndex: 0,
+                        questionText: 'Saved assessment question',
+                        options: [{ text: 'A. Stored answer', isSelected: true }],
+                        studentAnswer: 'A',
+                    },
+                },
+                {
+                    type: 'bot', content: 'Saved mode result', messageType: 'mode-result',
+                    timestamp: '2025-01-02T03:04:12.750Z', elapsedTime: 4000, elapsedTimeDerived: true,
+                    htmlContent: '<div class="mode-explanation">Saved mode result</div>',
+                },
+            ];
+            const chatData = {
+                metadata: {
+                    courseId: localStorage.getItem('selectedCourseId'),
+                    courseName: 'BIOC Harness', studentId: 'timing-student',
+                    unitName: 'Unit 1', currentMode: 'tutor', totalMessages: originalMessages.length,
+                },
+                messages: originalMessages,
+                practiceTests: null,
+                studentAnswers: { answers: [] },
+                sessionInfo: { sessionId: 'timing-session' },
+            };
+
+            const snapshot = (/** @type {any[]} */ messages) => messages.map(message => ({
+                messageType: message.messageType,
+                timestamp: message.timestamp,
+                elapsedTime: message.elapsedTime,
+                elapsedTimeDerived: message.elapsedTimeDerived,
+            }));
+
+            w.loadChatData(chatData);
+            await new Promise(resolve => setTimeout(resolve, 650));
+            const firstCollection = await w.collectAllChatData();
+            const firstDom = Array.from(document.querySelectorAll('#chat-messages .message')).map((element) => {
+                const messageElement = /** @type {HTMLElement} */ (element);
+                return {
+                    timestamp: messageElement.dataset.timestamp,
+                    elapsedTime: messageElement.dataset.elapsedTime,
+                    elapsedTimeDerived: messageElement.dataset.elapsedTimeDerived,
+                };
+            });
+
+            w.loadChatData(firstCollection);
+            await new Promise(resolve => setTimeout(resolve, 650));
+            const secondCollection = await w.collectAllChatData();
+
+            return {
+                expected: snapshot(originalMessages),
+                first: snapshot(firstCollection.messages),
+                second: snapshot(secondCollection.messages),
+                firstDom,
+            };
+        });
+
+        expect(timing.first).toEqual(timing.expected);
+        expect(timing.second).toEqual(timing.expected);
+        expect(timing.firstDom.every((message) =>
+            /^\d+$/.test(message.timestamp)
+            && /^\d+$/.test(message.elapsedTime)
+            && /^(true|false)$/.test(message.elapsedTimeDerived)
+        )).toBe(true);
     });
 
     test('submits chat context with practice history and renders directive-mode actions', async ({ page }) => {
@@ -1196,6 +1281,13 @@ test.describe('student.js compact browser harness', () => {
                         { type: 'user', timestamp: new Date().toISOString() },
                     ],
                 }),
+                w.calculateSessionDuration({
+                    messages: [
+                        { type: 'bot', content: 'Welcome to BiocBot! I can see you have access to published units.', elapsedTime: 0, elapsedTimeDerived: false },
+                        { type: 'user', timestamp: 'not-a-date', elapsedTime: 6_000, elapsedTimeDerived: true },
+                        { type: 'bot', timestamp: 'also-not-a-date', elapsedTime: 65_000, elapsedTimeDerived: true },
+                    ],
+                }),
             ];
 
             w.__currentUser = null;
@@ -1231,9 +1323,20 @@ test.describe('student.js compact browser harness', () => {
 
             localStorage.setItem('biocbot_current_chat_' + sid, '{not-json');
             const invalidChatData = w.getCurrentChatData();
+            const derivedElapsedMessages = w.ensureMessageElapsedTimes([
+                { type: 'user', timestamp: '2026-07-14T03:00:00.000Z' },
+                { type: 'bot', timestamp: '2026-07-14T03:00:01.250Z' },
+                { type: 'user', timestamp: 'not-a-date' },
+            ]);
 
             return {
                 durationCases,
+                derivedElapsedMessages,
+                earliestSessionStart: w.getSessionStartTime([
+                    { type: 'user', timestamp: '2026-07-14T03:00:00.000Z' },
+                    { type: 'bot', timestamp: '2026-07-10T18:57:57.042Z' },
+                    { type: 'bot', timestamp: 'not-a-date' },
+                ]),
                 localId,
                 generatedId,
                 preferenceCourse,
@@ -1248,6 +1351,13 @@ test.describe('student.js compact browser harness', () => {
         expect(helperResults.durationCases[0]).toBe('0s');
         expect(helperResults.durationCases[1]).toMatch(/1m|65s|5s/);
         expect(helperResults.durationCases[2]).toMatch(/1h|0s/);
+        expect(helperResults.durationCases[3]).toBe('1m 5s');
+        expect(helperResults.derivedElapsedMessages).toMatchObject([
+            { elapsedTime: 0, elapsedTimeDerived: true },
+            { elapsedTime: 1250, elapsedTimeDerived: true },
+            { elapsedTime: 0, elapsedTimeDerived: true },
+        ]);
+        expect(helperResults.earliestSessionStart).toBe('2026-07-10T18:57:57.042Z');
         expect(helperResults.localId).toBe('local-user-id');
         expect(helperResults.generatedId).toMatch(/^session_/);
         expect(helperResults.preferenceCourse).toBe('PREF-COURSE');
