@@ -1419,11 +1419,22 @@ function calculateDurationFromChatData(chatData) {
         return '0s';
     }
     
-    // Find the last bot message
-    const lastBotMessage = chatData.messages.slice().reverse().find(msg => msg.type === 'bot');
+    const isSyntheticBotMessage = (msg) => {
+        if (!msg || msg.type !== 'bot') return false;
+        if (msg.sourceAttribution?.source === 'System') return true;
+        const content = typeof msg.content === 'string' ? msg.content : '';
+        return content.includes('Welcome to BiocBot!') &&
+            content.includes('I can see you have access to published units');
+    };
+
+    // A startup/system message from a later visit is not a conversation reply.
+    const lastBotMessage = chatData.messages.slice().reverse().find(
+        msg => msg.type === 'bot' && !isSyntheticBotMessage(msg)
+    );
     if (!lastBotMessage || !lastBotMessage.timestamp) {
-        // If no bot message found, use the last message
-        const lastMessage = chatData.messages[chatData.messages.length - 1];
+        const lastMessage = chatData.messages.slice().reverse().find(
+            msg => !isSyntheticBotMessage(msg)
+        );
         if (!lastMessage || !lastMessage.timestamp) {
             return '0s';
         }

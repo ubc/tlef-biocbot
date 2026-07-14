@@ -56,6 +56,10 @@ async function checkPublishedUnitsAndLoadQuestions() {
 
         const courseData = await response.json();
 
+        if (typeof setChatSessionTimeoutSeconds === 'function') {
+            setChatSessionTimeoutSeconds(courseData.data?.studentSessionTimeout);
+        }
+
 
         if (!courseData.data || !courseData.data.lectures) {
 
@@ -266,23 +270,19 @@ function showUnitSelectionDropdown(publishedUnits) {
             updatedUnitSelect.appendChild(option);
         });
 
-        // Check for saved chat data first - if it exists and is within 30 minutes, restore that unit instead
+        // Restore a saved unit only while it is inside the configured course window.
         const savedChatData = getCurrentChatData();
         let shouldRestoreSavedUnit = false;
         let savedUnitName = null;
 
-        if (savedChatData && savedChatData.lastActivityTimestamp) {
+        const forceFreshAssessment = window.forceFreshAssessment === true;
+        if (!forceFreshAssessment && savedChatData && savedChatData.lastActivityTimestamp) {
             const hasMessages = savedChatData.messages && savedChatData.messages.length > 0;
             const hasAssessment = (savedChatData.practiceTests && savedChatData.practiceTests.questions && savedChatData.practiceTests.questions.length > 0) || 
                                  (savedChatData.studentAnswers && savedChatData.studentAnswers.answers && savedChatData.studentAnswers.answers.length > 0);
 
             if (hasMessages || hasAssessment) {
-                const lastActivity = new Date(savedChatData.lastActivityTimestamp);
-                const now = new Date();
-                const diffMs = now - lastActivity;
-                const diffMinutes = Math.floor(diffMs / (1000 * 60));
-
-                if (diffMinutes <= 30 && savedChatData.metadata && savedChatData.metadata.unitName) {
+                if (!isSavedChatSessionStale(savedChatData) && savedChatData.metadata && savedChatData.metadata.unitName) {
                     savedUnitName = savedChatData.metadata.unitName;
                     // Check if the saved unit is in the published units list
                     const savedUnitExists = publishedUnits.some(u => u.name === savedUnitName);
@@ -297,7 +297,16 @@ function showUnitSelectionDropdown(publishedUnits) {
         }
 
         // Auto-select unit: prefer saved unit if it exists, otherwise use most recent
-        if (shouldRestoreSavedUnit && savedUnitName) {
+        const freshSelectedUnit = forceFreshAssessment
+            ? publishedUnits.find(unit => unit.name === localStorage.getItem('selectedUnitName'))
+            : null;
+
+        if (forceFreshAssessment && (freshSelectedUnit || mostRecentUnit)) {
+            const unitToAssess = freshSelectedUnit || mostRecentUnit;
+            updatedUnitSelect.value = unitToAssess.name;
+            localStorage.setItem('selectedUnitName', unitToAssess.name);
+            loadQuestionsForSelectedUnit(unitToAssess.name);
+        } else if (shouldRestoreSavedUnit && savedUnitName) {
             updatedUnitSelect.value = savedUnitName;
 
 
@@ -334,11 +343,6 @@ function showUnitSelectionDropdown(publishedUnits) {
                          sessionStorage.getItem('isContinuingChat') === 'true' || 
                          window.autoContinued;
     
-    // Only show welcome message if NOT loading from history
-    if (!isHistoryLoad) {
-        showUnitSelectionWelcomeMessage();
-    }
-
     // Hide chat input and mode toggle until assessment is completed
     // BUT ONLY if we are NOT loading from history or auto-continuing a chat
     // If we are loading history, the chat is already established so we need the input
@@ -388,21 +392,23 @@ async function loadQuestionsForSelectedUnit(unitName) {
     try {
 
 
-        // Check if we should auto-continue instead of starting a new assessment
-        // If there's saved chat data for this unit within 30 minutes, skip loading questions
-        const savedChatData = getCurrentChatData();
-        if (savedChatData && savedChatData.messages && savedChatData.messages.length > 0 && savedChatData.lastActivityTimestamp) {
-            const lastActivity = new Date(savedChatData.lastActivityTimestamp);
-            const now = new Date();
-            const diffMs = now - lastActivity;
-            const diffMinutes = Math.floor(diffMs / (1000 * 60));
+        const forceFreshAssessment = window.forceFreshAssessment === true;
 
-            if (diffMinutes <= 30 && savedChatData.metadata && savedChatData.metadata.unitName === unitName) {
+        // Check if we should auto-continue instead of starting a new assessment
+        // If saved chat data for this unit is still inside the configured window,
+        // let auto-continue restore it instead of starting another assessment.
+        const savedChatData = getCurrentChatData();
+        if (!forceFreshAssessment && savedChatData && savedChatData.messages && savedChatData.messages.length > 0 && savedChatData.lastActivityTimestamp) {
+            if (!isSavedChatSessionStale(savedChatData) && savedChatData.metadata && savedChatData.metadata.unitName === unitName) {
 
                 // Don't load questions - let auto-continue handle restoration
                 return;
             }
         }
+
+        // The flag only needs to survive until this fresh assessment load has
+        // bypassed the auto-continue guard above.
+        window.forceFreshAssessment = false;
 
         // Hide chat input and mode toggle when starting new assessment
         const chatInputContainer = document.querySelector('.chat-input-container');
@@ -602,6 +608,7 @@ function showNoQuestionsForUnitMessage(unitName) {
         chatMessages.innerHTML = '';
     }
     clearCurrentChatData();
+    showUnitSelectionWelcomeMessage();
 
     // Add message to chat
     const noQuestionsMessage = document.createElement('div');
@@ -626,6 +633,8 @@ function showNoQuestionsForUnitMessage(unitName) {
     timestamp.classList.add('timestamp');
     timestamp.textContent = 'Just now';
     contentDiv.appendChild(timestamp);
+
+    noQuestionsMessage.dataset.timestamp = Date.now().toString();
 
     noQuestionsMessage.appendChild(avatarDiv);
     noQuestionsMessage.appendChild(contentDiv);
@@ -687,6 +696,9 @@ function startAssessmentWithQuestions(questions, passThreshold = 0) {
     if (!window.autoContinued) {
         chatMessages.innerHTML = '';
         clearCurrentChatData();
+        // A genuinely fresh assessment/session starts with the original
+        // BiocBot welcome. Continued sessions bypass this clearing branch.
+        showUnitSelectionWelcomeMessage();
     }
 
     // Add message about starting assessment for the selected unit
@@ -713,6 +725,11 @@ function startAssessmentWithQuestions(questions, passThreshold = 0) {
     timestamp.textContent = 'Just now';
     contentDiv.appendChild(timestamp);
 
+    // Preserve when the assessment actually began. Without this dataset value,
+    // export collection assigns the current time and can place this message
+    // after questions that were displayed later.
+    assessmentStartMessage.dataset.timestamp = Date.now().toString();
+
     assessmentStartMessage.appendChild(avatarDiv);
     assessmentStartMessage.appendChild(contentDiv);
 
@@ -724,6 +741,21 @@ function startAssessmentWithQuestions(questions, passThreshold = 0) {
 
     // Show first question
     showCalibrationQuestion();
+
+    // Persist the assessment immediately so inactivity can expire a student who
+    // leaves the page sitting on a question without submitting an answer.
+    void (async () => {
+        try {
+            const studentId = getCurrentStudentId();
+            const currentChatData = await collectAllChatData();
+            if (!studentId || !currentChatData) return;
+            currentChatData.lastActivityTimestamp = new Date().toISOString();
+            localStorage.setItem(`biocbot_current_chat_${studentId}`, JSON.stringify(currentChatData));
+            scheduleChatSessionExpiration(currentChatData);
+        } catch (error) {
+            console.error('Error auto-saving assessment start:', error);
+        }
+    })();
 }
 
 /**
@@ -969,6 +1001,7 @@ async function selectCalibrationAnswer(answerIndex, questionIndex) {
             currentChatData.lastActivityTimestamp = new Date().toISOString();
             
             localStorage.setItem(autoSaveKey, JSON.stringify(currentChatData));
+            scheduleChatSessionExpiration(currentChatData);
 
         }
     } catch (e) {
@@ -1139,6 +1172,7 @@ async function submitShortAnswer(answer, questionIndex) {
             currentChatData.lastActivityTimestamp = new Date().toISOString();
             
             localStorage.setItem(autoSaveKey, JSON.stringify(currentChatData));
+            scheduleChatSessionExpiration(currentChatData);
 
         }
     } catch (e) {
@@ -1295,6 +1329,7 @@ async function calculateStudentMode() {
                 if (currentChatData) {
                     currentChatData.lastActivityTimestamp = new Date().toISOString();
                     localStorage.setItem(autoSaveKey, JSON.stringify(currentChatData));
+                    scheduleChatSessionExpiration(currentChatData);
                 }
             }, 100);
         } catch (e) {
@@ -1620,6 +1655,7 @@ function initializeModeToggle() {
                     const autoSaveKey = `biocbot_current_chat_${studentId}`;
                     currentChatData.lastActivityTimestamp = new Date().toISOString();
                     localStorage.setItem(autoSaveKey, JSON.stringify(currentChatData));
+                    scheduleChatSessionExpiration(currentChatData);
                 }
             });
         } catch (e) {

@@ -49,11 +49,24 @@ function calculateDurationFromSessionData(session) {
         return '0s';
     }
     
-    // Find the last bot message
-    const lastBotMessage = messages.slice().reverse().find(msg => msg.type === 'bot');
+    const isSyntheticBotMessage = (msg) => {
+        if (!msg || msg.type !== 'bot') return false;
+        if (msg.sourceAttribution?.source === 'System') return true;
+        const content = typeof msg.content === 'string' ? msg.content : '';
+        return content.includes('Welcome to BiocBot!') &&
+            content.includes('I can see you have access to published units');
+    };
+
+    // Find the last actual response, excluding startup/system UI that may have
+    // been appended during a later visit.
+    const lastBotMessage = messages.slice().reverse().find(
+        msg => msg.type === 'bot' && !isSyntheticBotMessage(msg)
+    );
     if (!lastBotMessage || !lastBotMessage.timestamp) {
-        // If no bot message found, use the last message
-        const lastMessage = messages[messages.length - 1];
+        // If no real bot response exists, use the last non-synthetic message.
+        const lastMessage = messages.slice().reverse().find(
+            msg => !isSyntheticBotMessage(msg)
+        );
         if (!lastMessage || !lastMessage.timestamp) {
             return '0s';
         }

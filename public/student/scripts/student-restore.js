@@ -3,6 +3,28 @@
  */
 
 /**
+ * Copy persisted timing fields onto a custom-rendered message element. These
+ * renderers bypass addMessage(), so the fields must be restored explicitly or
+ * a later DOM-based export will derive/re-stamp them.
+ * @param {HTMLElement} element - Restored message element
+ * @param {Object} messageData - Persisted message data
+ */
+function applyRestoredTimingData(element, messageData) {
+    const timestampMs = new Date(messageData && messageData.timestamp).getTime();
+    if (Number.isFinite(timestampMs)) {
+        element.dataset.timestamp = String(timestampMs);
+    }
+
+    const elapsedTime = Number(messageData && messageData.elapsedTime);
+    if (messageData && messageData.elapsedTime !== null
+        && messageData.elapsedTime !== undefined
+        && Number.isFinite(elapsedTime)) {
+        element.dataset.elapsedTime = String(Math.max(0, Math.round(elapsedTime)));
+        element.dataset.elapsedTimeDerived = String(messageData.elapsedTimeDerived === true);
+    }
+}
+
+/**
  * Render a restored mode result message
  * @param {Object} messageData - The message data object
  */
@@ -12,7 +34,7 @@ function renderRestoredModeResult(messageData) {
 
     const modeMessage = document.createElement('div');
     modeMessage.classList.add('message', 'bot-message', 'mode-result', 'standard-mode-result');
-    modeMessage.dataset.timestamp = new Date(messageData.timestamp).getTime();
+    applyRestoredTimingData(modeMessage, messageData);
 
     const avatarDiv = document.createElement('div');
     avatarDiv.classList.add('message-avatar');
@@ -56,7 +78,7 @@ function renderRestoredModeToggleResult(messageData) {
 
     const modeMessage = document.createElement('div');
     modeMessage.classList.add('message', 'bot-message', 'mode-toggle-result');
-    modeMessage.dataset.timestamp = new Date(messageData.timestamp).getTime();
+    applyRestoredTimingData(modeMessage, messageData);
 
     const avatarDiv = document.createElement('div');
     avatarDiv.classList.add('message-avatar');
@@ -132,15 +154,24 @@ function loadChatData(chatData) {
 
             // Load each message from the chat data WITHOUT triggering auto-save
             chatData.messages.forEach((messageData, index) => {
-
+                const messageOptions = {
+                    messageType: messageData.messageType || null,
+                    isSummarySeed: messageData.isSummarySeed === true,
+                    timestamp: messageData.timestamp,
+                    triggeredBy: messageData.triggeredBy || null,
+                    actionStatus: messageData.actionStatus || null,
+                    sourceMessageId: messageData.sourceMessageId || null,
+                    elapsedTime: messageData.elapsedTime,
+                    elapsedTimeDerived: messageData.elapsedTimeDerived === true
+                };
 
                 if (messageData.type === 'user') {
-                    addMessage(messageData.content, 'user', false, true, null, messageData.isHtml, null, null, null, null, { isSummarySeed: messageData.isSummarySeed === true, timestamp: messageData.timestamp }); // Skip auto-save
+                    addMessage(messageData.content, 'user', false, true, null, messageData.isHtml, null, null, null, null, messageOptions); // Skip auto-save
                 } else if (messageData.type === 'bot') {
                     // Check if this is a special message type that needs special handling
                     if (messageData.messageType === 'assessment-start') {
                         // This is the assessment start message - add it as a regular bot message
-                        addMessage(messageData.content, 'bot', messageData.hasFlagButton, true, messageData.sourceAttribution, true, null, null, messageData.messageId, messageData.feedbackRating, { timestamp: messageData.timestamp }); // Skip auto-save, force HTML for assessment start
+                        addMessage(messageData.content, 'bot', messageData.hasFlagButton, true, messageData.sourceAttribution, true, null, null, messageData.messageId, messageData.feedbackRating, messageOptions); // Skip auto-save, force HTML for assessment start
                     } else if (messageData.messageType === 'practice-test-question') {
                         // This is a practice test question - restore its UI
                         renderRestoredPracticeQuestion(messageData); // Skip auto-save implicit
@@ -162,7 +193,7 @@ function loadChatData(chatData) {
                              }
                         }
                         
-                        addMessage(messageData.content, 'bot', messageData.hasFlagButton, true, messageData.sourceAttribution, messageData.isHtml, activeTopic, null, messageData.messageId, messageData.feedbackRating, { timestamp: messageData.timestamp }); // Skip auto-save, force HTML for result
+                        addMessage(messageData.content, 'bot', messageData.hasFlagButton, true, messageData.sourceAttribution, messageData.isHtml, activeTopic, null, messageData.messageId, messageData.feedbackRating, messageOptions); // Skip auto-save, force HTML for result
                     }
                 }
             });
@@ -583,7 +614,11 @@ function renderRestoredPracticeQuestion(messageData) {
     const questionData = messageData.questionData;
     if (!questionData) {
         // Fallback to text if data missing
-        addMessage(messageData.content, 'bot', false, true);
+        addMessage(messageData.content, 'bot', false, true, null, false, null, null, null, null, {
+            timestamp: messageData.timestamp,
+            elapsedTime: messageData.elapsedTime,
+            elapsedTimeDerived: messageData.elapsedTimeDerived === true
+        });
         return;
     }
 
@@ -685,7 +720,6 @@ function renderRestoredPracticeQuestion(messageData) {
     if (messageData.timestamp) {
         try {
             const date = new Date(messageData.timestamp);
-            messageData.datasetTimestamp = date.getTime();
             timestamp.title = date.toLocaleString();
         } catch(e) {}
     }
@@ -697,9 +731,7 @@ function renderRestoredPracticeQuestion(messageData) {
     questionMessage.appendChild(avatarDiv);
     questionMessage.appendChild(contentDiv);
     
-    if (messageData.datasetTimestamp) {
-        questionMessage.dataset.timestamp = messageData.datasetTimestamp;
-    }
+    applyRestoredTimingData(questionMessage, messageData);
 
     chatMessages.appendChild(questionMessage);
 }

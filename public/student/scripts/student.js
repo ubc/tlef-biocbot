@@ -31,6 +31,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     let currentController = null; // Controller for aborting in-flight requests
     let lastActiveStruggleTopic = null; // Track active struggle topic for the session
 
+    window.addEventListener('chat-session:rotating', () => {
+        if (currentController) {
+            currentController.abort();
+            currentController = null;
+        }
+        removeTypingIndicator();
+    });
+
     // Guard: Only allow students on this page; redirect others immediately
     const handleRoleGuard = (user) => {
         if (!user) return; // auth.js will handle redirect if unauthenticated
@@ -65,7 +73,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Wait for authentication to be ready before initializing auto-save
     const initializeAutoSaveWhenReady = async () => {
 
+        await refreshChatSessionTimeoutForSelectedCourse(true);
         await initializeAutoSave();
+        scheduleChatSessionExpiration();
         if (typeof window.updateChatSummaryButtonState === 'function') {
             window.updateChatSummaryButtonState();
         }
@@ -160,6 +170,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Initialize new session button
     initializeNewSessionButton();
+
+    // Expire stale chats when a student returns to a sleeping/background tab.
+    initializeSessionReturnMonitor();
 
     // Initialize "View General Rules" link
     const viewRulesLink = document.getElementById('view-rules-link');
@@ -512,6 +525,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             const summary = await requestChatSummary(messages, courseId, unitName, mode);
             const courseName = localStorage.getItem('selectedCourseName');
+
+            // The summary belongs to a fresh session, so record the successful
+            // button action on the old session before its local state is cleared.
+            const previousChatData = getCurrentChatData();
+            if (previousChatData) {
+                recordChatActionEvent(previousChatData, 'summarize_button');
+                syncAutoSaveWithServer(previousChatData);
+            }
 
             clearCurrentChatData();
             resetAssessmentStateForSummarySession();
@@ -946,6 +967,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             const message = chatInput.value.trim();
             if (!message) return;
+
+            // A visible/focused page may not emit focus or visibility events.
+            // Enforce the full session rotation before accepting the next message.
+            if (await checkForExpiredSessionOnReturn()) {
+                return;
+            }
 
             // Check message count BEFORE adding the user message
             const messageCountBefore = countMessagesFromFirstStudent();

@@ -273,7 +273,8 @@ class LLMService {
      *
      * @param {Buffer|string} imageData - Raw image bytes (Buffer) or base64 string.
      * @param {string} mimeType - Image MIME type, e.g. 'image/png'.
-     * @param {Object} [context] - Optional context, e.g. { slideNumber }.
+     * @param {Object} [context] - Optional context, e.g. { slideNumber } for
+     *   PPTX images or { pageNumber } for PDF images.
      * @returns {Promise<string>} A textual description (empty string if none).
      */
     async describeImage(imageData, mimeType, context = {}) {
@@ -285,11 +286,14 @@ class LLMService {
             ? imageData.toString('base64')
             : imageData;
 
-        const slideInfo = context.slideNumber
+        const locationInfo = context.slideNumber
             ? ` (from slide ${context.slideNumber})`
-            : '';
+            : (context.pageNumber ? ` (from page ${context.pageNumber})` : '');
+        const materialKind = context.slideNumber
+            ? 'lecture slide'
+            : 'lecture document';
         const prompt =
-            `You are extracting content from a lecture slide${slideInfo} so it can be used as ` +
+            `You are extracting content from a ${materialKind}${locationInfo} so it can be used as ` +
             `searchable course notes. Describe only what is genuinely visible in the image.\n\n` +
             `If the image is purely decorative or non-scientific — for example an icon, ` +
             `clip-art, logo, doodle, thought bubble, background, divider, emoji, or generic ` +
@@ -312,7 +316,7 @@ class LLMService {
         };
         const finalOptions = await this._applyModelOptions(baseOptions);
 
-        const response = await this._sendRawConversation(
+        const response = await this._sendImageConversationWithRetry(
             [
                 {
                     role: 'user',
@@ -341,6 +345,44 @@ class LLMService {
         }
 
         return content;
+    }
+
+    /**
+     * Send a describe-image conversation with bounded exponential-backoff
+     * retry. Embedded-image description fires many vision calls in parallel
+     * (see `imageConcurrency` in the document parser), so transient rate-limit
+     * (HTTP 429) and timeout errors are common; without retry each blip
+     * silently drops one image and the description goes missing. Permanent
+     * key/quota failures surface as `LlmKeyError` and are rethrown immediately
+     * without retrying.
+     *
+     * @param {Array} messages - Conversation messages (with image attachments).
+     * @param {Object} options - Provider/model options.
+     * @param {number} [maxAttempts=4] - Total attempts before giving up.
+     * @returns {Promise<Object>} The LLM response.
+     * @private
+     */
+    async _sendImageConversationWithRetry(messages, options, maxAttempts = 4) {
+        let attempt = 0;
+        for (;;) {
+            try {
+                return await this._sendRawConversation(messages, options);
+            } catch (error) {
+                // Invalid key / exhausted quota won't recover on retry.
+                if (error && error.name === 'LlmKeyError') {
+                    throw error;
+                }
+                attempt++;
+                if (attempt >= maxAttempts) {
+                    throw error;
+                }
+                // Exponential backoff with jitter: ~0.5s, 1.5s, 4.5s.
+                const backoff = 500 * Math.pow(3, attempt - 1);
+                const jitter = Math.floor(Math.random() * 250);
+                console.warn(`⚠️ describeImage call failed (attempt ${attempt}/${maxAttempts - 1}, retrying in ${backoff + jitter}ms): ${error.message}`);
+                await new Promise((resolve) => setTimeout(resolve, backoff + jitter));
+            }
+        }
     }
 
     /**

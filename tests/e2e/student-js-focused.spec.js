@@ -383,11 +383,99 @@ async function openStudentScriptHarness(page, options = {}) {
 }
 
 test.describe('Course/unit initialization and saved state', () => {
+    test('rotates an autosave beyond the configured inactivity window', async ({ page }) => {
+        const oldSessionId = 'e2e_stale_local_session';
+        const staleChat = {
+            metadata: {
+                courseId: STU_COURSE_ID,
+                courseName: 'BIOC E2E Student Chat',
+                studentId,
+                studentName: 'E2E Student',
+                unitName: 'Unit 1',
+                currentMode: 'tutor',
+                totalMessages: 2,
+                version: '1.0',
+            },
+            messages: [
+                { type: 'user', content: 'old question', timestamp: '2026-01-01T00:00:00Z' },
+                { type: 'bot', content: 'old answer', timestamp: '2026-01-01T00:00:05Z' },
+            ],
+            practiceTests: null,
+            studentAnswers: { answers: [] },
+            sessionInfo: {
+                sessionId: oldSessionId,
+                startTime: '2026-01-01T00:00:00Z',
+                duration: '5s',
+            },
+            lastActivityTimestamp: '2026-01-01T00:00:05Z',
+        };
+
+        await openStudentChat(page, { chatData: staleChat });
+
+        await expect.poll(() => page.evaluate((studentId) => {
+            const raw = localStorage.getItem(`biocbot_current_chat_${studentId}`);
+            return raw ? JSON.parse(raw).sessionInfo?.sessionId : null;
+        }, studentId)).not.toBe(oldSessionId);
+        await expect.poll(() => page.evaluate(({ studentId, courseId }) =>
+            localStorage.getItem(`biocbot_session_${studentId}_${courseId}_Unit 1`),
+        { studentId, courseId: STU_COURSE_ID })).not.toBe(oldSessionId);
+        await expect(page.locator('#chat-messages')).not.toContainText('old question');
+    });
+
+    test('starts a visibly new session when the student returns to a stale tab', async ({ page }) => {
+        await openStudentChat(page);
+        await waitForDirectChatReady(page);
+
+        const oldSessionId = 'e2e_background_tab_session';
+        await page.evaluate(({ studentId, courseId, oldSessionId }) => {
+            const staleChat = {
+                metadata: {
+                    courseId,
+                    courseName: 'BIOC E2E Student Chat',
+                    studentId,
+                    studentName: 'E2E Student',
+                    unitName: 'Unit 1',
+                    currentMode: 'tutor',
+                    totalMessages: 2,
+                    version: '1.0',
+                },
+                messages: [
+                    { type: 'user', content: 'STALE TAB QUESTION', timestamp: '2026-01-01T00:00:00Z' },
+                    { type: 'bot', content: 'STALE TAB ANSWER', timestamp: '2026-01-01T00:00:05Z' },
+                ],
+                practiceTests: null,
+                studentAnswers: { answers: [] },
+                sessionInfo: { sessionId: oldSessionId, startTime: '2026-01-01T00:00:00Z', duration: '5s' },
+                lastActivityTimestamp: '2026-01-01T00:00:05Z',
+            };
+            localStorage.setItem(`biocbot_current_chat_${studentId}`, JSON.stringify(staleChat));
+            localStorage.setItem(`biocbot_session_${studentId}_${courseId}_Unit 1`, oldSessionId);
+            document.getElementById('chat-messages').innerHTML = '<div>STALE TAB QUESTION</div>';
+            const w = /** @type {any} */ (window);
+            w.setChatSessionTimeoutSeconds(30);
+            window.dispatchEvent(new Event('focus'));
+        }, { studentId, courseId: STU_COURSE_ID, oldSessionId });
+
+        await expect(page.locator('#chat-messages')).not.toContainText('STALE TAB QUESTION');
+        await expect(page.locator('#chat-messages')).toContainText(
+            'Your previous session ended after 30 seconds of inactivity. A new session has started.'
+        );
+        await expect(page.locator('.notification.info')).toContainText(
+            'Previous session expired — new chat session started'
+        );
+        await expect.poll(() => page.evaluate((studentId) => {
+            const raw = localStorage.getItem(`biocbot_current_chat_${studentId}`);
+            return raw ? JSON.parse(raw).sessionInfo?.sessionId : null;
+        }, studentId)).not.toBe(oldSessionId);
+    });
+
     test('a unit with no assessment questions enables direct chat and preserves the selected unit', async ({ page }) => {
         await openStudentChat(page);
 
         await expect(page.locator('#unit-select')).toHaveValue('Unit 1', { timeout: 15_000 });
         await waitForDirectChatReady(page);
+        await expect(page.locator('#chat-messages')).toContainText('Welcome to BiocBot!');
+        await expect(page.locator('.bot-message').filter({ hasText: 'Welcome to BiocBot!' })).toHaveCount(1);
         await expect.poll(() => page.evaluate(() => localStorage.getItem('selectedUnitName'))).toBe('Unit 1');
     });
 
@@ -730,6 +818,7 @@ test.describe('Assessment calibration', () => {
 
         await openStudentChat(page);
 
+        await expect(page.locator('.assessment-start')).toHaveAttribute('data-timestamp', /^\d+$/);
         await expect(page.locator('#calibration-question-0')).toContainText('Which letter is correct?', { timeout: 15_000 });
         await page.locator('#calibration-question-0 .calibration-option', { hasText: 'B. Incorrect' }).click();
 
@@ -875,6 +964,88 @@ test.describe('student.js compact browser harness', () => {
         expect(collected.byIdFound).toBe(true);
         expect(collected.updatedHasActivity).toBe(true);
         expect(collected.currentCleared).toBe(true);
+    });
+
+    test('preserves timestamps and elapsed timing through repeated history reloads', async ({ page }) => {
+        await openStudentScriptHarness(page);
+
+        const timing = await page.evaluate(async () => {
+            const w = /** @type {any} */ (window);
+            const originalMessages = [
+                {
+                    type: 'user', content: 'Original question', messageType: 'regular-chat',
+                    timestamp: '2025-01-02T03:04:05.000Z', elapsedTime: 0, elapsedTimeDerived: false,
+                },
+                {
+                    type: 'bot', content: '<strong>Starting assessment</strong>', messageType: 'assessment-start', isHtml: true,
+                    timestamp: '2025-01-02T03:04:06.250Z', elapsedTime: 1250, elapsedTimeDerived: true,
+                },
+                {
+                    type: 'bot', content: 'Saved assessment question', messageType: 'practice-test-question',
+                    timestamp: '2025-01-02T03:04:08.750Z', elapsedTime: 2500, elapsedTimeDerived: false,
+                    questionData: {
+                        questionIndex: 0,
+                        questionText: 'Saved assessment question',
+                        options: [{ text: 'A. Stored answer', isSelected: true }],
+                        studentAnswer: 'A',
+                    },
+                },
+                {
+                    type: 'bot', content: 'Saved mode result', messageType: 'mode-result',
+                    timestamp: '2025-01-02T03:04:12.750Z', elapsedTime: 4000, elapsedTimeDerived: true,
+                    htmlContent: '<div class="mode-explanation">Saved mode result</div>',
+                },
+            ];
+            const chatData = {
+                metadata: {
+                    courseId: localStorage.getItem('selectedCourseId'),
+                    courseName: 'BIOC Harness', studentId: 'timing-student',
+                    unitName: 'Unit 1', currentMode: 'tutor', totalMessages: originalMessages.length,
+                },
+                messages: originalMessages,
+                practiceTests: null,
+                studentAnswers: { answers: [] },
+                sessionInfo: { sessionId: 'timing-session' },
+            };
+
+            const snapshot = (/** @type {any[]} */ messages) => messages.map(message => ({
+                messageType: message.messageType,
+                timestamp: message.timestamp,
+                elapsedTime: message.elapsedTime,
+                elapsedTimeDerived: message.elapsedTimeDerived,
+            }));
+
+            w.loadChatData(chatData);
+            await new Promise(resolve => setTimeout(resolve, 650));
+            const firstCollection = await w.collectAllChatData();
+            const firstDom = Array.from(document.querySelectorAll('#chat-messages .message')).map((element) => {
+                const messageElement = /** @type {HTMLElement} */ (element);
+                return {
+                    timestamp: messageElement.dataset.timestamp,
+                    elapsedTime: messageElement.dataset.elapsedTime,
+                    elapsedTimeDerived: messageElement.dataset.elapsedTimeDerived,
+                };
+            });
+
+            w.loadChatData(firstCollection);
+            await new Promise(resolve => setTimeout(resolve, 650));
+            const secondCollection = await w.collectAllChatData();
+
+            return {
+                expected: snapshot(originalMessages),
+                first: snapshot(firstCollection.messages),
+                second: snapshot(secondCollection.messages),
+                firstDom,
+            };
+        });
+
+        expect(timing.first).toEqual(timing.expected);
+        expect(timing.second).toEqual(timing.expected);
+        expect(timing.firstDom.every((message) =>
+            /^\d+$/.test(String(message.timestamp))
+            && /^\d+$/.test(String(message.elapsedTime))
+            && /^(true|false)$/.test(String(message.elapsedTimeDerived))
+        )).toBe(true);
     });
 
     test('submits chat context with practice history and renders directive-mode actions', async ({ page }) => {
@@ -1110,6 +1281,13 @@ test.describe('student.js compact browser harness', () => {
                         { type: 'user', timestamp: new Date().toISOString() },
                     ],
                 }),
+                w.calculateSessionDuration({
+                    messages: [
+                        { type: 'bot', content: 'Welcome to BiocBot! I can see you have access to published units.', elapsedTime: 0, elapsedTimeDerived: false },
+                        { type: 'user', timestamp: 'not-a-date', elapsedTime: 6_000, elapsedTimeDerived: true },
+                        { type: 'bot', timestamp: 'also-not-a-date', elapsedTime: 65_000, elapsedTimeDerived: true },
+                    ],
+                }),
             ];
 
             w.__currentUser = null;
@@ -1145,9 +1323,20 @@ test.describe('student.js compact browser harness', () => {
 
             localStorage.setItem('biocbot_current_chat_' + sid, '{not-json');
             const invalidChatData = w.getCurrentChatData();
+            const derivedElapsedMessages = w.ensureMessageElapsedTimes([
+                { type: 'user', timestamp: '2026-07-14T03:00:00.000Z' },
+                { type: 'bot', timestamp: '2026-07-14T03:00:01.250Z' },
+                { type: 'user', timestamp: 'not-a-date' },
+            ]);
 
             return {
                 durationCases,
+                derivedElapsedMessages,
+                earliestSessionStart: w.getSessionStartTime([
+                    { type: 'user', timestamp: '2026-07-14T03:00:00.000Z' },
+                    { type: 'bot', timestamp: '2026-07-10T18:57:57.042Z' },
+                    { type: 'bot', timestamp: 'not-a-date' },
+                ]),
                 localId,
                 generatedId,
                 preferenceCourse,
@@ -1162,6 +1351,13 @@ test.describe('student.js compact browser harness', () => {
         expect(helperResults.durationCases[0]).toBe('0s');
         expect(helperResults.durationCases[1]).toMatch(/1m|65s|5s/);
         expect(helperResults.durationCases[2]).toMatch(/1h|0s/);
+        expect(helperResults.durationCases[3]).toBe('1m 5s');
+        expect(helperResults.derivedElapsedMessages).toMatchObject([
+            { elapsedTime: 0, elapsedTimeDerived: true },
+            { elapsedTime: 1250, elapsedTimeDerived: true },
+            { elapsedTime: 0, elapsedTimeDerived: true },
+        ]);
+        expect(helperResults.earliestSessionStart).toBe('2026-07-10T18:57:57.042Z');
         expect(helperResults.localId).toBe('local-user-id');
         expect(helperResults.generatedId).toMatch(/^session_/);
         expect(helperResults.preferenceCourse).toBe('PREF-COURSE');

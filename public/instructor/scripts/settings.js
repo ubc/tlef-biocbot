@@ -835,6 +835,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (idleTimeoutInput && result.prompts.studentIdleTimeout) {
                     idleTimeoutInput.value = result.prompts.studentIdleTimeout / 60;
                 }
+                const sessionTimeoutInput = document.getElementById('session-timeout-input');
+                if (sessionTimeoutInput && result.prompts.studentSessionTimeout) {
+                    sessionTimeoutInput.value = result.prompts.studentSessionTimeout / 60;
+                }
             }
         } catch (error) {
             console.error('Error fetching global config:', error);
@@ -1131,6 +1135,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (idleTimeoutInput && idleTimeoutInput.value !== '') {
             studentIdleTimeout = Math.round(parseFloat(idleTimeoutInput.value) * 60);
         }
+        const sessionTimeoutInput = document.getElementById('session-timeout-input');
+        let studentSessionTimeout = 1800;
+        if (sessionTimeoutInput && sessionTimeoutInput.value !== '') {
+            studentSessionTimeout = Math.round(parseFloat(sessionTimeoutInput.value) * 60);
+        }
 
         const response = await fetch('/api/settings/prompts', {
             method: 'POST',
@@ -1146,6 +1155,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 additiveRetrieval: document.getElementById('additive-retrieval-toggle')?.checked === true,
                 additionalMaterialSecondarySearch: document.getElementById('additional-material-secondary-toggle')?.checked === true,
                 studentIdleTimeout,
+                studentSessionTimeout,
                 courseId
             })
         });
@@ -1439,13 +1449,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     wireSectionButton('reset-privacy-settings', async () => {
         const anonymizeToggle = document.getElementById('anonymize-students-toggle');
         const idleTimeoutInput = document.getElementById('idle-timeout-input');
+        const sessionTimeoutInput = document.getElementById('session-timeout-input');
         if (anonymizeToggle) anonymizeToggle.checked = false;
         if (idleTimeoutInput) idleTimeoutInput.value = 4;
+        if (sessionTimeoutInput) sessionTimeoutInput.value = 30;
         await saveAnonymizeStudentsToServer();
         await savePromptsConfigToServer();
         showNotification('Privacy settings reset to defaults', 'success');
     }, {
-        confirmMessage: 'Reset privacy and session settings to defaults (anonymization off, 4 minute idle timeout)?',
+        confirmMessage: 'Reset privacy and session settings to defaults (anonymization off, 4 minute idle timeout, 30 minute chat session timeout)?',
         busyLabel: 'Resetting...'
     });
 

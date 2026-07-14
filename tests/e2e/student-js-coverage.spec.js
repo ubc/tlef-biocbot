@@ -1020,7 +1020,7 @@ test.describe('Mode toggle (Protégé / Tutor)', () => {
 // showNewSessionNotification)
 // ----------------------------------------------------------------------------
 test.describe('New-session button', () => {
-    test('clicking new-session shows the notification, clears chat data, and re-runs initialization', async ({ page }) => {
+    test('clicking new-session shows the notification, rotates chat data, and re-runs initialization', async ({ page }) => {
         await openStudent(page, {
             chatData: {
                 metadata: {
@@ -1047,8 +1047,18 @@ test.describe('New-session button', () => {
         await page.locator('#new-session-btn').click();
 
         await expect(page.locator('.notification.info').filter({ hasText: 'New chat session started' })).toBeVisible({ timeout: 5_000 });
-        // localStorage current chat should now be cleared.
-        await expect.poll(() => page.evaluate((sid) => localStorage.getItem(`biocbot_current_chat_${sid}`), studentId)).toBeNull();
+        await expect(page.locator('#chat-messages')).toContainText('Welcome to BiocBot!', { timeout: 10_000 });
+        await expect(page.locator('#chat-messages')).not.toContainText('pre-existing');
+
+        // Initialization immediately creates the replacement session. Assert
+        // its stable final state instead of racing the brief cleared state.
+        const freshChat = await page.evaluate((sid) => {
+            const raw = localStorage.getItem(`biocbot_current_chat_${sid}`);
+            return raw ? JSON.parse(raw) : null;
+        }, studentId);
+        expect(freshChat.sessionInfo.sessionId).not.toBe('pre_new_session');
+        expect(freshChat.messages.some((/** @type {any} */ message) => message.content.includes('Welcome to BiocBot!'))).toBe(true);
+        expect(freshChat.messages.some((/** @type {any} */ message) => message.content.includes('pre-existing'))).toBe(false);
     });
 
     test('new-session with no course selected does not crash and re-loads available courses', async ({ page }) => {

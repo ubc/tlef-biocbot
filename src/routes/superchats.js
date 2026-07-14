@@ -67,8 +67,17 @@ const notDeletedFilter = { $or: [{ isDeleted: { $exists: false } }, { isDeleted:
 function calculateSessionDuration(session) {
     const messages = (session && session.chatData && session.chatData.messages) || [];
     const first = messages.find(msg => msg.type === 'user');
-    const lastBot = messages.slice().reverse().find(msg => msg.type === 'bot');
-    const last = lastBot || messages[messages.length - 1];
+    const isSyntheticBotMessage = (msg) => {
+        if (!msg || msg.type !== 'bot') return false;
+        if (msg.sourceAttribution?.source === 'System') return true;
+        const content = typeof msg.content === 'string' ? msg.content : '';
+        return content.includes('Welcome to BiocBot!') &&
+            content.includes('I can see you have access to published units');
+    };
+    const lastBot = messages.slice().reverse().find(
+        msg => msg.type === 'bot' && !isSyntheticBotMessage(msg)
+    );
+    const last = lastBot || messages.slice().reverse().find(msg => !isSyntheticBotMessage(msg));
     if (!first || !first.timestamp || !last || !last.timestamp) return '0s';
 
     const diffMs = new Date(last.timestamp) - new Date(first.timestamp);
