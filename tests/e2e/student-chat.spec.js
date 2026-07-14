@@ -29,14 +29,23 @@ const {
     setUserAgreement,
 } = require('./helpers/student');
 
+/** @type {string} */
 let instructorId;
+/** @type {string} */
 let studentId;
+/** @type {string} */
 let studentPassword;
+/** @type {string} */
+let reloginStudentId;
+/** @type {string} */
+let reloginStudentPassword;
 
 test.beforeAll(async () => {
     instructorId = await getUserIdByUsername(TEST_USERS.instructor.username);
     studentId = await getStudentId();
     studentPassword = loadCredentials().student;
+    reloginStudentId = await getUserIdByUsername(TEST_USERS.student_relogin.username);
+    reloginStudentPassword = loadCredentials().student_relogin;
 });
 
 test.afterAll(async () => {
@@ -2762,14 +2771,30 @@ test.describe('Chat export & feedback UX fixes', () => {
         expect(result.datasetTs).toBe(result.expected);
         expect(Math.abs(result.nowTs - result.datasetTs)).toBeGreaterThan(60_000);
     });
+});
 
+test.describe('Chat timing across tab close and relogin', () => {
     test('closing the tab and logging back in preserves all older message timing', async ({ browser }) => {
+        const currentReloginStudentId = String(reloginStudentId);
+        const currentReloginStudentPassword = String(reloginStudentPassword);
         await resetStudentChatData({ instructorId });
-        await setUserAgreement(studentId, true);
+        await withDb((/** @type {import('mongodb').Db} */ db) => db.collection('courses').updateOne(
+            { courseId: STU_COURSE_ID },
+            {
+                $set: {
+                    [`studentEnrollment.${currentReloginStudentId}.enrolled`]: true,
+                    [`studentEnrollment.${currentReloginStudentId}.enrolledAt`]: new Date(),
+                },
+            }
+        ));
+        await setUserAgreement(currentReloginStudentId, true);
         const context = await browser.newContext();
         const api = context.request;
         const login = async () => api.post('/api/auth/login', {
-            data: { username: TEST_USERS.student.username, password: studentPassword },
+            data: {
+                username: TEST_USERS.student_relogin.username,
+                password: currentReloginStudentPassword,
+            },
         });
 
         try {
@@ -2807,7 +2832,8 @@ test.describe('Chat export & feedback UX fixes', () => {
             const chatData = {
                 metadata: {
                     exportDate: new Date().toISOString(), courseId: STU_COURSE_ID,
-                    courseName: STU_COURSE_NAME, studentId, studentName: 'E2E Student',
+                    courseName: STU_COURSE_NAME, studentId: currentReloginStudentId,
+                    studentName: TEST_USERS.student_relogin.displayName,
                     unitName: 'Unit 1', currentMode: 'tutor', totalMessages: originalMessages.length,
                     version: '1.0',
                 },
@@ -2815,8 +2841,8 @@ test.describe('Chat export & feedback UX fixes', () => {
                 practiceTests: null,
                 studentAnswers: { answers: [] },
                 sessionInfo: {
-                    sessionId, startTime: originalMessages[0].timestamp,
-                    endTime: originalMessages.at(-1).timestamp, duration: '5s',
+                    sessionId, startTime: '2025-02-03T04:05:06.000Z',
+                    endTime: '2025-02-03T04:05:20.500Z', duration: '5s',
                 },
                 lastActivityTimestamp: new Date().toISOString(),
             };
@@ -2830,12 +2856,13 @@ test.describe('Chat export & feedback UX fixes', () => {
                 localStorage.setItem('studentMode', 'tutor');
                 localStorage.setItem(`biocbot_current_chat_${studentId}`, JSON.stringify(chatData));
                 localStorage.setItem(`biocbot_session_${studentId}_${courseId}_Unit 1`, sessionId);
-            }, { studentId, courseId: STU_COURSE_ID, sessionId, chatData });
+            }, { studentId: currentReloginStudentId, courseId: STU_COURSE_ID, sessionId, chatData });
             await firstTab.reload();
             await expect(firstTab.locator('#chat-messages')).toContainText('ORIGINAL BOT RESPONSE', { timeout: 15_000 });
 
             await firstTab.evaluate(() => {
-                addMessage('NEW MESSAGE AFTER FIRST RESTORE', 'user');
+                const testWindow = /** @type {any} */ (window);
+                testWindow.addMessage('NEW MESSAGE AFTER FIRST RESTORE', 'user');
             });
             await expect(firstTab.locator('#chat-messages')).toContainText('NEW MESSAGE AFTER FIRST RESTORE');
             await firstTab.close();
@@ -2850,7 +2877,9 @@ test.describe('Chat export & feedback UX fixes', () => {
             await expect(reopenedTab.locator('#chat-messages')).toContainText('NEW MESSAGE AFTER FIRST RESTORE');
 
             const afterRelogin = await reopenedTab.evaluate(({ studentId, expectedMessages }) => {
-                const stored = JSON.parse(localStorage.getItem(`biocbot_current_chat_${studentId}`));
+                const raw = localStorage.getItem(`biocbot_current_chat_${studentId}`);
+                if (!raw) throw new Error('Expected restored chat data in localStorage');
+                const stored = JSON.parse(raw);
                 const fields = (/** @type {any} */ message) => ({
                     messageType: message.messageType,
                     timestamp: message.timestamp,
@@ -2872,7 +2901,7 @@ test.describe('Chat export & feedback UX fixes', () => {
                     stored: stored.messages.slice(0, expectedMessages.length).map(fields),
                     rendered,
                 };
-            }, { studentId, expectedMessages: originalMessages });
+            }, { studentId: currentReloginStudentId, expectedMessages: originalMessages });
 
             expect(afterRelogin.stored).toEqual(originalMessages.map((message) => ({
                 messageType: message.messageType,
@@ -2888,6 +2917,20 @@ test.describe('Chat export & feedback UX fixes', () => {
             await reopenedTab.close();
         } finally {
             await context.close();
+        }
+
+        // Logging the dedicated relogin user out and back in must never destroy
+        // the shared e2e_student session consumed by all subsequent specs.
+        const sharedStudentContext = await browser.newContext({
+            storageState: storageStatePath('student'),
+        });
+        try {
+            const sharedMe = await sharedStudentContext.request.get('/api/auth/me');
+            expect(sharedMe.ok()).toBeTruthy();
+            const sharedBody = await sharedMe.json();
+            expect(sharedBody.user?.username).toBe(TEST_USERS.student.username);
+        } finally {
+            await sharedStudentContext.close();
         }
     });
 });

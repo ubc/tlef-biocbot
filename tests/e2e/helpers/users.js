@@ -20,6 +20,13 @@ const TEST_USERS = {
         displayName: 'E2E Student',
         landingPath: '/student',
     },
+    student_relogin: {
+        username: 'e2e_student_relogin',
+        email: 'e2e-student-relogin@test.local',
+        role: 'student',
+        displayName: 'E2E Student Relogin',
+        landingPath: '/student',
+    },
     ta: {
         username: 'e2e_ta',
         email: 'e2e-ta@test.local',
@@ -36,6 +43,7 @@ const TEST_USERS = {
     },
 };
 
+/** @param {string} role */
 function storageStatePath(role) {
     return path.join(STORAGE_STATE_DIR, `${role}.json`);
 }
