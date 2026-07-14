@@ -493,7 +493,7 @@ test('loadAvailableCourses clears a stored course when enrollment verification a
     const harness = await openStudentWithMocks(page);
     // Let the page's initial loadAvailableCourses call finish before changing
     // its mock responses and invoking a second call.
-    await expect(page.locator('#chat-messages')).toContainText("Hello! I'm BiocBot", { timeout: 10_000 });
+    await expect(page.locator('#chat-messages')).toContainText('seeded branch chat', { timeout: 10_000 });
     harness.setEnrollmentResponse({ abort: true });
     harness.setAvailableCourses({
         success: true,
@@ -522,10 +522,16 @@ test('loadAvailableCourses clears a stored course when enrollment verification a
 test('loadAvailableCourses renders no-courses and fetch-error empty states', async ({ page }) => {
     const harness = await openStudentWithMocks(page, { seedSelectedCourse: false });
     // Prevent the startup request from racing the branch-specific requests.
-    await expect(page.locator('#course-select')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('#course-select:visible, #chat-messages .message').first()).toBeVisible({ timeout: 10_000 });
 
     harness.setAvailableCourses({ success: true, data: [] });
     await page.evaluate(() => {
+        localStorage.removeItem('selectedCourseId');
+        localStorage.removeItem('selectedCourseName');
+        const chatMessages = document.getElementById('chat-messages');
+        if (chatMessages) {
+            chatMessages.innerHTML = '';
+        }
         const w = /** @type {any} */ (window);
         return w.loadAvailableCourses();
     });

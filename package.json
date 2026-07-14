@@ -48,7 +48,7 @@
     "passport-ubcshib": "0.1.4",
     "ubc-genai-toolkit-chunking": "^0.1.0",
     "ubc-genai-toolkit-core": "^0.1.0",
-    "ubc-genai-toolkit-document-parsing": "^0.2.0",
+    "ubc-genai-toolkit-document-parsing": "file:../ubc-genai-toolkit-document-parsing",
     "ubc-genai-toolkit-embeddings": "^0.1.1",
     "ubc-genai-toolkit-llm": "^0.3.0"
   },
