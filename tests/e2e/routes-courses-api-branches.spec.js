@@ -1021,7 +1021,7 @@ test.describe('GET /api/courses/:courseId/students (fallback paths)', () => {
 test.describe('GET /api/courses/statistics (extra branches)', () => {
     test.use({ storageState: storageStatePath('instructor') });
 
-    test('defaults to tutor for sessions with no chatData and counts large durations correctly', async ({ request: api }) => {
+    test('excludes sessions with no measured duration and counts large durations correctly', async ({ request: api }) => {
         await seedCourse({ courseId: COURSE_BR_A, instructorId });
         const startA = new Date('2026-04-02T00:00:00Z');
         const endA = new Date('2026-04-02T02:00:00Z'); // 2 hours
@@ -1053,11 +1053,11 @@ test.describe('GET /api/courses/statistics (extra branches)', () => {
         const res = await api.get(`/api/courses/statistics?courseId=${COURSE_BR_A}`);
         expect(res.ok()).toBeTruthy();
         const body = await res.json();
-        expect(body.data.totalSessions).toBe(2);
+        expect(body.data.totalSessions).toBe(1);
         // 2-hour session → "2h 0m"
         expect(body.data.averageSessionLength).toMatch(/\d+h \d+m/);
-        // both attributed to tutor (default branch + explicit tutor)
-        expect(body.data.modeDistribution.tutor).toBe(2);
+        // only the measured session contributes to the mode distribution
+        expect(body.data.modeDistribution.tutor).toBe(1);
 
         await withDb((db) => db.collection('chat_sessions').deleteMany({ courseId: COURSE_BR_A }));
     });

@@ -118,6 +118,66 @@ function isInactiveCourse(course = {}) {
     return (course.status || 'active') === 'inactive';
 }
 
+/**
+ * Calculate the measured duration of a saved student chat. Newer sessions
+ * persist an elapsedTime (milliseconds since the preceding message) on every
+ * message; summing those values preserves the timing captured by the client.
+ * Older sessions fall back to their message timestamps.
+ *
+ * @param {Object} session - Saved chat session
+ * @returns {number} Measured duration in milliseconds
+ */
+function calculateMeasuredSessionDurationMs(session) {
+    const messages = Array.isArray(session?.chatData?.messages)
+        ? session.chatData.messages
+        : [];
+    const firstUserIndex = messages.findIndex(message => message?.type === 'user');
+    if (firstUserIndex === -1) return 0;
+
+    const isSyntheticBotMessage = (message) => {
+        if (!message || message.type !== 'bot') return false;
+        if (message.sourceAttribution?.source === 'System') return true;
+        const content = typeof message.content === 'string' ? message.content : '';
+        return content.includes('Welcome to BiocBot!') &&
+            content.includes('I can see you have access to published units');
+    };
+
+    let endIndex = -1;
+    for (let index = messages.length - 1; index >= firstUserIndex; index--) {
+        if (messages[index]?.type === 'bot' && !isSyntheticBotMessage(messages[index])) {
+            endIndex = index;
+            break;
+        }
+    }
+    if (endIndex === -1) {
+        for (let index = messages.length - 1; index >= firstUserIndex; index--) {
+            if (!isSyntheticBotMessage(messages[index])) {
+                endIndex = index;
+                break;
+            }
+        }
+    }
+    if (endIndex <= firstUserIndex) return 0;
+
+    const elapsedIntervals = messages
+        .slice(firstUserIndex + 1, endIndex + 1)
+        .map(message => message?.elapsedTime !== null
+            && message?.elapsedTime !== undefined
+            && message?.elapsedTime !== ''
+            ? Number(message.elapsedTime)
+            : NaN);
+    if (elapsedIntervals.every(value => Number.isFinite(value) && value >= 0)) {
+        return elapsedIntervals.reduce((total, value) => total + value, 0);
+    }
+
+    const startMs = new Date(messages[firstUserIndex]?.timestamp).getTime();
+    const endMs = new Date(messages[endIndex]?.timestamp).getTime();
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+        return 0;
+    }
+    return endMs - startMs;
+}
+
 function sortCoursesWithInactiveLast(courses = []) {
     return [...courses].sort((a, b) => {
         const aInactive = isInactiveCourse(a) ? 1 : 0;
@@ -904,6 +964,16 @@ router.get('/statistics', async (req, res) => {
         let sessionsWithDuration = 0;
         
         allSessions.forEach(session => {
+            const durationMs = calculateMeasuredSessionDurationMs(session);
+
+            // Empty/instantaneous autosaves are not real dashboard sessions.
+            // Exclude them from the count and every per-session aggregation so
+            // totals, mode distribution, and averages stay internally aligned.
+            if (durationMs <= 0) return;
+
+            totalSessionDurationMs += durationMs;
+            sessionsWithDuration++;
+
             // Count unique students
             if (session.studentId) {
                 uniqueStudents.add(session.studentId);
@@ -935,27 +1005,10 @@ router.get('/statistics', async (req, res) => {
                 });
             }
             
-            // Calculate session duration
-            if (session.chatData && session.chatData.messages && session.chatData.messages.length > 0) {
-                const messages = session.chatData.messages;
-                const firstUserMessage = messages.find(msg => msg.type === 'user');
-                const lastBotMessage = messages.slice().reverse().find(msg => msg.type === 'bot');
-                
-                if (firstUserMessage && lastBotMessage && firstUserMessage.timestamp && lastBotMessage.timestamp) {
-                    const start = new Date(firstUserMessage.timestamp);
-                    const end = new Date(lastBotMessage.timestamp);
-                    const durationMs = end - start;
-                    
-                    if (durationMs > 0) {
-                        totalSessionDurationMs += durationMs;
-                        sessionsWithDuration++;
-                    }
-                }
-            }
         });
         
         // Calculate averages
-        const totalSessions = allSessions.length;
+        const totalSessions = sessionsWithDuration;
         const averageSessionLength = sessionsWithDuration > 0 
             ? Math.round(totalSessionDurationMs / sessionsWithDuration / 1000) // in seconds
             : 0;

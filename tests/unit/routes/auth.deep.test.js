@@ -46,11 +46,13 @@ describe('POST /register catch block and branches', () => {
         expect(res.body.error).toMatch(/registration failed/i);
     });
 
-    test('skips the allowLocalLogin check entirely when there is no db', async () => {
+    test('fails closed when registration cannot read the admin setting', async () => {
         const authService = makeAuthService();
         const res = await request(app({ db: null, locals: { authService } }))
             .post('/register').send({ username: 'a', password: 'b', role: 'student' });
-        expect(res.status).toBe(200);
+        expect(res.status).toBe(503);
+        expect(res.body.code).toBe('AUTH_SERVICE_UNAVAILABLE');
+        expect(authService.registerUser).not.toHaveBeenCalled();
     });
 });
 
@@ -179,17 +181,18 @@ describe('DELETE /tas/:taId uncovered branches', () => {
 });
 
 describe('GET /methods catch block and branches', () => {
-    test('500 when reading global settings throws', async () => {
+    test('503 with safe methods when reading global settings throws', async () => {
         const db = throwingDb({ settings: { findOne: jest.fn(async () => { throw new Error('boom'); }) } });
         const res = await request(app({ db })).get('/methods');
-        expect(res.status).toBe(500);
-        expect(res.body.error).toMatch(/failed to get authentication methods/i);
+        expect(res.status).toBe(503);
+        expect(res.body.error).toMatch(/temporarily unavailable/i);
+        expect(res.body.methods).toMatchObject({ local: false, ubcshib: false, allowLocalLogin: false, serviceAvailable: false });
     });
 
-    test('skips the settings lookup entirely when there is no db', async () => {
+    test('fails closed when there is no database', async () => {
         const res = await request(app({ db: null })).get('/methods');
-        expect(res.status).toBe(200);
-        expect(res.body.methods).toMatchObject({ local: true, allowLocalLogin: true });
+        expect(res.status).toBe(503);
+        expect(res.body.methods).toMatchObject({ local: false, allowLocalLogin: false, serviceAvailable: false });
     });
 
     test('an explicit allowLocalLogin: true leaves local enabled', async () => {

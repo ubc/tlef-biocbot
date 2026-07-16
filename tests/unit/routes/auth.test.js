@@ -37,6 +37,12 @@ beforeAll(() => {
 afterAll(() => jest.restoreAllMocks());
 
 describe('POST /login (pre-Passport branches only)', () => {
+    test('503 when the admin setting cannot be read', async () => {
+        const res = await request(app({ db: null })).post('/login').send({ username: 'a', password: 'b' });
+        expect(res.status).toBe(503);
+        expect(res.body.code).toBe('AUTH_SERVICE_UNAVAILABLE');
+    });
+
     test('403 when an admin has disabled local login', async () => {
         const db = memoryDb({ settings: [{ _id: 'global', allowLocalLogin: false }] });
         const res = await request(app({ db })).post('/login').send({ username: 'a', password: 'b' });

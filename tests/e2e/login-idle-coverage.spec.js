@@ -276,7 +276,7 @@ test.describe('login.js focused browser coverage', () => {
         });
     }
 
-    test('stays on the login page for auth status and auth method fetch errors', async ({ page }) => {
+    test('fails closed on the login page when auth method lookup fails', async ({ page }) => {
         await installLoginHarness(page);
         await routeAuthQueues(page, {
             'GET /api/auth/methods': ['abort'],
@@ -285,8 +285,9 @@ test.describe('login.js focused browser coverage', () => {
 
         await gotoLoginHarness(page, `${loginHarnessPath}?error=unknown`);
 
-        await expect(page.locator('#message')).toHaveText('Authentication failed. Please try again.');
-        await expect(page.locator('#auth-form')).toBeVisible();
+        await expect(page.locator('#message')).toHaveText('Sign-in is temporarily unavailable. Please try again later.');
+        await expect(page.locator('#auth-form')).toBeHidden();
+        await expect(page.locator('#cwl-login-btn')).toBeHidden();
         await expect.poll(() => new URL(page.url()).pathname).toBe(loginHarnessPath);
     });
 

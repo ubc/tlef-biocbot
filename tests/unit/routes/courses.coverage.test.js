@@ -49,22 +49,22 @@ describe('GET /statistics', () => {
         });
     });
 
-    test('aggregates modes, messages, students, and a seconds-long session', async () => {
+    test('uses captured elapsed values and excludes zero-duration sessions from aggregates', async () => {
         const db = memoryDb({
             courses: [{ courseId: 'C1', instructorId: 'i1', status: 'active' }],
             chat_sessions: [
-                { courseId: 'C1', studentId: 's1', chatData: { metadata: { currentMode: 'protege' }, messages: [
+                { courseId: 'C1', studentId: 's1', duration: '45s', chatData: { metadata: { currentMode: 'protege' }, messages: [
                     { type: 'user', content: '12345', timestamp: '2026-01-01T00:00:00Z' },
-                    { type: 'bot', content: '123456789', timestamp: '2026-01-01T00:00:45Z' },
+                    { type: 'bot', content: '123456789', timestamp: '2026-01-01T00:00:45Z', elapsedTime: 5000 },
                 ] } },
-                { courseId: 'C1', studentId: 's1', isDeleted: false, chatData: { messages: [{ type: 'user', content: 42 }] } },
+                { courseId: 'C1', studentId: 's1', isDeleted: false, duration: '0s', chatData: { messages: [{ type: 'user', content: 42 }] } },
             ],
         });
         const res = await request(app({ db, user: instructor })).get('/statistics');
         expect(res.body.data).toEqual({
-            totalStudents: 1, totalSessions: 2, modeDistribution: { tutor: 1, protege: 1 },
-            averageSessionLength: '45s', averageSessionLengthSeconds: 45,
-            averageMessagesPerSession: 1.5, averageMessageLength: 7,
+            totalStudents: 1, totalSessions: 1, modeDistribution: { tutor: 0, protege: 1 },
+            averageSessionLength: '5s', averageSessionLengthSeconds: 5,
+            averageMessagesPerSession: 2, averageMessageLength: 7,
         });
     });
 

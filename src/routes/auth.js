@@ -13,6 +13,26 @@ const { normalizeErrorResponses } = require('../middleware/apiResponse');
 router.use(express.json());
 router.use(normalizeErrorResponses);
 
+const AUTH_UNAVAILABLE_MESSAGE = 'Sign-in is temporarily unavailable. Please try again later.';
+
+async function isLocalLoginAllowed(req) {
+    const db = req.app.locals.db;
+    if (!db) {
+        throw new Error('Authentication database connection not available');
+    }
+
+    const settings = await db.collection('settings').findOne({ _id: 'global' });
+    return settings?.allowLocalLogin !== false;
+}
+
+function sendAuthenticationUnavailable(res) {
+    return res.status(503).json({
+        success: false,
+        error: AUTH_UNAVAILABLE_MESSAGE,
+        code: 'AUTH_SERVICE_UNAVAILABLE'
+    });
+}
+
 // Generic middleware to log all incoming requests to this router for debugging
 router.use((req, res, next) => {
     console.log(`[AUTH DEBUG] Incoming request: ${req.method} ${req.originalUrl}`);
@@ -26,17 +46,18 @@ router.use((req, res, next) => {
  * Authenticate user with username and password using Passport Local Strategy
  */
 router.post('/login', async (req, res, next) => {
-    // Check if local login is allowed
-    const db = req.app.locals.db;
-    if (db) {
-        const settings = await db.collection('settings').findOne({ _id: 'global' });
-        // If settings exist and allowLocalLogin is false (explicitly disabled)
-        if (settings && settings.allowLocalLogin === false) {
-             return res.status(403).json({
+    // The administrator's setting is authoritative. If it cannot be read, do
+    // not fall back to exposing or accepting local credentials.
+    try {
+        if (!await isLocalLoginAllowed(req)) {
+            return res.status(403).json({
                 success: false,
                 error: 'Local login is currently disabled by the administrator.'
             });
         }
+    } catch (error) {
+        console.error('Unable to verify whether local login is enabled:', error);
+        return sendAuthenticationUnavailable(res);
     }
 
     // Validate required fields before Passport authentication
@@ -121,15 +142,16 @@ router.post('/login', async (req, res, next) => {
 router.post('/register', async (req, res) => {
     try {
         // Check if local registration is allowed (same setting as login)
-        const db = req.app.locals.db;
-        if (db) {
-            const settings = await db.collection('settings').findOne({ _id: 'global' });
-            if (settings && settings.allowLocalLogin === false) {
-                 return res.status(403).json({
+        try {
+            if (!await isLocalLoginAllowed(req)) {
+                return res.status(403).json({
                     success: false,
                     error: 'Account creation is currently disabled by the administrator.'
                 });
             }
+        } catch (error) {
+            console.error('Unable to verify whether local registration is enabled:', error);
+            return sendAuthenticationUnavailable(res);
         }
 
         const { username, password, email, role, displayName } = req.body;
@@ -784,24 +806,17 @@ router.post('/saml/callback',
 router.get('/methods', async (req, res) => {
     try {
         const methods = {
-            local: true,
+            local: false,
             saml: false,
             ubcshib: false,
-            allowLocalLogin: true // Default to true
+            allowLocalLogin: false,
+            serviceAvailable: true
         };
 
-        // Check global setting for local login
-        const db = req.app.locals.db;
-        if (db) {
-            const settings = await db.collection('settings').findOne({ _id: 'global' });
-            if (settings && settings.allowLocalLogin !== undefined) {
-                methods.allowLocalLogin = settings.allowLocalLogin;
-                // If local login explicitly disabled, update local flag
-                if (settings.allowLocalLogin === false) {
-                    methods.local = false;
-                }
-            }
-        }
+        // The setting defaults to enabled only after a successful database
+        // read. A missing or failing database must never turn local login on.
+        methods.allowLocalLogin = await isLocalLoginAllowed(req);
+        methods.local = methods.allowLocalLogin;
 
         // Check if SAML is configured
         if (process.env.SAML_ENTRY_POINT &&
@@ -825,9 +840,17 @@ router.get('/methods', async (req, res) => {
         });
     } catch (error) {
         console.error('Error getting auth methods:', error);
-        res.status(500).json({
+        res.status(503).json({
             success: false,
-            error: 'Failed to get authentication methods'
+            error: AUTH_UNAVAILABLE_MESSAGE,
+            code: 'AUTH_SERVICE_UNAVAILABLE',
+            methods: {
+                local: false,
+                saml: false,
+                ubcshib: false,
+                allowLocalLogin: false,
+                serviceAvailable: false
+            }
         });
     }
 });
