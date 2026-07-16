@@ -36,6 +36,14 @@
     text-align: left;
 }
 
+/* Authentication settings are database-backed. Keep local controls hidden
+   until the server confirms that the administrator has enabled them. */
+.auth-methods-pending h2,
+.auth-methods-pending #auth-form,
+.auth-methods-pending .form-footer {
+    display: none;
+}
+
 .login-form h2 {
     color: var(--text-color);
     font-size: 24px;
@@ -213,9 +221,9 @@
     .login-card {
         padding: 30px 20px;
     }
-    
+
     .form-group input,
     .form-group select {
         font-size: 16px; /* Prevent zoom on iOS */
     }
-} 
+}

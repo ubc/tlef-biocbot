@@ -18,6 +18,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const cwlLoginBtn = document.getElementById('cwl-login-btn');
     const loginDivider = document.getElementById('login-divider');
 
+    // Fail closed while the database-backed administrator setting is loading.
+    setLocalLoginVisibility(false);
+
     // Check available authentication methods and show CWL button if available
     checkAvailableAuthMethods();
 
@@ -254,48 +257,53 @@ async function checkAvailableAuthMethods() {
         const response = await fetch('/api/auth/methods');
         const result = await response.json();
 
-        if (result.success && result.methods) {
-            // Get button and divider elements
-            const cwlLoginBtn = document.getElementById('cwl-login-btn');
-            const loginDivider = document.getElementById('login-divider');
-            const loginForm = document.getElementById('login-form');
-            const loginFormElement = document.getElementById('auth-form'); // The actual form inside the container
-            const registerSection = document.getElementById('register-form');
-            const formFooter = document.querySelector('.form-footer');
-            
-            // Check if local login is allowed
-            // Default to allowed if not specified
-            const allowLocalLogin = result.methods.allowLocalLogin !== false;
-            
-            if (!allowLocalLogin) {
-                // Hide local login form elements but keep container for CWL button
-                if (loginFormElement) loginFormElement.style.display = 'none';
-                
-                // Hide "Sign In" header if local login is disabled
-                const signInHeader = loginForm.querySelector('h2');
-                if (signInHeader) signInHeader.style.display = 'none';
-                
-                // Hide registration option
-                if (formFooter) formFooter.style.display = 'none';
-                
-                // Hide divider since there's no "alternative" anymore
-                if (loginDivider) loginDivider.style.display = 'none';
-                
-                // Show a message if you want, or just rely on the CWL button being the only option
-            }
+        if (!response.ok || !result.success || !result.methods || result.methods.serviceAvailable === false) {
+            throw new Error(result.error || 'Authentication methods are unavailable');
+        }
 
-            // Show CWL button if UBC Shibboleth is available
-            if (result.methods.ubcshib && cwlLoginBtn) {
-                cwlLoginBtn.style.display = 'block';
-                
-                // Show divider only if both methods are available
-                if (loginDivider && allowLocalLogin) {
-                    loginDivider.style.display = 'flex';
-                }
-            }
+        const allowLocalLogin = result.methods.local !== false &&
+            result.methods.allowLocalLogin !== false;
+        const allowCwlLogin = result.methods.ubcshib === true;
+
+        setLocalLoginVisibility(allowLocalLogin);
+
+        const cwlLoginBtn = document.getElementById('cwl-login-btn');
+        const loginDivider = document.getElementById('login-divider');
+        if (cwlLoginBtn) cwlLoginBtn.style.display = allowCwlLogin ? 'block' : 'none';
+        if (loginDivider) {
+            loginDivider.style.display = allowLocalLogin && allowCwlLogin ? 'flex' : 'none';
+        }
+
+        if (!allowLocalLogin && !allowCwlLogin) {
+            showMessage('No authentication methods are currently available.', 'error');
         }
     } catch (error) {
-        // If endpoint fails, default behavior (show local, hide CWL)
-        console.log('Auth methods check failed (this is normal in local dev):', error);
+        // The admin setting could not be verified. Keep every sign-in control
+        // hidden instead of falling back to the unrestricted local form.
+        setLocalLoginVisibility(false);
+        const cwlLoginBtn = document.getElementById('cwl-login-btn');
+        const loginDivider = document.getElementById('login-divider');
+        if (cwlLoginBtn) cwlLoginBtn.style.display = 'none';
+        if (loginDivider) loginDivider.style.display = 'none';
+        showMessage('Sign-in is temporarily unavailable. Please try again later.', 'error');
+        console.log('Auth methods check failed:', error);
     }
+}
+
+/**
+ * Show or hide every local-authentication entry point.
+ * @param {boolean} visible - Whether the admin setting permits local auth
+ */
+function setLocalLoginVisibility(visible) {
+    const loginSection = document.getElementById('login-form');
+    const loginFormElement = document.getElementById('auth-form');
+    const registerSection = document.getElementById('register-form');
+    const signInHeader = loginSection?.querySelector('h2');
+    const formFooter = loginSection?.querySelector('.form-footer');
+
+    loginSection?.classList.remove('auth-methods-pending');
+    if (loginFormElement) loginFormElement.style.display = visible ? '' : 'none';
+    if (signInHeader) signInHeader.style.display = visible ? '' : 'none';
+    if (formFooter) formFooter.style.display = visible ? '' : 'none';
+    if (!visible && registerSection) registerSection.style.display = 'none';
 }

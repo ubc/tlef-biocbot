@@ -19,9 +19,10 @@ jest.mock('passport', () => ({
 
 const express = require('express');
 const request = require('supertest');
+const { memoryDb } = require('../helpers/memory-db');
 const router = require('../../../src/routes/auth');
 
-function buildApp({ db = null, user = null, session, locals = {}, login, logout, omitSession = false } = {}) {
+function buildApp({ db = memoryDb({}), user = null, session, locals = {}, login, logout, omitSession = false } = {}) {
     const app = express();
     app.use(express.json());
     app.locals.db = db;
