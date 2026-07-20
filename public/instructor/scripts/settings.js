@@ -163,7 +163,37 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    function addKeyboardPickerActivation(selectElement) {
+        if (!selectElement) return;
+        selectElement.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+
+            try {
+                if (typeof selectElement.showPicker === 'function') {
+                    selectElement.showPicker();
+                    event.preventDefault();
+                }
+            } catch (error) {
+                // Preserve the browser's native select behavior when unavailable.
+            }
+        });
+    }
+
     initDirtyTracking();
+    addKeyboardPickerActivation(document.getElementById('course-year-level-select'));
+    addKeyboardPickerActivation(document.getElementById('superchat-select'));
+    addKeyboardPickerActivation(document.getElementById('superchat-year-select'));
+
+    document.addEventListener('keydown', event => {
+        const toggle = event.target;
+        if (!(toggle instanceof HTMLInputElement)
+            || toggle.type !== 'checkbox'
+            || !toggle.closest('#settings-panels, #transfer-course-modal')
+            || event.key !== 'Enter') return;
+
+        event.preventDefault();
+        toggle.click();
+    });
 
     // Check if user has system admin access
     await waitForAuth();

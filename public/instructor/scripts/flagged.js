@@ -555,16 +555,34 @@ function initializeEventListeners() {
     const statusFilter = document.getElementById('status-filter');
     const refreshButton = document.getElementById('refresh-flags');
     if (flagTypeFilter) {
+        addKeyboardPickerActivation(flagTypeFilter);
         flagTypeFilter.addEventListener('change', handleFilterChange);
     }
     
     if (statusFilter) {
+        addKeyboardPickerActivation(statusFilter);
         statusFilter.addEventListener('change', handleFilterChange);
     }
     
     if (refreshButton) {
         refreshButton.addEventListener('click', handleRefresh);
     }
+}
+
+function addKeyboardPickerActivation(selectElement) {
+    selectElement.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+
+        try {
+            if (typeof selectElement.showPicker === 'function') {
+                selectElement.showPicker();
+                event.preventDefault();
+                return;
+            }
+        } catch (error) {
+            // Fall through to the browser's native select behavior.
+        }
+    });
 }
 
 
@@ -1679,6 +1697,7 @@ const mhState = {
 function initMHEventListeners() {
     const statusFilter = document.getElementById('mh-status-filter');
     if (statusFilter) {
+        addKeyboardPickerActivation(statusFilter);
         statusFilter.addEventListener('change', () => {
             mhState.currentFilter = statusFilter.value;
             applyMHFilters();

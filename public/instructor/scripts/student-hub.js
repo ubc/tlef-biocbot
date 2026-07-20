@@ -24,6 +24,7 @@ function initializeStudentHub() {
     // No need for dropdown change handler
     const surveyStatusFilter = document.getElementById('survey-status-filter');
     if (surveyStatusFilter) {
+        addKeyboardPickerActivation(surveyStatusFilter);
         surveyStatusFilter.addEventListener('change', () => {
             if (currentSurveyCourseId) {
                 loadChatSurveyResponses(currentSurveyCourseId);
@@ -44,6 +45,21 @@ function initializeStudentHub() {
     if (downloadSurveyButton) {
         downloadSurveyButton.addEventListener('click', downloadChatSurveyResponses);
     }
+}
+
+function addKeyboardPickerActivation(selectElement) {
+    selectElement.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+
+        try {
+            if (typeof selectElement.showPicker === 'function') {
+                selectElement.showPicker();
+                event.preventDefault();
+            }
+        } catch (error) {
+            // Preserve the browser's native select behavior when unavailable.
+        }
+    });
 }
 
 async function loadInstructorCourses() {
@@ -427,6 +443,14 @@ function renderStudents(courseId) {
             </div>
         `;
     }).join('');
+
+    container.querySelectorAll('.enroll-toggle input[type="checkbox"]').forEach(checkbox => {
+        checkbox.addEventListener('keydown', event => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            checkbox.click();
+        });
+    });
 }
 
 window.promoteToTA = async function(studentId, studentName, courseId) {

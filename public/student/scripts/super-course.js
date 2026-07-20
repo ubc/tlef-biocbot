@@ -68,6 +68,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         // what's available (a disabled control reads as "broken").
         superchatPicker.disabled = false;
 
+        superchatPicker.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+
+            try {
+                if (typeof superchatPicker.showPicker === 'function') {
+                    superchatPicker.showPicker();
+                    event.preventDefault();
+                    return;
+                }
+            } catch (error) {
+                // Fall through to the browser's native select behavior.
+            }
+        });
+
         superchatPicker.addEventListener('change', () => {
             const next = superchatPicker.value;
             if (!next || next === currentSuperchatId) return;
@@ -102,6 +116,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (savedLevel && [...levelSelect.options].some(opt => opt.value === savedLevel)) {
             levelSelect.value = savedLevel;
         }
+        levelSelect.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+
+            try {
+                if (typeof levelSelect.showPicker === 'function') {
+                    levelSelect.showPicker();
+                    event.preventDefault();
+                    return;
+                }
+            } catch (error) {
+                // Fall through to the browser's native select behavior.
+            }
+        });
         levelSelect.addEventListener('change', () => {
             localStorage.setItem(levelStorageKey, levelSelect.value);
         });
@@ -187,6 +214,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !(event.target instanceof HTMLElement)) return;
+        const menu = event.target.closest('.flag-menu.show');
+        if (!menu) return;
+
+        event.preventDefault();
+        menu.classList.remove('show');
+        const flagButton = menu.previousElementSibling;
+        if (flagButton instanceof HTMLButtonElement) {
+            flagButton.setAttribute('aria-expanded', 'false');
+            flagButton.focus();
+        }
+    });
+
     function setBusy(isBusy) {
         sendButton.disabled = isBusy;
         input.disabled = isBusy;
@@ -256,6 +297,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         button.className = 'flag-button';
         button.innerHTML = '⚑';
         button.title = 'Flag this message';
+        button.setAttribute('aria-label', 'Flag this message');
+        button.setAttribute('aria-expanded', 'false');
         button.addEventListener('click', (event) => {
             event.stopPropagation();
             toggleFlagMenu(button);
@@ -294,7 +337,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const menu = button.nextElementSibling;
         closeFlagMenus(menu);
         if (menu && menu.classList.contains('flag-menu')) {
-            menu.classList.toggle('show');
+            const isOpening = !menu.classList.contains('show');
+            menu.classList.toggle('show', isOpening);
+            button.setAttribute('aria-expanded', String(isOpening));
+            if (isOpening) {
+                menu.querySelector('.flag-option')?.focus();
+            }
         }
     }
 
@@ -302,6 +350,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.querySelectorAll('.flag-menu.show').forEach(menu => {
             if (menu !== exceptMenu) {
                 menu.classList.remove('show');
+                const flagButton = menu.previousElementSibling;
+                if (flagButton instanceof HTMLButtonElement) {
+                    flagButton.setAttribute('aria-expanded', 'false');
+                }
             }
         });
     }

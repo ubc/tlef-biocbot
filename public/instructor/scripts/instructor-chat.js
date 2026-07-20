@@ -40,6 +40,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (savedLevel && [...levelSelect.options].some(opt => opt.value === savedLevel)) {
             levelSelect.value = savedLevel;
         }
+        levelSelect.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+
+            try {
+                if (typeof levelSelect.showPicker === 'function') {
+                    levelSelect.showPicker();
+                    event.preventDefault();
+                }
+            } catch {
+                // Preserve the browser's native Space-key behavior.
+            }
+        });
         levelSelect.addEventListener('change', () => {
             localStorage.setItem(levelStorageKey, levelSelect.value);
         });
