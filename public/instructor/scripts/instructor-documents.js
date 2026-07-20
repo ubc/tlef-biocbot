@@ -672,23 +672,23 @@ async function viewDocument(documentId) {
         }
         
         const result = await response.json();
-        const document = result.data;
+        const documentData = result.data;
         
         console.log('📄 Document data received:', {
-            documentId: document.documentId,
-            originalName: document.originalName,
-            contentType: document.contentType,
-            hasContent: !!document.content,
-            contentLength: document.content ? document.content.length : 0,
-            contentPreview: document.content ? document.content.substring(0, 100) + '...' : 'No content'
+            documentId: documentData.documentId,
+            originalName: documentData.originalName,
+            contentType: documentData.contentType,
+            hasContent: !!documentData.content,
+            contentLength: documentData.content ? documentData.content.length : 0,
+            contentPreview: documentData.content ? documentData.content.substring(0, 100) + '...' : 'No content'
         });
         
-        if (!document) {
+        if (!documentData) {
             throw new Error('Document not found');
         }
         
         // Create and show modal with document content
-        showDocumentModal(document);
+        showDocumentModal(documentData);
         
     } catch (error) {
         console.error('Error viewing document:', error);
