@@ -293,7 +293,7 @@ textarea {
     overflow-y: auto;
 }
 
-header {
+header:not(.sidebar) {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -302,7 +302,7 @@ header {
     border-bottom: 1px solid var(--border-color);
 }
 
-header h1 {
+header:not(.sidebar) h1 {
     font-size: 24px;
     font-weight: 500;
 }
@@ -467,7 +467,7 @@ header h1 {
     }
 
     /* Compact header on mobile */
-    header {
+    header:not(.sidebar) {
         margin-bottom: 10px;
         padding-bottom: 10px;
         flex-direction: column;
@@ -475,7 +475,7 @@ header h1 {
         gap: 10px;
     }
 
-    header h1 {
+    header:not(.sidebar) h1 {
         font-size: 20px;
     }
 
@@ -510,7 +510,7 @@ header h1 {
     /* Collapsed State */
     .mobile-collapsed .sidebar .main-nav,
     .mobile-collapsed .sidebar .user-info,
-    .mobile-collapsed header,
+    .mobile-collapsed header:not(.sidebar),
     .mobile-collapsed .history-header,
     .mobile-collapsed .flagged-header {
         display: none !important;

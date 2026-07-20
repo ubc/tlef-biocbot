@@ -1,71 +1,143 @@
 // @ts-check
-const { test, expect } = require('@playwright/test');
+/// <reference types="node" />
+const { test } = require('@playwright/test');
 const { storageStatePath } = require('../e2e/helpers/users');
+const { expectModalKeyboardContract } = require('./helpers/modal-keyboard-contract');
 
-/**
- * Exercise a dialog's keyboard contract from its actual trigger. The modal root
- * may be an overlay; checking containment rather than a CSS class keeps this
- * reusable across the three modal implementations.
- *
- * @param {import('@playwright/test').Page} page
- * @param {string} trigger
- * @param {string} modal
- */
-async function expectKeyboardModal(page, trigger, modal) {
-    const triggerElement = page.locator(trigger).first();
-    const modalElement = page.locator(modal);
-    await expect(triggerElement).toBeVisible({ timeout: 15_000 });
-    await triggerElement.focus();
-    await page.keyboard.press('Enter');
-    await expect(modalElement).toBeVisible({ timeout: 10_000 });
-    await expect
-        .poll(() => modalElement.evaluate((element) => element.contains(document.activeElement)))
-        .toBe(true);
+const MODAL_COURSE_ID = 'A11Y-MODAL-FIXTURE';
 
-    for (let index = 0; index < 20; index += 1) {
-        await page.keyboard.press('Tab');
-        await expect
-            .poll(() => modalElement.evaluate((element) => element.contains(document.activeElement)))
-            .toBe(true);
-    }
-
-    await page.keyboard.press('Escape');
-    await expect(modalElement).toBeHidden();
-    await expect
-        .poll(() => triggerElement.evaluate((element) => document.activeElement === element))
-        .toBe(true);
+/** @param {import('@playwright/test').Page} page */
+async function seedQuestionTrigger(page) {
+    await page.route(`**/api/onboarding/${MODAL_COURSE_ID}`, (route) => route.fulfill({
+        json: {
+            success: true,
+            data: {
+                courseId: MODAL_COURSE_ID,
+                courseName: 'Accessibility Modal Fixture',
+                courseStructure: { weeks: 1, lecturesPerWeek: 1, totalUnits: 1 },
+                lectures: [{
+                    name: 'Unit 1',
+                    learningObjectives: [],
+                    assessmentQuestions: [],
+                    documents: [],
+                    isPublished: false,
+                    passThreshold: 0,
+                }],
+            },
+        },
+    }));
 }
 
-test.describe('Accessibility: student modal keyboard interaction', () => {
+/** @param {import('@playwright/test').Page} page */
+async function seedRemovableTA(page) {
+    const taId = 'a11y-modal-ta';
+    const course = {
+        courseId: MODAL_COURSE_ID,
+        courseName: 'Accessibility Modal Fixture',
+        tas: [taId],
+    };
+
+    await page.route('**/api/onboarding/instructor/*', (route) => route.fulfill({
+        json: { success: true, data: { courses: [course] } },
+    }));
+    await page.route('**/api/auth/tas', (route) => route.fulfill({
+        json: {
+            success: true,
+            data: [{
+                userId: taId,
+                username: 'a11y_modal_ta',
+                email: 'a11y-modal-ta@test.local',
+                displayName: 'Accessibility Fixture TA',
+                createdAt: '2026-01-01T00:00:00.000Z',
+            }],
+        },
+    }));
+    await page.route(`**/api/courses/${MODAL_COURSE_ID}/ta-permissions`, (route) => route.fulfill({
+        json: {
+            success: true,
+            data: {
+                taPermissions: {
+                    [taId]: { canAccessCourses: true, canAccessFlags: true },
+                },
+            },
+        },
+    }));
+}
+
+test.describe('Accessibility: representative modal keyboard contract', () => {
     test.use({ storageState: storageStatePath('student') });
 
-    test('student dashboard confirmation modal traps focus and restores its trigger', async ({ page }) => {
+    test('student dashboard confirmation uses the shared native-dialog contract', async ({ page }) => {
         await page.goto('/student/dashboard.html');
         await page.waitForLoadState('load');
-        await expectKeyboardModal(page, '#reset-all-btn', '#confirm-modal');
-    });
 
+        await expectModalKeyboardContract(page, {
+            trigger: '#reset-all-btn',
+            activationKey: 'Enter',
+            dialog: '#confirm-modal',
+            name: 'Reset All Topics?',
+            initialFocus: '#dashboard-confirm-modal-title',
+            firstFocusable: '#modal-cancel-btn',
+            lastFocusable: '#modal-confirm-btn',
+        });
+    });
 });
 
-test.describe('Accessibility: instructor modal keyboard interaction', () => {
+test.describe('Accessibility: instructor modal keyboard fixtures', () => {
     test.use({ storageState: storageStatePath('instructor') });
 
-    test('instructor question modal traps focus and restores its trigger', async ({ page }) => {
-        test.fixme(true, 'The seeded page lacks a visible question trigger; see audits.md §3.');
-        await page.goto('/instructor/documents');
+    test('instructor question modal runs from a deterministic visible trigger', async ({ page }) => {
+        await seedQuestionTrigger(page);
+        await page.goto(`/instructor/documents?courseId=${MODAL_COURSE_ID}`);
         await page.waitForLoadState('load');
-        await expectKeyboardModal(page, '.add-question-btn', '#question-modal');
+
+        await expectModalKeyboardContract(page, {
+            trigger: '.add-question-btn',
+            dialog: 'dialog.a11y-modal-host:has(#question-modal)',
+            name: 'Create Assessment Question',
+            initialFocus: '#question-modal h2',
+            firstFocusable: '#question-modal .modal-close',
+            lastFocusable: '#question-modal .modal-actions .btn-primary:last-child',
+        });
     });
 
+    test('remove TA modal runs from a deterministic removable TA', async ({ page }) => {
+        await seedRemovableTA(page);
+        await page.goto(`/instructor/ta-hub?courseId=${MODAL_COURSE_ID}`);
+        await page.waitForLoadState('load');
+
+        await expectModalKeyboardContract(page, {
+            trigger: '.btn-small.btn-danger',
+            dialog: 'dialog.a11y-modal-host:has(#remove-ta-modal)',
+            name: 'Remove Teaching Assistant',
+            initialFocus: '#remove-ta-modal h2',
+            firstFocusable: '#remove-ta-modal .modal-close',
+            lastFocusable: '#confirm-remove-ta',
+        });
+    });
 });
 
-test.describe('Accessibility: TA-management modal keyboard interaction', () => {
-    test.use({ storageState: storageStatePath('instructor') });
+test.describe('Accessibility: instructor onboarding modal keyboard contract', () => {
+    test.use({ storageState: storageStatePath('instructor_fresh') });
 
-    test('remove TA modal traps focus and restores its trigger', async ({ page }) => {
-        test.fixme(true, 'The seeded page lacks a removable TA trigger; see audits.md §3.');
-        await page.goto('/instructor/ta-hub');
+    test('the onboarding question modal opens from its real trigger and returns focus after dismissal', async ({ page }) => {
+        await page.goto('/instructor/onboarding');
         await page.waitForLoadState('load');
-        await expectKeyboardModal(page, '.btn-small.btn-danger', '#remove-ta-modal');
+
+        // The questions panel is normally selected through the preceding guided
+        // flow. Select it here only to expose its real, user-visible trigger.
+        await page.evaluate(() => {
+            /** @type {any} */ (window).showSubstep('questions');
+        });
+        await expect(page.locator('#substep-questions')).toHaveClass(/active/);
+
+        await expectModalKeyboardContract(page, {
+            trigger: '#substep-questions .add-question-btn',
+            dialog: 'dialog.a11y-modal-host:has(#question-modal)',
+            name: 'Create Assessment Question',
+            initialFocus: '#question-modal h2',
+            firstFocusable: '#question-modal .modal-close',
+            lastFocusable: '#question-modal .modal-actions .btn-primary:last-child',
+        });
     });
 });

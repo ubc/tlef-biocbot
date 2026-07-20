@@ -225,6 +225,7 @@ function openRegenerateModal() {
     }
     
     modal.classList.add('show');
+    a11yModal.open(modal, { onRequestClose: closeRegenerateModal });
 }
 
 /**
@@ -233,6 +234,7 @@ function openRegenerateModal() {
 function closeRegenerateModal() {
     const modal = document.getElementById('regenerate-modal');
     if (modal) {
+        a11yModal.close(modal);
         modal.classList.remove('show');
         // Reset feedback
         const feedback = document.getElementById('regenerate-feedback');

@@ -577,10 +577,7 @@ function openRegenerateModal() {
     
     // Show modal
     modal.classList.add('show');
-    a11yModal.open(modal, { initialFocus: '#regenerate-feedback', onRequestClose: closeRegenerateModal });
-    
-    // Focus on textarea
-    setTimeout(() => feedbackTextarea.focus(), 100);
+    a11yModal.open(modal, { onRequestClose: closeRegenerateModal });
 }
 
 /**

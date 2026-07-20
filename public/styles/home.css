@@ -152,6 +152,10 @@
   font-weight: 600;
 }
 
+.section-header h2 > span[aria-hidden="true"]:not(.section-toggle-icon) {
+  margin-right: 0.4em;
+}
+
 /* Course Summary Section */
 .course-summary .course-info {
   display: flex;

@@ -1,4 +1,5 @@
 // @ts-check
+/// <reference types="node" />
 // Accessibility scans run as their own Playwright check, separate from the e2e
 // suite in playwright.config.js. This config reuses the base webServer and
 // global-setup (which seeds users and saves per-role auth storage states), but
@@ -13,5 +14,6 @@ module.exports = {
     reporter: [
         ['html', { open: 'never', outputFolder: 'playwright-report-a11y' }],
         ['list'],
+        ['./tests/a11y/a11y-json-reporter.js'],
     ],
 };

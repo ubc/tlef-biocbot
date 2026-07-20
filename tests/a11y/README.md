@@ -68,7 +68,10 @@ Use `storageStatePath('ta')`.
 ### Shared / Special Pages
 
 - [x] ~~/login~~ - `scanned-pass`, unauthenticated scan in `shared.a11y.spec.js`
-- [x] ~~/qdrant-test~~ - `scanned-pass`, authenticated scan in `shared.a11y.spec.js`
+
+`/qdrant-test` is intentionally absent from this inventory. The server route points
+to a removed `public/qdrant-test.html`, so scanning it would audit an Express error
+page rather than an application page.
 
 ### Modals & Pop-ups
 
@@ -152,6 +155,11 @@ item after the fix pass and rerun.
 
 ## Commands
 
+Use Node.js 24.17.0 or newer within the 24.x release line. The repository records
+this in `.nvmrc` and `package.json`; with nvm, run `nvm use` before installing or
+running tests. `npm run test:a11y` performs a preflight check and prints corrective
+guidance before Playwright loads when the runtime is incompatible.
+
 List discovered a11y tests without needing the app services to pass:
 
 ```sh
@@ -163,6 +171,13 @@ Run the full accessibility suite:
 ```sh
 npm run test:a11y
 ```
+
+Every run initializes `a11y-results/a11y-results.json` with a non-passing `running`
+state, then replaces it atomically with the final result. The report includes test
+pass/fail/flaky/skip counts, scan status, WCAG tags, and one record per affected
+target for critical, serious, moderate, and minor axe violations. Each violation
+record includes its route/page, rule ID, impact, selector/target, failure summary,
+help text, HTML, and axe help URL.
 
 Run one file:
 

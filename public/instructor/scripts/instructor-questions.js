@@ -524,10 +524,7 @@ function openQuestionModal(week) {
         resetQuestionForm();
         populateQuestionLearningObjectiveDropdown(week);
         populateStruggleTopicDropdown(week, false);
-        a11yModal.open(modal, {
-            initialFocus: '#question-type',
-            onRequestClose: closeQuestionModal
-        });
+        a11yModal.open(modal, { onRequestClose: closeQuestionModal });
     }
 }
 

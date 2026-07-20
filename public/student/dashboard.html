@@ -86,10 +86,10 @@
     </div>
 
     <!-- Confirmation Modal -->
-    <div id="confirm-modal" class="modal-overlay" style="display: none;">
+    <dialog id="confirm-modal" class="modal-overlay">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 id="modal-title">Confirm Reset</h2>
+                <h2 id="dashboard-confirm-modal-title" tabindex="-1">Confirm Reset</h2>
             </div>
             <div class="modal-body">
                 <p id="modal-message">Are you sure you want to reset this topic?</p>
@@ -99,7 +99,7 @@
                 <button id="modal-confirm-btn" class="danger-button">Reset</button>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <script src="../common/scripts/modal-a11y.js"></script>
     <script src="../common/scripts/auth.js"></script>

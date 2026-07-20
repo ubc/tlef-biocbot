@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Modal elements
     const modal = document.getElementById('confirm-modal');
-    const modalTitle = document.getElementById('modal-title');
+    const modalTitle = document.getElementById('dashboard-confirm-modal-title');
     const modalMessage = document.getElementById('modal-message');
     const modalConfirmBtn = document.getElementById('modal-confirm-btn');
     const modalCancelBtn = document.getElementById('modal-cancel-btn');
@@ -151,9 +151,7 @@ document.addEventListener('DOMContentLoaded', async () => {
      */
     function showConfirmModal(topic) {
         topicToReset = topic;
-        modal.style.display = 'flex';
-        a11yModal.open(modal, { onRequestClose: hideModal });
-        
+
         if (topic === 'ALL') {
             modalTitle.textContent = 'Reset All Topics?';
             modalMessage.textContent = 'This will clear all your struggle history and disable Directive Mode for all topics. Are you sure?';
@@ -163,11 +161,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             modalMessage.textContent = 'This will reset the struggle count for this topic and disable Directive Mode if active. Are you sure?';
             modalConfirmBtn.textContent = `I understand ${capitalize(topic)} now`;
         }
+
+        a11yModal.open(modal, { onRequestClose: hideModal });
     }
 
     function hideModal() {
         a11yModal.close(modal);
-        modal.style.display = 'none';
         topicToReset = null;
     }
 

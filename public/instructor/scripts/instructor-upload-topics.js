@@ -59,7 +59,7 @@ function openTopicReviewModal(courseId, sourceName, existingTopics, suggestedTop
 
     modal.style.display = '';
     modal.classList.add('show');
-    a11yModal.open(modal, { initialFocus: '#topic-review-new-input', onRequestClose: () => {
+    a11yModal.open(modal, { onRequestClose: () => {
         modal.querySelector('#topic-review-cancel-btn').click();
     } });
 

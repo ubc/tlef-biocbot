@@ -1085,7 +1085,7 @@ function clearPreviewPanel() {
             <div class="no-selection">
                 <div class="no-selection-content">
                     <div class="no-selection-icon">📋</div>
-                    <h4>No Chat Selected</h4>
+                    <h3>No Chat Selected</h3>
                     <p>Select a chat from the list to view its contents and continue the conversation.</p>
                 </div>
             </div>

@@ -190,6 +190,22 @@
   z-index: 1000;
 }
 
+dialog.modal-overlay {
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+dialog.modal-overlay:not([open]) {
+  display: none;
+}
+
+dialog.modal-overlay::backdrop {
+  background: transparent;
+}
+
 .modal-content {
   background: white;
   padding: 30px;

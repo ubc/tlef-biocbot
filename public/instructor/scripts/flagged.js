@@ -1344,7 +1344,7 @@ function showErrorState(message) {
     }
     
     if (emptyState) {
-        emptyState.innerHTML = `<p style="color: #ef4444;">${message}</p>`;
+        emptyState.innerHTML = `<p class="error-message">${message}</p>`;
         emptyState.style.display = 'block';
     }
     

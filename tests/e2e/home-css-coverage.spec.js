@@ -32,6 +32,16 @@ function homeCssHarness() {
 </head>
 <body>
     <div class="app-container">
+        <header class="sidebar">
+            <div class="logo-container"><h2>BiocBot</h2></div>
+            <nav class="main-nav">
+                <ul>
+                    <li class="active"><a href="#">Home</a></li>
+                    <li><a href="#">Super Chat Notes</a></li>
+                </ul>
+            </nav>
+            <div class="user-info">Coverage Instructor</div>
+        </header>
         <main class="main-content">
             <header class="home-header">
                 <div class="header-content">
@@ -177,7 +187,7 @@ function homeCssHarness() {
                 </section>
 
                 <section class="home-section statistics-section" id="statistics-section">
-                    <div class="section-header"><h2>Course Statistics</h2></div>
+                    <div class="section-header"><h2><span aria-hidden="true">📊</span> Course Statistics</h2></div>
                     <div class="statistics-content">
                         <div class="statistics-grid">
                             <div class="stat-card">
@@ -373,6 +383,17 @@ test.describe('home.css harness coverage', () => {
         await gotoHarness(page);
 
         await expect(page.locator('.home-header')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+        const sidebarLayout = await page.locator('.sidebar').evaluate((sidebar) => {
+            const nav = sidebar.querySelector('.main-nav');
+            if (!nav) return null;
+            const sidebarRect = sidebar.getBoundingClientRect();
+            const navRect = nav.getBoundingClientRect();
+            return {
+                leftInset: navRect.left - sidebarRect.left,
+                rightInset: sidebarRect.right - navRect.right,
+            };
+        });
+        expect(sidebarLayout).toEqual({ leftInset: 20, rightInset: 20 });
         await expect(page.locator('.course-selection-container')).toHaveCSS('border-radius', '8px');
         await expect(page.locator('.current-course-display')).toHaveCSS('display', 'flex');
         await expect(page.locator('.course-selector')).toHaveCSS('flex-direction', 'column');
@@ -410,6 +431,10 @@ test.describe('home.css harness coverage', () => {
         await expect(page.locator('.disclaimer-item').first()).toHaveCSS('border-left-color', 'rgb(108, 117, 125)');
 
         await expect(page.locator('.statistics-grid')).toHaveCSS('display', 'grid');
+        const statisticsEmojiSpacing = await page
+            .locator('#statistics-section .section-header h2 > span[aria-hidden="true"]')
+            .evaluate((emoji) => Number.parseFloat(getComputedStyle(emoji).marginRight));
+        expect(statisticsEmojiSpacing).toBeGreaterThan(0);
         await expect(page.locator('.stat-card').first()).toHaveCSS('text-align', 'center');
         await page.locator('.stat-card').first().hover();
         expect(await page.locator('.stat-card').first().evaluate((el) => getComputedStyle(el).transform)).not.toBe('none');

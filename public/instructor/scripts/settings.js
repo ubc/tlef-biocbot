@@ -1742,6 +1742,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function closeTransferModal({ force = false } = {}) {
         if (isTransferInProgress && !force) return;
+        window.a11yModal?.close(transferCourseModal);
         resetTransferModalState();
         setTransferModalVisibility(false);
     }
@@ -1789,11 +1790,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         setTransferModalVisibility(true);
-        window.setTimeout(() => transferModalConfirmBtn?.focus(), 0);
+        window.a11yModal?.open(transferCourseModal, {
+            dialogEl: transferCourseModal.querySelector('.transfer-modal'),
+            onRequestClose: () => closeTransferModal(),
+        });
     }
 
     function setTransferModalLoading(payload) {
         isTransferInProgress = true;
+
+        // A course copy must finish atomically. Re-open through the shared
+        // contract so Escape/backdrop attempts stay in the dialog and expose
+        // an announced explanation rather than silently doing nothing.
+        window.a11yModal?.open(transferCourseModal, {
+            dialogEl: transferCourseModal.querySelector('.transfer-modal'),
+            escapable: false,
+            dismissalBlockedMessage: 'Course copy is in progress. Please keep this dialog open until it finishes.',
+        });
 
         if (transferModalTitle) {
             transferModalTitle.textContent = 'Creating Course Copy...';
@@ -2042,12 +2055,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         });
     }
-
-    document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && transferCourseModal?.classList.contains('show')) {
-            closeTransferModal();
-        }
-    });
 
     if (toggleCourseActiveBtn) {
         toggleCourseActiveBtn.addEventListener('click', async () => {
