@@ -361,12 +361,14 @@ function openAutoLinkConfirmationModal(week, buttonElement = null) {
         unitLabel.textContent = weekKey === 'Onboarding' ? 'Unit 1' : weekKey;
     }
     modal.classList.add('show');
+    a11yModal.open(modal, { onRequestClose: closeAutoLinkConfirmationModal });
 }
 
 function closeAutoLinkConfirmationModal() {
     autoLinkConfirmationContext = null;
     const modal = document.getElementById('auto-link-confirmation-modal');
     if (modal) {
+        a11yModal.close(modal);
         modal.classList.remove('show');
     }
 }
@@ -396,6 +398,7 @@ function openQuestionModal(week) {
         
         // Check if AI generation should be enabled
         checkAIGenerationInModal();
+        a11yModal.open(modal, { onRequestClose: closeQuestionModal });
     }
 }
 
@@ -405,6 +408,7 @@ function openQuestionModal(week) {
 function closeQuestionModal() {
     const modal = document.getElementById('question-modal');
     if (modal) {
+        a11yModal.close(modal);
         modal.classList.remove('show');
         resetQuestionForm();
     }
@@ -705,6 +709,7 @@ function openQuestionLearningObjectiveModal(week, questionId) {
     questionText.textContent = question.question || '';
     populateLearningObjectiveOptions(select, getOnboardingLearningObjectives(), question.learningObjective || '');
     modal.classList.add('show');
+    a11yModal.open(modal, { onRequestClose: closeQuestionLearningObjectiveModal });
 }
 
 function closeQuestionLearningObjectiveModal() {
@@ -724,6 +729,7 @@ function closeQuestionLearningObjectiveModal() {
     }
 
     if (modal) {
+        a11yModal.close(modal);
         modal.classList.remove('show');
     }
 }

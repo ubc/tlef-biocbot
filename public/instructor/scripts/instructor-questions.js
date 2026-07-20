@@ -3,6 +3,30 @@
  * extraction review modal, and learning-objective linking.
  */
 
+// Native select controls are focused with Tab. Enter and Space should then
+// reveal their options where the browser supports the picker API; Space keeps
+// its normal native behavior as a fallback for browsers without that API.
+function enableQuestionModalSelectKeyboard(selectElement) {
+    if (!selectElement) return;
+
+    selectElement.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+
+        try {
+            if (typeof selectElement.showPicker === 'function') {
+                selectElement.showPicker();
+                event.preventDefault();
+            }
+        } catch {
+            // Keep the browser's built-in Space-key behavior available.
+        }
+    });
+}
+
+enableQuestionModalSelectKeyboard(document.getElementById('question-type'));
+enableQuestionModalSelectKeyboard(document.getElementById('struggle-topic-select'));
+enableQuestionModalSelectKeyboard(document.getElementById('learning-objective-select'));
+
 /**
  * Load assessment questions directly from course data (for initial load)
  * @param {Object} courseData - Course data with lectures and assessment questions
@@ -496,11 +520,11 @@ function openQuestionModal(week) {
     const modal = document.getElementById('question-modal');
     if (modal) {
         modal.classList.add('show');
-        a11yModal.open(modal, { onRequestClose: closeQuestionModal });
         // Reset form
         resetQuestionForm();
         populateQuestionLearningObjectiveDropdown(week);
         populateStruggleTopicDropdown(week, false);
+        a11yModal.open(modal, { onRequestClose: closeQuestionModal });
     }
 }
 

@@ -10,7 +10,57 @@
  * document click handler) in their original registration order.
  */
 
+function initializeKeyboardControlActivation() {
+    // The course picker is rendered after the page boots, so use delegation
+    // rather than attaching listeners to only the controls present at load.
+    document.addEventListener('keydown', event => {
+        const control = event.target;
+        if (!(control instanceof HTMLElement)) return;
+
+        if (event.key === 'Escape') {
+            const menu = control.closest('.flag-menu.show');
+            if (menu) {
+                event.preventDefault();
+                menu.classList.remove('show');
+                const flagButton = menu.previousElementSibling;
+                if (flagButton instanceof HTMLButtonElement) {
+                    flagButton.setAttribute('aria-expanded', 'false');
+                    flagButton.focus();
+                }
+                return;
+            }
+        }
+
+        if (control.matches('#course-select, #revoked-course-select, #unit-select')) {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+
+            // showPicker is the native, keyboard-friendly picker API. When it
+            // is unavailable, leave the event alone so the browser's own
+            // Space-key select behavior remains available.
+            try {
+                if (typeof control.showPicker === 'function') {
+                    control.showPicker();
+                    event.preventDefault();
+                    return;
+                }
+            } catch (error) {
+                // Use the browser's native select behavior below.
+            }
+            return;
+        }
+
+        if (control.id === 'mode-toggle-checkbox' && event.key === 'Enter') {
+            // Checkboxes normally toggle with Space. Supporting Enter makes
+            // this switch consistent with the selectors above.
+            event.preventDefault();
+            control.click();
+        }
+    });
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+    initializeKeyboardControlActivation();
+
     try {
         const courseId = localStorage.getItem('selectedCourseId');
         if (courseId) {
@@ -1231,6 +1281,10 @@ document.addEventListener('click', function(event) {
         const openMenus = document.querySelectorAll('.flag-menu.show');
         openMenus.forEach(menu => {
             menu.classList.remove('show');
+            const flagButton = menu.previousElementSibling;
+            if (flagButton instanceof HTMLButtonElement) {
+                flagButton.setAttribute('aria-expanded', 'false');
+            }
         });
     }
 });

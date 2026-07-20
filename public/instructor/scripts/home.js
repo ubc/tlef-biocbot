@@ -131,6 +131,11 @@ async function initializeHomePage() {
         // Add event listeners for live struggle table controls
         const filterCheckbox = document.getElementById('filter-active-only');
         if (filterCheckbox) {
+            filterCheckbox.addEventListener('keydown', event => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                filterCheckbox.click();
+            });
             filterCheckbox.addEventListener('change', renderLiveStruggleTable);
         }
         
@@ -1579,6 +1584,7 @@ async function initializeCourseSelection() {
     }
     
     if (courseSelectDropdown) {
+        addKeyboardPickerActivation(courseSelectDropdown);
         courseSelectDropdown.addEventListener('change', async (event) => {
             const courseId = event.target.value;
             if (!courseId) return;
@@ -1589,6 +1595,7 @@ async function initializeCourseSelection() {
     }
 
     if (joinCourseSelectDropdown) {
+        addKeyboardPickerActivation(joinCourseSelectDropdown);
         joinCourseSelectDropdown.addEventListener('change', handleJoinCourseSelectionChange);
     }
 
@@ -1606,6 +1613,22 @@ async function initializeCourseSelection() {
     
     // Update navigation links to include course ID
     updateNavigationLinks();
+}
+
+function addKeyboardPickerActivation(selectElement) {
+    selectElement.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+
+        try {
+            if (typeof selectElement.showPicker === 'function') {
+                selectElement.showPicker();
+                event.preventDefault();
+                return;
+            }
+        } catch (error) {
+            // Fall through to the browser's native select behavior.
+        }
+    });
 }
 
 function isCourseInactive(course = {}) {
@@ -2541,6 +2564,12 @@ function renderApprovedGlobalTopics(topics, courseId) {
             <span class="approved-topics-hint">Double-click a topic to edit it</span>
         </div>
     `;
+
+    const newTopicUnitSelect = container.querySelector('#new-topic-unit-select');
+    if (newTopicUnitSelect) {
+        newTopicUnitSelect.setAttribute('aria-label', 'Unit for new topic');
+        addKeyboardPickerActivation(newTopicUnitSelect);
+    }
 }
 
 // ===========================

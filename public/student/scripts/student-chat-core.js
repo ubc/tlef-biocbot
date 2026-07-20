@@ -572,22 +572,25 @@ function addMessage(content, sender, withSource = false, skipAutoSave = false, s
         }
 
         const flagButton = document.createElement('button');
+        flagButton.type = 'button';
         flagButton.classList.add('flag-button');
         flagButton.innerHTML = '⚑';
         flagButton.title = 'Flag this message';
+        flagButton.setAttribute('aria-label', 'Flag this message');
+        flagButton.setAttribute('aria-expanded', 'false');
         flagButton.onclick = () => toggleFlagMenu(flagButton);
 
         // Create flag menu
         const flagMenu = document.createElement('div');
         flagMenu.classList.add('flag-menu');
         flagMenu.innerHTML = `
-            <div class="flag-option" onclick="flagMessage(this, 'incorrect')">Incorrect</div>
-            <div class="flag-option" onclick="flagMessage(this, 'inappropriate')">Inappropriate</div>
-            <div class="flag-option" onclick="flagMessage(this, 'unclear')">Unclear</div>
-            <div class="flag-option" onclick="flagMessage(this, 'confusing')">Confusing</div>
-            <div class="flag-option" onclick="flagMessage(this, 'typo')">Typo/Error</div>
-            <div class="flag-option" onclick="flagMessage(this, 'offensive')">Offensive</div>
-            <div class="flag-option" onclick="flagMessage(this, 'irrelevant')">Irrelevant</div>
+            <button type="button" class="flag-option" onclick="flagMessage(this, 'incorrect')">Incorrect</button>
+            <button type="button" class="flag-option" onclick="flagMessage(this, 'inappropriate')">Inappropriate</button>
+            <button type="button" class="flag-option" onclick="flagMessage(this, 'unclear')">Unclear</button>
+            <button type="button" class="flag-option" onclick="flagMessage(this, 'confusing')">Confusing</button>
+            <button type="button" class="flag-option" onclick="flagMessage(this, 'typo')">Typo/Error</button>
+            <button type="button" class="flag-option" onclick="flagMessage(this, 'offensive')">Offensive</button>
+            <button type="button" class="flag-option" onclick="flagMessage(this, 'irrelevant')">Irrelevant</button>
         `;
 
         flagContainer.appendChild(flagButton);
@@ -700,13 +703,22 @@ function toggleFlagMenu(button) {
     allMenus.forEach(menu => {
         if (menu !== button.nextElementSibling) {
             menu.classList.remove('show');
+            const otherFlagButton = menu.previousElementSibling;
+            if (otherFlagButton instanceof HTMLButtonElement) {
+                otherFlagButton.setAttribute('aria-expanded', 'false');
+            }
         }
     });
 
     // Toggle the clicked menu
     const menu = button.nextElementSibling;
     if (menu && menu.classList.contains('flag-menu')) {
-        menu.classList.toggle('show');
+        const isOpening = !menu.classList.contains('show');
+        menu.classList.toggle('show', isOpening);
+        button.setAttribute('aria-expanded', String(isOpening));
+        if (isOpening) {
+            menu.querySelector('.flag-option')?.focus();
+        }
     }
 }
 

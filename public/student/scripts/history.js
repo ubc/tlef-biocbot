@@ -521,6 +521,43 @@ function displayChatHistory(chatHistory) {
     if (firstItem) {
         firstItem.click();
     }
+
+    configureHistoryListKeyboardNavigation(historyList);
+}
+
+function configureHistoryListKeyboardNavigation(historyList) {
+    const isDesktopLayout = window.matchMedia('(min-width: 769px)').matches;
+    const itemSelectors = historyList.querySelectorAll('.history-item-select, .edit-btn');
+
+    // On desktop, a potentially long history is one Tab stop. Arrow keys pick
+    // a chat, then Tab advances directly to the selected chat's actions.
+    historyList.tabIndex = isDesktopLayout ? 0 : -1;
+    itemSelectors.forEach(control => {
+        control.tabIndex = isDesktopLayout ? -1 : 0;
+    });
+
+    historyList.onkeydown = event => {
+        if (!isDesktopLayout) return;
+
+        const items = [...historyList.querySelectorAll('.chat-history-item')];
+        if (!items.length) return;
+
+        const activeIndex = Math.max(0, items.findIndex(item => item.classList.contains('active')));
+        let nextIndex = activeIndex;
+
+        if (event.key === 'ArrowDown') nextIndex = Math.min(activeIndex + 1, items.length - 1);
+        else if (event.key === 'ArrowUp') nextIndex = Math.max(activeIndex - 1, 0);
+        else if (event.key === 'Home') nextIndex = 0;
+        else if (event.key === 'End') nextIndex = items.length - 1;
+        else if (event.key === 'F2') {
+            event.preventDefault();
+            items[activeIndex].querySelector('.edit-btn')?.click();
+            return;
+        } else return;
+
+        event.preventDefault();
+        items[nextIndex].querySelector('.history-item-select')?.click();
+    };
 }
 
 /**
@@ -587,7 +624,7 @@ function createHistoryItem(chat, index) {
     const titleText = document.createElement('div');
     titleText.classList.add('title-text', 'history-item-select');
     titleText.setAttribute('role', 'button');
-    titleText.tabIndex = 0;
+    titleText.tabIndex = -1;
     titleText.textContent = chat.title;
     
     // Edit Input (Hidden by default)
@@ -1048,7 +1085,7 @@ function clearPreviewPanel() {
             <div class="no-selection">
                 <div class="no-selection-content">
                     <div class="no-selection-icon">📋</div>
-                    <h4>No Chat Selected</h4>
+                    <h3>No Chat Selected</h3>
                     <p>Select a chat from the list to view its contents and continue the conversation.</p>
                 </div>
             </div>

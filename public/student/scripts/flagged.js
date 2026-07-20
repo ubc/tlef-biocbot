@@ -52,6 +52,22 @@ document.addEventListener('DOMContentLoaded', async function() {
     await initAuth();
     const statusSelect = document.getElementById('status-filter');
     if (statusSelect) {
+        statusSelect.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+
+            // Use the picker API where available. Otherwise, preserve the
+            // browser's native keyboard behavior for selects.
+            try {
+                if (typeof statusSelect.showPicker === 'function') {
+                    statusSelect.showPicker();
+                    event.preventDefault();
+                    return;
+                }
+            } catch (error) {
+                // Fall through to the browser's native select behavior.
+            }
+        });
+
         statusSelect.addEventListener('change', () => {
             studentFlagsState.status = statusSelect.value;
             applyStudentFlagFilters();
@@ -258,5 +274,3 @@ function escapeHtml(text) {
     div.textContent = text || '';
     return div.innerHTML;
 }
-
-

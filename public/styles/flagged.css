@@ -137,6 +137,10 @@
     font-size: 1rem;
 }
 
+.empty-message .error-message {
+    color: #b91c1c;
+}
+
 /* Flagged Items List */
 .flagged-list {
     display: flex;

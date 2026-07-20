@@ -299,8 +299,8 @@ window.confirmDeleteUnit = confirmDeleteUnit;
     // Handle accordion toggling
     accordionHeaders.forEach(header => {
         header.addEventListener('click', (e) => {
-            // Don't toggle if clicking on the toggle switch
-            if (e.target.closest('.publish-toggle')) {
+            // Keep the unit's own controls independent from the accordion.
+            if (e.target.closest('button, input, label, select, textarea, a')) {
                 return;
             }
             

@@ -307,6 +307,14 @@ header h1 {
     font-weight: 500;
 }
 
+/* The sidebar is a landmark header, but it is not a page-content header. */
+header.sidebar {
+    justify-content: flex-start;
+    align-items: stretch;
+    margin-bottom: 0;
+    border-bottom: 0;
+}
+
 .course-selector select {
     width: 200px;
 }
@@ -479,6 +487,13 @@ header h1 {
         font-size: 20px;
     }
 
+    header.sidebar {
+        margin-bottom: 0;
+        padding-bottom: 10px;
+        align-items: stretch;
+        gap: 0;
+    }
+
     /* Mobile Header Toggle Styles */
     .logo-container {
         display: flex;
@@ -510,7 +525,7 @@ header h1 {
     /* Collapsed State */
     .mobile-collapsed .sidebar .main-nav,
     .mobile-collapsed .sidebar .user-info,
-    .mobile-collapsed header,
+    .mobile-collapsed header:not(.sidebar),
     .mobile-collapsed .history-header,
     .mobile-collapsed .flagged-header {
         display: none !important;

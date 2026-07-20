@@ -424,8 +424,8 @@ function initializeUnitEventListeners() {
     const accordionHeaders = document.querySelectorAll('.accordion-header');
     accordionHeaders.forEach(header => {
         const toggleAccordion = (e) => {
-            // Don't toggle if clicking on the toggle switch
-            if (e.target.closest('.publish-toggle')) {
+            // Keep the unit's own controls independent from the accordion.
+            if (e.target.closest('button, input, label, select, textarea, a')) {
                 return;
             }
             
@@ -447,7 +447,7 @@ function initializeUnitEventListeners() {
         header.addEventListener('click', toggleAccordion);
         header.addEventListener('keydown', (e) => {
             if (e.key !== 'Enter' && e.key !== ' ') return;
-            if (e.target.closest('.publish-toggle')) return;
+            if (e.target !== header) return;
             e.preventDefault();
             toggleAccordion(e);
         });

@@ -43,7 +43,10 @@ async function revealModal(page, selector, mode) {
             const el = document.querySelector(sel);
             if (!el) return false;
             const node = /** @type {HTMLElement} */ (el);
-            if (m === 'show') {
+            if (node instanceof HTMLDialogElement) {
+                node.style.display = '';
+                if (!node.open) node.showModal();
+            } else if (m === 'show') {
                 node.style.display = '';
                 node.classList.add('show');
                 node.setAttribute('aria-hidden', 'false');
@@ -133,6 +136,7 @@ const DOWNLOADS_MODALS = [
 test.describe('Accessibility: instructor downloads modals', () => {
     test.use({ storageState: storageStatePath('instructor') });
 
+    /** @type {string|undefined} */
     let instructorId;
 
     test.beforeAll(async () => {

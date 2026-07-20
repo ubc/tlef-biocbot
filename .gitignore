@@ -8,6 +8,7 @@
 /monocart-report
 /coverage-reports
 /test-results
+/a11y-results
 /playwright/.auth
 package-lock.json
 .claude/

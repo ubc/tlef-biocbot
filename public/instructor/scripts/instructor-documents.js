@@ -2,6 +2,8 @@
  * Instructor: document list, view/download/delete, material status.
  */
 
+let documentModalTrigger = null;
+
 /**
  * Load the saved documents for all lectures from the database
  */
@@ -657,6 +659,10 @@ async function cleanupOrphanedDocuments() {
  */
 async function viewDocument(documentId) {
     try {
+        documentModalTrigger = document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
+
         // Fetch document content
         const response = await fetch(`/api/documents/${documentId}`);
         
@@ -666,23 +672,23 @@ async function viewDocument(documentId) {
         }
         
         const result = await response.json();
-        const document = result.data;
+        const documentData = result.data;
         
         console.log('📄 Document data received:', {
-            documentId: document.documentId,
-            originalName: document.originalName,
-            contentType: document.contentType,
-            hasContent: !!document.content,
-            contentLength: document.content ? document.content.length : 0,
-            contentPreview: document.content ? document.content.substring(0, 100) + '...' : 'No content'
+            documentId: documentData.documentId,
+            originalName: documentData.originalName,
+            contentType: documentData.contentType,
+            hasContent: !!documentData.content,
+            contentLength: documentData.content ? documentData.content.length : 0,
+            contentPreview: documentData.content ? documentData.content.substring(0, 100) + '...' : 'No content'
         });
         
-        if (!document) {
+        if (!documentData) {
             throw new Error('Document not found');
         }
         
         // Create and show modal with document content
-        showDocumentModal(document);
+        showDocumentModal(documentData);
         
     } catch (error) {
         console.error('Error viewing document:', error);
@@ -918,7 +924,7 @@ function showDocumentModal(documentData) {
     
     // Create modal HTML
     const modalHTML = `
-        <div class="document-modal" style="
+        <div class="document-modal" role="dialog" aria-modal="true" aria-labelledby="document-modal-title" style="
             position: fixed;
             top: 0;
             left: 0;
@@ -947,8 +953,8 @@ function showDocumentModal(documentData) {
                     border-bottom: 1px solid #eee;
                     padding-bottom: 10px;
                 ">
-                    <h2 style="margin: 0; color: #333;">${documentData.originalName}</h2>
-                    <button class="close-modal" onclick="closeDocumentModal()" style="
+                    <h2 id="document-modal-title" style="margin: 0; color: #333;">${documentData.originalName}</h2>
+                    <button class="close-modal" onclick="closeDocumentModal()" aria-label="Close document preview" style="
                         background: none;
                         border: none;
                         font-size: 24px;
@@ -1018,6 +1024,12 @@ function showDocumentModal(documentData) {
             closeDocumentModal();
         }
     });
+    modal.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        closeDocumentModal();
+    });
+    modal.querySelector('.close-modal')?.focus();
 }
 
 /**
@@ -1027,6 +1039,11 @@ function closeDocumentModal() {
     const modal = document.querySelector('.document-modal');
     if (modal) {
         modal.remove();
+    }
+    const returnFocus = documentModalTrigger;
+    documentModalTrigger = null;
+    if (returnFocus && document.contains(returnFocus)) {
+        returnFocus.focus();
     }
 }
 

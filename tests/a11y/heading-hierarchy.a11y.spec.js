@@ -1,6 +1,106 @@
 // @ts-check
+/// <reference types="node" />
 const { test, expect } = require('@playwright/test');
 const { storageStatePath } = require('../e2e/helpers/users');
+
+const HEADING_STUDENT_ID = 'a11y-heading-student';
+const HEADING_COURSE_ID = 'A11Y-HEADING-COURSE';
+
+/**
+ * Keep the student chat heading case independent of database state left by other
+ * suites. A valid selected course prevents the first-time course picker from
+ * racing the heading snapshot.
+ *
+ * @param {import('@playwright/test').Page} page
+ */
+async function seedStudentHeadingPage(page) {
+    const course = {
+        courseId: HEADING_COURSE_ID,
+        courseName: 'Accessibility Heading Fixture',
+        status: 'active',
+        lectures: [{
+            name: 'Unit 1',
+            displayName: 'Unit 1',
+            isPublished: true,
+            passThreshold: 0,
+            documents: [],
+            assessmentQuestions: [],
+        }],
+    };
+
+    await page.route('**/api/**', async (route) => {
+        const url = new URL(route.request().url());
+        const pathname = url.pathname;
+        if (pathname === '/api/auth/me') {
+            await route.fulfill({
+                json: {
+                    success: true,
+                    user: {
+                        userId: HEADING_STUDENT_ID,
+                        username: 'a11y_heading_student',
+                        role: 'student',
+                        displayName: 'Accessibility Heading Student',
+                        preferences: {},
+                    },
+                },
+            });
+        } else if (pathname === '/api/user-agreement/status') {
+            await route.fulfill({ json: { success: true, data: { hasAgreed: true, agreementVersion: '1.0' } } });
+        } else if (pathname === `/api/courses/${HEADING_COURSE_ID}/student-enrollment`) {
+            await route.fulfill({ json: { success: true, data: { enrolled: true, status: 'active' } } });
+        } else if (pathname === `/api/courses/${HEADING_COURSE_ID}`) {
+            await route.fulfill({ json: { success: true, data: course } });
+        } else if (pathname === '/api/courses/available/all') {
+            await route.fulfill({
+                json: {
+                    success: true,
+                    data: [{
+                        courseId: HEADING_COURSE_ID,
+                        courseName: course.courseName,
+                        isEnrolled: true,
+                    }],
+                },
+            });
+        } else if (pathname === '/api/quiz/status') {
+            await route.fulfill({ json: { success: true, enabled: false } });
+        } else if (pathname === '/api/questions/lecture') {
+            await route.fulfill({ json: { success: true, data: { questions: [] } } });
+        } else if (pathname === '/api/student/struggle') {
+            await route.fulfill({ json: { success: true, struggleState: { topics: [] } } });
+        } else if (pathname === '/api/flags/count' || pathname === '/api/flags') {
+            await route.fulfill({ json: { success: true, count: 0, data: [] } });
+        } else {
+            await route.fulfill({ json: { success: true, data: {} } });
+        }
+    });
+
+    await page.addInitScript(({ courseId, courseName, studentId }) => {
+        const chatData = {
+            metadata: {
+                courseId,
+                courseName,
+                studentId,
+                studentName: 'Accessibility Heading Student',
+                unitName: 'Unit 1',
+                currentMode: 'tutor',
+                totalMessages: 0,
+                version: '1.0',
+            },
+            messages: [],
+            practiceTests: null,
+            studentAnswers: { answers: [] },
+            sessionInfo: { sessionId: 'a11y-heading-session' },
+        };
+        localStorage.setItem('selectedCourseId', courseId);
+        localStorage.setItem('selectedCourseName', courseName);
+        localStorage.setItem('selectedUnitName', 'Unit 1');
+        localStorage.setItem(`biocbot_current_chat_${studentId}`, JSON.stringify(chatData));
+    }, {
+        courseId: HEADING_COURSE_ID,
+        courseName: course.courseName,
+        studentId: HEADING_STUDENT_ID,
+    });
+}
 
 /**
  * Return headings exposed to assistive technology in document order. Hidden UI,
@@ -12,8 +112,12 @@ const { storageStatePath } = require('../e2e/helpers/users');
  */
 async function getVisibleHeadings(page, root = 'body') {
     return page.locator(root).evaluate((container) => {
-        const isHidden = (element) => {
-            for (let node = element; node && node instanceof HTMLElement; node = node.parentElement) {
+        const isHidden = (/** @type {Element} */ element) => {
+            for (
+                let node = /** @type {HTMLElement | null} */ (element);
+                node;
+                node = node.parentElement
+            ) {
                 if (
                     node.hidden ||
                     node.inert ||
@@ -86,12 +190,12 @@ for (const { role, paths } of PAGE_GROUPS) {
 
         for (const path of paths) {
             test(`${path} has a sequential visible heading outline`, async ({ page }) => {
-                test.fixme(
-                    ['/student', '/student/history'].includes(path),
-                    'Known heading-level skip; see audits.md §2.'
-                );
+                if (path === '/student') await seedStudentHeadingPage(page);
                 await page.goto(path);
                 await page.waitForLoadState('load');
+                if (path === '/student') {
+                    await expect(page.locator('#unit-select')).toHaveValue('Unit 1');
+                }
                 await expectValidHeadingOutline(page);
             });
         }

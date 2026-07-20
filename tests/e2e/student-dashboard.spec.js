@@ -209,7 +209,7 @@ test.describe('Student dashboard UI', () => {
 
         await page.locator('.reset-btn[data-topic="photosynthesis"]').click();
         await expect(page.locator('#confirm-modal')).toBeVisible();
-        await expect(page.locator('#modal-title')).toHaveText('Reset "Photosynthesis"?');
+        await expect(page.locator('#dashboard-confirm-modal-title')).toHaveText('Reset "Photosynthesis"?');
         await expect(page.locator('#modal-confirm-btn')).toHaveText('I understand Photosynthesis now');
         await page.locator('#modal-confirm-btn').click();
 
@@ -254,7 +254,7 @@ test.describe('Student dashboard UI', () => {
         await expect(page.locator('#topics-list-container .topic-card')).toHaveCount(2, { timeout: 10_000 });
 
         await page.locator('#reset-all-btn').click();
-        await expect(page.locator('#modal-title')).toHaveText('Reset All Topics?');
+        await expect(page.locator('#dashboard-confirm-modal-title')).toHaveText('Reset All Topics?');
         await expect(page.locator('#modal-confirm-btn')).toHaveText('Reset All');
         await page.locator('#modal-confirm-btn').click();
 
