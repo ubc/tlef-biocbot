@@ -14,8 +14,9 @@
     <link rel="stylesheet" href="./styles/student-hub.css">
 </head>
 <body>
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
     <div class="app-container">
-        <aside class="sidebar">
+        <header class="sidebar">
             <div class="logo-container">
                 <h2>BiocBot</h2>
             </div>
@@ -26,7 +27,7 @@
                     <li><a href="/instructor/notes">Super Chat Notes</a></li>
                     <li><a href="/instructor/documents">Course Upload</a></li>
                     <li><a href="/instructor/flagged">Flagged Content</a></li>
-                    <li id="nav-student-hub-li" class="active"><a href="/instructor/student-hub">Student Hub</a></li>
+                    <li id="nav-student-hub-li" class="active"><a href="/instructor/student-hub" aria-current="page">Student Hub</a></li>
                     <li id="instructor-downloads-nav" style="display: none;"><a href="/instructor/downloads">Download Chats</a></li>
                     <li><a href="/instructor/ta-hub">TA Hub</a></li>
 
@@ -41,11 +42,11 @@
                     <a href="#" id="logout-btn" class="user-action">Logout</a>
                 </div>
             </div>
-        </aside>
+        </header>
 
         <main class="main-content">
             <div class="content-header">
-                <h1>Student Hub</h1>
+                <h1 id="main" tabindex="-1">Student Hub</h1>
                 <p>View and manage student enrollment in your courses</p>
             </div>
 

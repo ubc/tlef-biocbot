@@ -17,15 +17,16 @@
     <link rel="stylesheet" href="./styles/ta-home.css">
 </head>
 <body>
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
     <div class="app-container">
         <!-- Sidebar Navigation -->
-        <aside class="sidebar">
+        <header class="sidebar">
             <div class="logo-container">
                 <h2>BiocBot</h2>
             </div>
             <nav class="main-nav">
                 <ul>
-                    <li class="active"><a href="/ta">Dashboard</a></li>
+                    <li class="active"><a href="/ta" aria-current="page">Dashboard</a></li>
                     <li><a href="/instructor/chat">Super Chat</a></li>
                     <li><a href="/instructor/notes">Super Chat Notes</a></li>
                     <li><a href="#" id="my-courses-link">Course Upload</a></li>
@@ -41,12 +42,12 @@
                     <a href="#" id="logout-btn" class="user-action">Logout</a>
                 </div>
             </div>
-        </aside>
+        </header>
 
         <!-- Main Content Area -->
         <main class="main-content">
             <div class="content-header">
-                <h1>TA Dashboard</h1>
+                <h1 id="main" tabindex="-1">TA Dashboard</h1>
                 <p>Welcome to your teaching assistant dashboard</p>
             </div>
 

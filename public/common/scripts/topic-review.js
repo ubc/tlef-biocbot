@@ -274,7 +274,7 @@ function ensureTopicReviewModal(hintText = 'Edit, add, or remove topics before s
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Review Detected Topics</h2>
-                <button class="modal-close" id="topic-review-close-btn">×</button>
+                <button class="modal-close" id="topic-review-close-btn" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
             <div class="modal-body">
                 <p class="topic-review-context" id="topic-review-context"></p>
@@ -297,6 +297,7 @@ function ensureTopicReviewModal(hintText = 'Edit, add, or remove topics before s
     document.body.appendChild(modal);
 
     const closeWithResult = (topics) => {
+        a11yModal.close(modal);
         modal.classList.remove('show');
         modal.style.display = 'none';
         const resolver = topicReviewResolve;

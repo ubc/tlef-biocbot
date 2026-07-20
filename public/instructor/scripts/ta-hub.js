@@ -364,6 +364,7 @@ function openRemoveTAModal(taId, taName) {
     const modal = document.getElementById('remove-ta-modal');
     if (modal) {
         modal.classList.add('show');
+        a11yModal.open(modal, { onRequestClose: closeRemoveTAModal });
         // Update modal content with TA name
         const modalBody = modal.querySelector('.modal-body p');
         if (modalBody) {
@@ -378,6 +379,7 @@ function openRemoveTAModal(taId, taName) {
 function closeRemoveTAModal() {
     const modal = document.getElementById('remove-ta-modal');
     if (modal) {
+        a11yModal.close(modal);
         modal.classList.remove('show');
     }
     taToRemove = null;

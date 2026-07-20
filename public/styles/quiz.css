@@ -173,6 +173,12 @@
     margin-bottom: 1.5rem;
 }
 
+fieldset.answer-options {
+    border: 0;
+    padding: 0;
+    min-inline-size: 0;
+}
+
 .option-label {
     display: flex;
     align-items: flex-start;
@@ -309,7 +315,7 @@
     margin-top: 0.5rem;
 }
 
-.materials-container h4 {
+.materials-container h2 {
     margin: 0 0 0.5rem 0;
     font-size: 0.95rem;
     color: var(--text-primary, #333);
@@ -495,6 +501,7 @@
 }
 
 .quiz-chat-title {
+    margin: 0;
     font-size: 0.9rem;
     font-weight: 600;
     color: var(--primary-color, #0055b7);

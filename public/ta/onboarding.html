@@ -16,15 +16,16 @@
     <link rel="stylesheet" href="./styles/ta-onboarding.css">
 </head>
 <body>
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
     <div class="app-container">
         <!-- Sidebar Navigation -->
-        <aside class="sidebar">
+        <header class="sidebar">
             <div class="logo-container">
                 <h2>BiocBot</h2>
             </div>
             <nav class="main-nav">
                 <ul>
-                    <li class="active"><a href="/ta/onboarding">Join Course</a></li>
+                    <li class="active"><a href="/ta/onboarding" aria-current="page">Join Course</a></li>
                 </ul>
             </nav>
             <div class="user-info">
@@ -36,7 +37,7 @@
                     <a href="#" id="logout-btn" class="user-action">Logout</a>
                 </div>
             </div>
-        </aside>
+        </header>
 
         <!-- Main Content Area -->
         <main class="main-content">
@@ -64,7 +65,7 @@
             <div id="ta-step-1" class="onboarding-step active">
                 <div class="step-content">
                     <div class="welcome-header">
-                        <h1>Welcome, Teaching Assistant!</h1>
+                        <h1 id="main" tabindex="-1">Welcome, Teaching Assistant!</h1>
                         <p class="welcome-subtitle">Join a course to start assisting students and instructors</p>
                     </div>
 
@@ -72,17 +73,17 @@
                         <div class="feature-cards-container">
                             <div class="feature-card">
                                 <div class="card-icon">📚</div>
-                                <h3>Course Access</h3>
+                                <h2>Course Access</h2>
                                 <p>Access course materials and student interactions</p>
                             </div>
                             <div class="feature-card">
                                 <div class="card-icon">🎓</div>
-                                <h3>Student Support</h3>
+                                <h2>Student Support</h2>
                                 <p>Help students with their questions and learning</p>
                             </div>
                             <div class="feature-card">
                                 <div class="card-icon">🤝</div>
-                                <h3>Instructor Collaboration</h3>
+                                <h2>Instructor Collaboration</h2>
                                 <p>Work closely with instructors to improve course content</p>
                             </div>
                         </div>
@@ -90,7 +91,7 @@
 
                     <form id="ta-course-selection-form" class="setup-form">
                         <div class="form-section">
-                            <h3>Select Course to Join</h3>
+                            <h2>Select Course to Join</h2>
                             <div class="form-group">
                                 <label for="ta-course-select">Available Courses</label>
                                 <select id="ta-course-select" name="course" required>

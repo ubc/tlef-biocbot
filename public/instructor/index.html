@@ -16,9 +16,10 @@
     <link rel="stylesheet" href="../styles/documents.css">
 </head>
 <body>
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
     <div class="app-container">
         <!-- Sidebar Navigation -->
-        <aside class="sidebar">
+        <header class="sidebar">
             <div class="logo-container">
                 <h2>BiocBot</h2>
             </div>
@@ -28,7 +29,7 @@
                     <li id="instructor-home-nav"><a href="/instructor/home">Home</a></li>
                     <li id="instructor-chat-nav"><a href="/instructor/chat">Super Chat</a></li>
                     <li id="instructor-notes-nav"><a href="/instructor/notes">Super Chat Notes</a></li>
-                    <li id="instructor-documents-nav" class="active"><a href="/instructor/documents">Course Upload</a></li>
+                    <li id="instructor-documents-nav" class="active"><a href="/instructor/documents" aria-current="page">Course Upload</a></li>
                     <li id="instructor-onboarding-nav" style="display: none;"><a href="/instructor/onboarding">Onboarding</a></li>
                     <li id="instructor-flagged-nav"><a href="/instructor/flagged">Flagged Content</a></li>
                     <li id="nav-student-hub-li"><a href="/instructor/student-hub">Student Hub</a></li>
@@ -38,7 +39,7 @@
                     
                     <!-- TA Navigation -->
                     <li id="ta-dashboard-nav" style="display: none;"><a href="/ta">Dashboard</a></li>
-                    <li id="ta-courses-nav" style="display: none;" class="active"><a href="#" id="ta-my-courses-link">Course Upload</a></li>
+                    <li id="ta-courses-nav" style="display: none;" class="active"><a href="#" id="ta-my-courses-link" aria-current="page">Course Upload</a></li>
                     <li id="ta-support-nav" style="display: none;"><a href="#" id="ta-student-support-link">Student Flag</a></li>
 
                 </ul>
@@ -52,12 +53,12 @@
                     <a href="#" id="logout-btn" class="user-action">Logout</a>
                 </div>
             </div>
-        </aside>
+        </header>
 
         <!-- Main Content Area -->
         <main class="main-content">
             <header class="documents-header">
-                <h1 id="course-title">Loading Course...</h1>
+                <h1 id="main" tabindex="-1"><span id="course-title">Loading Course...</span></h1>
             </header>
 
             <div class="course-subtitle" style="display: flex; align-items: baseline; gap: 15px;">
@@ -102,7 +103,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Create Assessment Question</h2>
-                <button class="modal-close" onclick="closeQuestionModal()">×</button>
+                <button class="modal-close" onclick="closeQuestionModal()" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
             
             <div class="modal-body">
@@ -158,8 +159,9 @@
                     
                     <!-- True/False Answer -->
                     <div class="form-section" id="tf-answer-section" style="display: none;">
-                        <label>Correct Answer</label>
-                        <div class="radio-group">
+                        <fieldset class="radio-group-fieldset">
+                            <legend class="form-label-legend">Correct Answer</legend>
+                            <div class="radio-group">
                             <label class="radio-option">
                                 <input type="radio" name="tf-answer" value="true">
                                 <span>True</span>
@@ -168,42 +170,45 @@
                                 <input type="radio" name="tf-answer" value="false">
                                 <span>False</span>
                             </label>
-                        </div>
+                            </div>
+                        </fieldset>
                     </div>
                     
                     <!-- Multiple Choice Options -->
                     <div class="form-section" id="mcq-answer-section" style="display: none;">
-                        <label>Answer Options</label>
-                        <div class="mcq-options">
+                        <fieldset class="radio-group-fieldset">
+                            <legend class="form-label-legend">Answer Options</legend>
+                            <div class="mcq-options">
                             <div class="mcq-option">
-                                <input type="text" placeholder="Option A" class="mcq-input" data-option="A">
+                                <input type="text" placeholder="Option A" class="mcq-input" data-option="A" aria-label="Option A text">
                                 <label class="radio-option">
                                     <input type="radio" name="mcq-correct" value="A">
                                     <span class="correct-label">Correct</span>
                                 </label>
                             </div>
                             <div class="mcq-option">
-                                <input type="text" placeholder="Option B" class="mcq-input" data-option="B">
+                                <input type="text" placeholder="Option B" class="mcq-input" data-option="B" aria-label="Option B text">
                                 <label class="radio-option">
                                     <input type="radio" name="mcq-correct" value="B">
                                     <span class="correct-label">Correct</span>
                                 </label>
                             </div>
                             <div class="mcq-option">
-                                <input type="text" placeholder="Option C" class="mcq-input" data-option="C">
+                                <input type="text" placeholder="Option C" class="mcq-input" data-option="C" aria-label="Option C text">
                                 <label class="radio-option">
                                     <input type="radio" name="mcq-correct" value="C">
                                     <span class="correct-label">Correct</span>
                                 </label>
                             </div>
                             <div class="mcq-option">
-                                <input type="text" placeholder="Option D" class="mcq-input" data-option="D">
+                                <input type="text" placeholder="Option D" class="mcq-input" data-option="D" aria-label="Option D text">
                                 <label class="radio-option">
                                     <input type="radio" name="mcq-correct" value="D">
                                     <span class="correct-label">Correct</span>
                                 </label>
                             </div>
-                        </div>
+                            </div>
+                        </fieldset>
                     </div>
                     
                     <!-- Short Answer Expected -->
@@ -233,7 +238,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Edit Learning Objective</h2>
-                <button class="modal-close" onclick="closeQuestionLearningObjectiveModal()">×</button>
+                <button class="modal-close" onclick="closeQuestionLearningObjectiveModal()" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
 
             <div class="modal-body">
@@ -265,7 +270,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Auto-link Questions?</h2>
-                <button class="modal-close" onclick="closeAutoLinkConfirmationModal()">×</button>
+                <button class="modal-close" onclick="closeAutoLinkConfirmationModal()" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
 
             <div class="modal-body">
@@ -293,7 +298,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Regenerate AI Question</h2>
-                <button class="modal-close" onclick="closeRegenerateModal()">×</button>
+                <button class="modal-close" onclick="closeRegenerateModal()" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
             
             <div class="modal-body">
@@ -330,12 +335,12 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="modal-title">Upload Content</h2>
-                <button class="modal-close" onclick="closeUploadModal()">×</button>
+                <button class="modal-close" onclick="closeUploadModal()" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
             
             <div class="modal-body">
                 <!-- Loading Indicator (shown during upload) -->
-                <div id="upload-loading-indicator" class="upload-loading-indicator" style="display: none;">
+                <div id="upload-loading-indicator" class="upload-loading-indicator" style="display: none;" role="status">
                     <div class="loading-spinner"></div>
                     <div class="loading-message">
                         <p><strong>Uploading and processing document...</strong></p>
@@ -353,11 +358,11 @@
                     <!-- Method Selection -->
                     <div id="upload-method-selection" class="method-selection" style="display: flex; gap: 20px; justify-content: center; margin: 30px 0;">
                         <button class="method-btn" onclick="showFileUpload()" style="display: flex; flex-direction: column; align-items: center; padding: 20px; border: 2px dashed #ccc; border-radius: 8px; background: none; cursor: pointer; width: 150px; transition: all 0.2s;">
-                            <span class="method-icon" style="font-size: 24px; margin-bottom: 10px;">📁</span>
+                            <span class="method-icon" style="font-size: 24px; margin-bottom: 10px;" aria-hidden="true">📁</span>
                             <span>Upload a file</span>
                         </button>
                         <button class="method-btn" onclick="showTextInput()" style="display: flex; flex-direction: column; align-items: center; padding: 20px; border: 2px dashed #ccc; border-radius: 8px; background: none; cursor: pointer; width: 150px; transition: all 0.2s;">
-                            <span class="method-icon" style="font-size: 24px; margin-bottom: 10px;">📝</span>
+                            <span class="method-icon" style="font-size: 24px; margin-bottom: 10px;" aria-hidden="true">📝</span>
                             <span>Paste content directly</span>
                         </button>
                     </div>
@@ -400,7 +405,7 @@
                     <div class="topic-review-list" id="upload-topic-review-list"></div>
                     <div class="topic-review-add-row">
                         <input id="upload-topic-new-input" class="topic-review-input" type="text" placeholder="Add a topic (e.g., Enzyme Kinetics)" />
-                        <select id="upload-topic-unit-select" class="topic-review-unit-select" title="Topic unit"></select>
+                        <select id="upload-topic-unit-select" class="topic-review-unit-select" title="Topic unit" aria-label="Unit for new topic"></select>
                         <button class="btn-secondary" id="upload-topic-add-btn">Add Topic</button>
                     </div>
                 </div>
@@ -421,11 +426,11 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Delete Unit</h2>
-                <button class="modal-close" onclick="closeDeleteUnitModal()">×</button>
+                <button class="modal-close" onclick="closeDeleteUnitModal()" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
             
             <div class="modal-body">
-                <div class="warning-icon" style="text-align: center; font-size: 3rem; margin-bottom: 1rem;">⚠️</div>
+                <div class="warning-icon" style="text-align: center; font-size: 3rem; margin-bottom: 1rem;" aria-hidden="true">⚠️</div>
                 <p>Are you sure you want to delete <strong id="delete-unit-name-display">this unit</strong>?</p>
                 
                 <div class="warning-box" style="background-color: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 15px; border-radius: 5px; margin-top: 15px;">
@@ -447,7 +452,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2><span id="calibration-unit">Unit</span> Calibration Questions: <span id="calibration-topic">Topic</span></h2>
-                <button class="modal-close" onclick="closeCalibrationModal()">×</button>
+                <button class="modal-close" onclick="closeCalibrationModal()" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
             
             <div class="modal-body">
@@ -494,6 +499,7 @@
     </div>
     
 
+    <script src="../common/scripts/modal-a11y.js"></script>
     <script src="../common/scripts/auth.js"></script>
     <script src="../common/scripts/notifications.js"></script>
     <script src="../common/scripts/ui-utils.js"></script>

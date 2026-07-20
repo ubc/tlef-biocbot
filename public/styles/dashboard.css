@@ -39,7 +39,7 @@
   text-align: center;
 }
 
-.summary-card h3 {
+.summary-card h2 {
   margin-bottom: 15px;
   font-size: 1.1rem;
   color: var(--text-muted);

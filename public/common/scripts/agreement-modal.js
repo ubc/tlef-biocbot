@@ -33,9 +33,9 @@ class AgreementModal {
 
         // Create modal content
         overlay.innerHTML = `
-            <div class="agreement-modal" id="agreement-modal" tabindex="-1">
+            <div class="agreement-modal" id="agreement-modal" role="dialog" aria-modal="true" aria-labelledby="agreement-modal-title">
                 <div class="agreement-modal-header">
-                    <h2>${copy.title}</h2>
+                    <h2 id="agreement-modal-title" tabindex="-1">${copy.title}</h2>
                     <p class="subtitle">${copy.subtitle}</p>
                 </div>
                 
@@ -81,7 +81,7 @@ class AgreementModal {
                         <input type="checkbox" id="agreement-checkbox" class="agreement-checkbox">
                         <label for="agreement-checkbox" class="agreement-checkbox-label">
                             <strong>I understand and agree</strong> to the terms outlined above. I will use BiocBot responsibly and in accordance with UBC's academic integrity policies, found here:
-                            <a href="https://academicintegrity.ubc.ca/student-start/" target="_blank">https://academicintegrity.ubc.ca/student-start/</a>
+                            <a href="https://academicintegrity.ubc.ca/student-start/" target="_blank">https://academicintegrity.ubc.ca/student-start/<span class="visually-hidden"> (opens in new tab)</span></a>
                         </label>
                     </div>
                 </div>
@@ -166,17 +166,6 @@ class AgreementModal {
             }
         });
 
-        // Prevent modal from being closed by escape key (unless read-only)
-        document.addEventListener('keydown', (e) => {
-            if (this.isVisible && e.key === 'Escape') {
-                if (this.isReadOnly) {
-                    this.hide();
-                } else {
-                    e.preventDefault();
-                    e.stopPropagation();
-                }
-            }
-        });
     }
 
     /**
@@ -191,9 +180,13 @@ class AgreementModal {
         this.modal.style.display = 'flex';
         document.body.style.overflow = 'hidden'; // Prevent background scrolling
         
-        // Focus on the modal for accessibility
-        const modalElement = this.modal.querySelector('#agreement-modal');
-        modalElement.focus();
+        window.a11yModal?.open(this.modal, {
+            dialogEl: this.modal.querySelector('#agreement-modal'),
+            labelledBy: 'agreement-modal-title',
+            initialFocus: '#agreement-modal-title',
+            escapable: this.isReadOnly === true,
+            onRequestClose: () => this.hide()
+        });
         
         // Reset state
         this.agreementChecked = false;
@@ -225,6 +218,7 @@ class AgreementModal {
         if (!this.isVisible) return;
 
         this.isVisible = false;
+        window.a11yModal?.close(this.modal);
         this.modal.style.display = 'none';
         document.body.style.overflow = ''; // Restore scrolling
     }

@@ -585,7 +585,9 @@ function createHistoryItem(chat, index) {
     
     // Display Title
     const titleText = document.createElement('div');
-    titleText.classList.add('title-text');
+    titleText.classList.add('title-text', 'history-item-select');
+    titleText.setAttribute('role', 'button');
+    titleText.tabIndex = 0;
     titleText.textContent = chat.title;
     
     // Edit Input (Hidden by default)
@@ -698,6 +700,12 @@ function createHistoryItem(chat, index) {
     item.appendChild(date);
     item.appendChild(metadata);
     item.appendChild(mobileActions);
+
+    titleText.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        handleHistoryItemClick(chat.id);
+    });
     
     return item;
 }
@@ -791,12 +799,16 @@ function handleHistoryItemClick(chatId) {
 function updateSelectedItem(chatId) {
     // Remove active class from all items
     const allItems = document.querySelectorAll('.chat-history-item');
-    allItems.forEach(item => item.classList.remove('active'));
+    allItems.forEach(item => {
+        item.classList.remove('active');
+        item.querySelector('.history-item-select')?.removeAttribute('aria-current');
+    });
     
     // Add active class to selected item
     const selectedItem = document.querySelector(`[data-chat-id="${chatId}"]`);
     if (selectedItem) {
         selectedItem.classList.add('active');
+        selectedItem.querySelector('.history-item-select')?.setAttribute('aria-current', 'true');
     }
 }
 

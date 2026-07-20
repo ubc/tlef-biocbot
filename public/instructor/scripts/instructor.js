@@ -193,6 +193,7 @@ function openDeleteUnitModal(unitName) {
     if (modal) {
         modal.style.display = ''; // Clear inline style to let CSS class handle display: flex
         modal.classList.add('show');
+        a11yModal.open(modal, { onRequestClose: closeDeleteUnitModal });
     }
 }
 
@@ -200,6 +201,7 @@ function closeDeleteUnitModal() {
     unitToDelete = null;
     const modal = document.getElementById('delete-unit-modal');
     if (modal) {
+        a11yModal.close(modal);
         modal.classList.remove('show');
         modal.style.display = 'none';
     }

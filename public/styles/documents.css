@@ -1645,6 +1645,19 @@
     margin-top: 0.5rem;
 }
 
+fieldset.radio-group-fieldset {
+    border: 0;
+    padding: 0;
+    margin: 0;
+}
+
+.form-label-legend {
+    padding: 0;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: #333;
+}
+
 .radio-option {
     display: flex;
     align-items: center;

@@ -3036,5 +3036,14 @@ function toggleSection(headerElement) {
     const section = headerElement.closest('.home-section');
     if (section) {
         section.classList.toggle('section-collapsed');
+        headerElement.setAttribute('aria-expanded', String(!section.classList.contains('section-collapsed')));
     }
 }
+
+document.addEventListener('keydown', (event) => {
+    const header = event.target.closest('[role="button"].section-header');
+    if (!header || (event.key !== 'Enter' && event.key !== ' ')) return;
+    if (event.target.closest('button')) return;
+    event.preventDefault();
+    toggleSection(header);
+});

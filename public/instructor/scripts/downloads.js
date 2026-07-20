@@ -452,7 +452,7 @@ function displayStudents(students) {
 async function downloadAllCourseSessions(format = 'json') {
     try {
         console.log(`Downloading all course sessions as ${format}...`);
-        document.querySelectorAll('.download-dropdown-menu.open').forEach(menu => menu.classList.remove('open'));
+        document.querySelectorAll('.download-dropdown-menu.open').forEach(menu => closeDownloadMenu(menu));
 
         if (currentStudents.length === 0) {
             alert('No students found to download.');
@@ -773,6 +773,7 @@ function showStudentModal(studentName, studentUsername, courseName, sessions) {
     
     // Show modal
     modal.style.display = 'block';
+    a11yModal.open(modal, { onRequestClose: closeStudentModal });
 }
 
 /**
@@ -803,7 +804,7 @@ function createSessionElement(session) {
                     Preview Chat
                 </button>
                 <div class="download-dropdown">
-                    <button class="btn-secondary download-dropdown-toggle" onclick="toggleDownloadMenu(event, '${session.sessionId}')">
+                    <button class="btn-secondary download-dropdown-toggle" onclick="toggleDownloadMenu(event, '${session.sessionId}')" aria-expanded="false" aria-haspopup="menu">
                         Download &#9662;
                     </button>
                     <div class="download-dropdown-menu" id="download-menu-${session.sessionId}">
@@ -826,20 +827,48 @@ function createSessionElement(session) {
  */
 function toggleDownloadMenu(event, sessionId) {
     event.stopPropagation();
+    const toggle = event.currentTarget;
     // Close all other open menus
     document.querySelectorAll('.download-dropdown-menu.open').forEach(menu => {
         if (menu.id !== `download-menu-${sessionId}`) {
-            menu.classList.remove('open');
+            closeDownloadMenu(menu);
         }
     });
     const menu = document.getElementById(`download-menu-${sessionId}`);
-    if (menu) menu.classList.toggle('open');
+    if (menu) {
+        const isOpen = menu.classList.toggle('open');
+        toggle.setAttribute('aria-haspopup', 'menu');
+        toggle.setAttribute('aria-expanded', String(isOpen));
+    }
+}
+
+function closeDownloadMenu(menu, returnFocus = false) {
+    if (!menu.classList.contains('open')) return;
+    menu.classList.remove('open');
+    const toggle = menu.previousElementSibling;
+    toggle?.setAttribute('aria-expanded', 'false');
+    if (returnFocus) toggle?.focus();
 }
 
 // Close dropdown menus when clicking outside
 document.addEventListener('click', () => {
     document.querySelectorAll('.download-dropdown-menu.open').forEach(menu => {
-        menu.classList.remove('open');
+        closeDownloadMenu(menu);
+    });
+});
+
+document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    document.querySelectorAll('.download-dropdown-menu.open').forEach(menu => closeDownloadMenu(menu, true));
+});
+
+document.addEventListener('focusout', (event) => {
+    const dropdown = event.target.closest('.download-dropdown');
+    if (!dropdown) return;
+    requestAnimationFrame(() => {
+        if (!dropdown.contains(document.activeElement)) {
+            dropdown.querySelectorAll('.download-dropdown-menu.open').forEach(menu => closeDownloadMenu(menu));
+        }
     });
 });
 
@@ -1039,9 +1068,7 @@ async function downloadSession(sessionId, format = 'json') {
         console.log(`Downloading session: ${sessionId} as ${format}`);
 
         // Close any open dropdown menus
-        document.querySelectorAll('.download-dropdown-menu.open').forEach(menu => {
-            menu.classList.remove('open');
-        });
+        document.querySelectorAll('.download-dropdown-menu.open').forEach(menu => closeDownloadMenu(menu));
 
         const isSuperchat = currentScope.type === 'superchat';
 
@@ -1100,7 +1127,7 @@ async function downloadSession(sessionId, format = 'json') {
 async function downloadAllSessions(format = 'json') {
     try {
         console.log(`Downloading all sessions for current student as ${format}`);
-        document.querySelectorAll('.download-dropdown-menu.open').forEach(menu => menu.classList.remove('open'));
+        document.querySelectorAll('.download-dropdown-menu.open').forEach(menu => closeDownloadMenu(menu));
 
         if (currentStudentSessions.length === 0) {
             alert('No sessions to download.');
@@ -1328,6 +1355,7 @@ function showDownloadProgress() {
     const modal = document.getElementById('download-modal');
     if (modal) {
         modal.style.display = 'block';
+        a11yModal.open(modal, { escapable: false });
     }
 }
 
@@ -1337,6 +1365,7 @@ function showDownloadProgress() {
 function hideDownloadProgress() {
     const modal = document.getElementById('download-modal');
     if (modal) {
+        a11yModal.close(modal);
         modal.style.display = 'none';
     }
 }
@@ -1353,6 +1382,10 @@ function updateDownloadProgress(current, total) {
     if (progressFill) {
         const percentage = (current / total) * 100;
         progressFill.style.width = `${percentage}%`;
+        const progressBar = progressFill.closest('.progress-bar');
+        progressBar?.setAttribute('aria-valuenow', String(current));
+        progressBar?.setAttribute('aria-valuemin', '0');
+        progressBar?.setAttribute('aria-valuemax', String(total));
     }
     
     if (downloadStatus) {
@@ -1366,6 +1399,7 @@ function updateDownloadProgress(current, total) {
 function closeStudentModal() {
     const modal = document.getElementById('student-modal');
     if (modal) {
+        a11yModal.close(modal);
         modal.style.display = 'none';
     }
 }

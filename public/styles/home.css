@@ -61,6 +61,14 @@
   font-weight: 500;
 }
 
+.course-selector .form-label-text {
+  display: block;
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: var(--text-color);
+  font-weight: 500;
+}
+
 .course-selector .course-select-dropdown {
   width: 100%;
   max-width: 470px;
@@ -92,7 +100,7 @@
   border: 1px solid var(--border-color);
 }
 
-.selected-course-details .course-info h4 {
+.selected-course-details .course-info .selected-course-name-heading {
   font-size: 1.2rem;
   color: var(--text-color);
   margin: 0 0 10px 0;
@@ -1221,9 +1229,18 @@
 }
 
 .tooltip:hover::after,
-.tooltip:hover::before {
+.tooltip:hover::before,
+.tooltip:focus-visible::after,
+.tooltip:focus-visible::before {
     visibility: visible;
     opacity: 1;
+}
+
+.info-icon {
+    background: none;
+    border: none;
+    font: inherit;
+    cursor: help;
 }
 
 /* ===========================

@@ -17,15 +17,16 @@
     <link rel="stylesheet" href="../styles/agreement-modal.css">
 </head>
 <body>
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
     <div class="app-container">
         <!-- Sidebar Navigation -->
-        <aside class="sidebar">
+        <header class="sidebar">
             <div class="logo-container">
                 <h2>BiocBot</h2>
             </div>
             <nav class="main-nav">
                 <ul>
-                    <li class="active"><a href="/student"><span class="icon"></span> Chat</a></li>
+                    <li class="active"><a href="/student" aria-current="page"><span class="icon"></span> Chat</a></li>
                     <li><a href="/student/history"><span class="icon"></span> Chat History</a></li>
                     <li><a href="/student/flagged"><span class="icon"></span> Flagged</a></li>
                     <li><a href="/student/dashboard.html"><span class="icon"></span> Topic Dashboard</a></li>
@@ -48,13 +49,13 @@
                     <a href="#" id="logout-btn" class="user-action">Logout</a>
                 </div>
             </div>
-        </aside>
+        </header>
 
         <!-- Main Content Area -->
         <main class="main-content">
             <!-- Chat Header -->
             <header class="chat-header">
-                <h1>Chat with BiocBot</h1>
+                <h1 id="main" tabindex="-1">Chat with BiocBot</h1>
                 <div class="current-course">
                     <span class="course-label">Course:</span>
                     <span class="course-name">Select Course</span>
@@ -72,7 +73,7 @@
 
             <!-- Chat Messages Container -->
             <div class="chat-container">
-                <div class="messages" id="chat-messages">
+                <div class="messages" id="chat-messages" role="log" aria-live="polite" aria-relevant="additions">
                     <!-- Initial State - Will be replaced by JS -->
                 </div>
 
@@ -89,7 +90,7 @@
                             <div class="mode-toggle">
                                 <span class="mode-label protege-label">Protégé</span>
                                 <div class="toggle-switch">
-                                    <input type="checkbox" id="mode-toggle-checkbox" checked>
+                                    <input type="checkbox" id="mode-toggle-checkbox" checked aria-label="Chat mode: Tutor when on, Protégé when off">
                                     <label for="mode-toggle-checkbox" class="toggle-slider"></label>
                                 </div>
                                 <span class="mode-label tutor-label active">Tutor</span>
@@ -109,11 +110,11 @@
 
     <!-- Idle Timeout Modal -->
     <div id="idle-timeout-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-content">
+        <div class="modal-content" role="alertdialog" aria-modal="true" aria-labelledby="idle-modal-title" aria-describedby="idle-modal-desc">
             <div class="modal-header">
-                <h2>Are you still there?</h2>
+                <h2 id="idle-modal-title" tabindex="-1">Are you still there?</h2>
             </div>
-            <div class="modal-body">
+            <div class="modal-body" id="idle-modal-desc" role="status">
                 <p>You have been idle for a while.</p>
                 <p>You will be automatically signed out in <span id="idle-countdown-display" style="font-weight: bold; color: var(--primary-color);">--:--</span>.</p>
             </div>
@@ -124,6 +125,7 @@
         </div>
     </div>
 
+    <script src="../common/scripts/modal-a11y.js"></script>
     <script src="../common/scripts/auth.js"></script>
     <script src="../common/scripts/agreement-modal.js"></script>
     <script src="./scripts/flag-notifications.js"></script>

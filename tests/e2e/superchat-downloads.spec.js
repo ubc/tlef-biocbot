@@ -310,7 +310,7 @@ test.describe('Downloads page superchat scope (system admin UI)', () => {
         expect(sessionJson.messages).toHaveLength(2);
         expect(sessionJson.messages[0].content).toBe('What is ATP?');
 
-        await modal.getByRole('button', { name: 'Close' }).click();
+        await modal.locator('.modal-close').click();
 
         // Whole-bucket export via the single round-trip endpoint
         await page.locator('#download-course-btn').click();

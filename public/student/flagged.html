@@ -13,8 +13,9 @@
     <link rel="stylesheet" href="../styles/flagged.css">
 </head>
 <body>
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
     <div class="app-container">
-        <aside class="sidebar">
+        <header class="sidebar">
             <div class="logo-container">
                 <h2>BiocBot</h2>
             </div>
@@ -22,7 +23,7 @@
                 <ul>
                     <li><a href="/student"><span class="icon"></span> Chat</a></li>
                     <li><a href="/student/history"><span class="icon"></span> Chat History</a></li>
-                    <li class="active"><a href="/student/flagged"><span class="icon"></span> Flagged</a></li>
+                    <li class="active"><a href="/student/flagged" aria-current="page"><span class="icon"></span> Flagged</a></li>
                     <li><a href="/student/dashboard.html"><span class="icon"></span> Topic Dashboard</a></li>
                     <li id="quiz-nav-item"><a href="/student/quiz"><span class="icon"></span> Quiz</a></li>
                     <li id="super-course-nav-item" style="display: none;"><a href="/student/super-course"><span class="icon"></span> Super Course</a></li>
@@ -37,10 +38,10 @@
                     <a href="#" id="logout-btn" class="user-action">Logout</a>
                 </div>
             </div>
-        </aside>
+        </header>
         <main class="main-content">
             <header class="flagged-header">
-                <h1>My Flagged Messages</h1>
+                <h1 id="main" tabindex="-1">My Flagged Messages</h1>
             </header>
             <div class="flagged-subtitle">
                 <p>View flags you’ve submitted and any instructor responses.</p>
@@ -59,7 +60,7 @@
                 <button id="refresh-flags" class="refresh-btn">Refresh</button>
             </div>
             <div class="flagged-content-container">
-                <div id="loading-state" class="loading-message">
+                <div id="loading-state" class="loading-message" role="status">
                     <p>Loading your flags...</p>
                 </div>
                 <div id="empty-state" class="empty-message" style="display: none;">
@@ -69,6 +70,7 @@
             </div>
         </main>
     </div>
+    <script src="../common/scripts/modal-a11y.js"></script>
     <script src="../common/scripts/auth.js"></script>
     <script src="../common/scripts/mobile-layout.js"></script>
     <script src="../common/scripts/idle-timer.js"></script>
@@ -83,4 +85,3 @@
     
 </body>
 </html>
-

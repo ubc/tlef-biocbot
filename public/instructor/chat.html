@@ -15,15 +15,16 @@
     <link rel="stylesheet" href="../styles/chat.css">
 </head>
 <body>
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
     <div class="app-container">
-        <aside class="sidebar">
+        <header class="sidebar">
             <div class="logo-container">
                 <h2>BiocBot</h2>
             </div>
             <nav class="main-nav">
                 <ul>
                     <li><a href="/instructor/home">Home</a></li>
-                    <li class="active"><a href="/instructor/chat">Super Chat</a></li>
+                    <li class="active"><a href="/instructor/chat" aria-current="page">Super Chat</a></li>
                     <li><a href="/instructor/notes">Super Chat Notes</a></li>
                     <li><a href="/instructor/documents">Course Upload</a></li>
                     <li id="onboarding-nav-item" style="display: none;"><a href="/instructor/onboarding">Onboarding</a></li>
@@ -42,11 +43,11 @@
                     <a href="#" id="logout-btn" class="user-action">Logout</a>
                 </div>
             </div>
-        </aside>
+        </header>
 
         <main class="main-content super-course-main-content">
             <header class="chat-header instructor-super-chat-header">
-                <h1>Super Course Chat</h1>
+                <h1 id="main" tabindex="-1">Super Course Chat</h1>
                 <div class="current-course">
                     <span class="course-label">Scope:</span>
                     <span class="course-name" id="super-course-scope">Opted-in biochemistry courses</span>
@@ -73,7 +74,7 @@
                     </div>
                 </section>
 
-                <div class="messages" id="chat-messages">
+                <div class="messages" id="chat-messages" role="log" aria-live="polite" aria-relevant="additions">
                     <div class="message bot-message">
                         <div class="message-avatar">B</div>
                         <div class="message-content">

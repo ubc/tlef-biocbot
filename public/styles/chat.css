@@ -1748,7 +1748,7 @@ input:checked+.toggle-slider:before {
     background-color: var(--background-color);
 }
 
-.history-header h3 {
+.history-header h2 {
     margin: 0 0 12px 0;
     color: var(--text-color);
     font-size: 18px;
@@ -1841,7 +1841,7 @@ input:checked+.toggle-slider:before {
     margin-bottom: 16px;
 }
 
-.no-history-content h4 {
+.no-history-content h3 {
     margin: 0 0 8px 0;
     color: var(--text-color);
     font-size: 18px;
@@ -1873,7 +1873,7 @@ input:checked+.toggle-slider:before {
     margin-bottom: 16px;
 }
 
-.no-selection-content h4 {
+.no-selection-content h3 {
     margin: 0 0 8px 0;
     color: var(--text-color);
     font-size: 18px;

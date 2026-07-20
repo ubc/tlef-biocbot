@@ -16,9 +16,10 @@
     <link rel="stylesheet" href="../styles/flagged.css">
 </head>
 <body>
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
     <div class="app-container">
         <!-- Sidebar Navigation -->
-        <aside class="sidebar">
+        <header class="sidebar">
             <div class="logo-container">
                 <h2>BiocBot</h2>
             </div>
@@ -29,7 +30,7 @@
                     <li id="instructor-chat-nav"><a href="/instructor/chat">Super Chat</a></li>
                     <li id="instructor-notes-nav"><a href="/instructor/notes">Super Chat Notes</a></li>
                     <li id="instructor-documents-nav"><a href="/instructor/documents">Course Upload</a></li>
-                    <li id="instructor-flagged-nav" class="active"><a href="/instructor/flagged">Flagged Content</a></li>
+                    <li id="instructor-flagged-nav" class="active"><a href="/instructor/flagged" aria-current="page">Flagged Content</a></li>
                     <li id="nav-student-hub-li"><a href="/instructor/student-hub">Student Hub</a></li>
                     <li id="instructor-downloads-nav" style="display: none;"><a href="/instructor/downloads">Download Chats</a></li>
                     <li id="instructor-ta-hub-nav"><a href="/instructor/ta-hub">TA Hub</a></li>
@@ -38,7 +39,7 @@
                     <!-- TA Navigation -->
                     <li id="ta-dashboard-nav" style="display: none;"><a href="/ta">Dashboard</a></li>
                     <li id="ta-courses-nav" style="display: none;"><a href="#" id="ta-my-courses-link">Course Upload</a></li>
-                    <li id="ta-support-nav" style="display: none;" class="active"><a href="#" id="ta-student-support-link">Student Flag</a></li>
+                    <li id="ta-support-nav" style="display: none;" class="active"><a href="#" id="ta-student-support-link" aria-current="page">Student Flag</a></li>
 
                 </ul>
             </nav>
@@ -51,12 +52,12 @@
                     <a href="#" id="logout-btn" class="user-action">Logout</a>
                 </div>
             </div>
-        </aside>
+        </header>
 
         <!-- Main Content Area -->
         <main class="main-content">
             <header class="flagged-header">
-                <h1>Flagged Content</h1>
+                <h1 id="main" tabindex="-1">Flagged Content</h1>
             </header>
 
             <div class="flagged-subtitle">
@@ -133,7 +134,7 @@
 
             <!-- Flagged Content List -->
             <div class="flagged-content-container">
-                <div id="loading-state" class="loading-message">
+                <div id="loading-state" class="loading-message" role="status">
                     <p>Loading flagged content...</p>
                 </div>
                 
