@@ -40,6 +40,9 @@ function openTopicReviewModal(courseId, sourceName, existingTopics, suggestedTop
 
     modal.style.display = '';
     modal.classList.add('show');
+    a11yModal.open(modal, { initialFocus: '#topic-review-new-input', onRequestClose: () => {
+        modal.querySelector('#topic-review-cancel-btn').click();
+    } });
 
     return new Promise((resolve) => {
         topicReviewResolve = resolve;
@@ -275,6 +278,7 @@ function openUploadModal(week, contentType = '') {
     const modal = document.getElementById('upload-modal');
     modal.style.display = '';
     modal.classList.add('show');
+    a11yModal.open(modal, { onRequestClose: closeUploadModal });
 }
 
 /**
@@ -290,6 +294,7 @@ function closeUploadModal() {
     }
     
     const modal = document.getElementById('upload-modal');
+    a11yModal.close(modal);
     modal.classList.remove('show');
     modal.style.display = 'none';
     resetModal();

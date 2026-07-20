@@ -464,12 +464,14 @@ function openAutoLinkConfirmationModal(week, buttonElement = null) {
         unitLabel.textContent = week || 'this unit';
     }
     modal.classList.add('show');
+    a11yModal.open(modal, { onRequestClose: closeAutoLinkConfirmationModal });
 }
 
 function closeAutoLinkConfirmationModal() {
     autoLinkConfirmationContext = null;
     const modal = document.getElementById('auto-link-confirmation-modal');
     if (modal) {
+        a11yModal.close(modal);
         modal.classList.remove('show');
     }
 }
@@ -494,6 +496,7 @@ function openQuestionModal(week) {
     const modal = document.getElementById('question-modal');
     if (modal) {
         modal.classList.add('show');
+        a11yModal.open(modal, { onRequestClose: closeQuestionModal });
         // Reset form
         resetQuestionForm();
         populateQuestionLearningObjectiveDropdown(week);
@@ -507,6 +510,7 @@ function openQuestionModal(week) {
 function closeQuestionModal() {
     const modal = document.getElementById('question-modal');
     if (modal) {
+        a11yModal.close(modal);
         modal.classList.remove('show');
         resetQuestionForm();
     }
@@ -1082,6 +1086,7 @@ function openQuestionLearningObjectiveModal(week, questionId) {
     questionText.textContent = question.question || '';
     populateLearningObjectiveOptions(select, getObjectivesForUnit(week), question.learningObjective || '');
     modal.classList.add('show');
+    a11yModal.open(modal, { onRequestClose: closeQuestionLearningObjectiveModal });
 }
 
 function closeQuestionLearningObjectiveModal() {
@@ -1101,6 +1106,7 @@ function closeQuestionLearningObjectiveModal() {
     }
 
     if (modal) {
+        a11yModal.close(modal);
         modal.classList.remove('show');
     }
 }

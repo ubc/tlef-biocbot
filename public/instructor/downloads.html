@@ -50,7 +50,7 @@
         <!-- Main Content Area -->
         <main class="main-content">
             <header class="downloads-header">
-                <h1 id="main" class="course-title" tabindex="-1">BIOC202 - Chat Downloads</h1>
+                <h1 id="main" tabindex="-1"><span id="course-title">BIOC202 - Chat Downloads</span></h1>
                 <div class="course-selector" id="scope-selector-container" style="display: none;">
                     <select id="scope-selector" aria-label="Download scope">
                         <!-- Course + superchat bucket options populated dynamically -->
@@ -162,7 +162,7 @@
             
             <div class="modal-body">
                 <div class="download-progress">
-                    <div class="progress-bar">
+                    <div class="progress-bar" role="progressbar" aria-label="Download progress">
                         <div class="progress-fill" id="progress-fill"></div>
                     </div>
                     <p id="download-status" role="status">Preparing download...</p>
@@ -171,6 +171,7 @@
         </div>
     </div>
     
+    <script src="../common/scripts/modal-a11y.js"></script>
     <script src="../common/scripts/auth.js"></script>
     <script src="../common/scripts/notifications.js"></script>
     <script src="./scripts/downloads.js"></script>

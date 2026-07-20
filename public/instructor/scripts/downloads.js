@@ -255,7 +255,7 @@ async function handleScopeChange(event) {
  * Update title, subtitle, bulk-download label, and empty state for the active scope.
  */
 function updateScopeLabels() {
-    const courseTitle = document.querySelector('.course-title');
+    const courseTitle = document.getElementById('course-title');
     const subtitle = document.getElementById('scope-subtitle');
     const downloadAllLabel = document.getElementById('download-all-label');
     const emptyState = document.querySelector('#empty-state p');
@@ -325,7 +325,7 @@ async function loadCurrentCourse() {
         currentCourseName = course.name;
 
         // Update course title
-        const courseTitle = document.querySelector('.course-title');
+        const courseTitle = document.getElementById('course-title');
         if (courseTitle) {
             courseTitle.textContent = `${course.name} - Download Chats`;
         }
@@ -773,6 +773,7 @@ function showStudentModal(studentName, studentUsername, courseName, sessions) {
     
     // Show modal
     modal.style.display = 'block';
+    a11yModal.open(modal, { onRequestClose: closeStudentModal });
 }
 
 /**
@@ -1328,6 +1329,7 @@ function showDownloadProgress() {
     const modal = document.getElementById('download-modal');
     if (modal) {
         modal.style.display = 'block';
+        a11yModal.open(modal, { escapable: false });
     }
 }
 
@@ -1337,6 +1339,7 @@ function showDownloadProgress() {
 function hideDownloadProgress() {
     const modal = document.getElementById('download-modal');
     if (modal) {
+        a11yModal.close(modal);
         modal.style.display = 'none';
     }
 }
@@ -1353,6 +1356,10 @@ function updateDownloadProgress(current, total) {
     if (progressFill) {
         const percentage = (current / total) * 100;
         progressFill.style.width = `${percentage}%`;
+        const progressBar = progressFill.closest('.progress-bar');
+        progressBar?.setAttribute('aria-valuenow', String(current));
+        progressBar?.setAttribute('aria-valuemin', '0');
+        progressBar?.setAttribute('aria-valuemax', String(total));
     }
     
     if (downloadStatus) {
@@ -1366,6 +1373,7 @@ function updateDownloadProgress(current, total) {
 function closeStudentModal() {
     const modal = document.getElementById('student-modal');
     if (modal) {
+        a11yModal.close(modal);
         modal.style.display = 'none';
     }
 }

@@ -237,7 +237,7 @@ async function loadSpecificCourse(courseId) {
         window.currentCourseData = courseData;
         
         // Update the course title in the header
-        const courseTitleElement = document.querySelector('.course-title');
+        const courseTitleElement = document.getElementById('course-title');
         if (courseTitleElement && courseData.courseName) {
             courseTitleElement.textContent = courseData.courseName;
         }
@@ -265,7 +265,7 @@ async function loadSpecificCourse(courseId) {
  */
 function showEmptyCourseState() {
     // Update the course title to show no course state
-    const courseTitleElement = document.querySelector('.course-title');
+    const courseTitleElement = document.getElementById('course-title');
     if (courseTitleElement) {
         courseTitleElement.textContent = 'No Course Found';
     }

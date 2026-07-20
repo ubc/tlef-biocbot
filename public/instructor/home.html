@@ -110,7 +110,7 @@
                 <!-- Onboarding Prompt Section -->
                 <section class="home-section onboarding-prompt-section" id="onboarding-prompt-section" style="display: none;">
                     <div class="section-header">
-                        <h2>🎓 Complete Your Onboarding</h2>
+                        <h2><span aria-hidden="true">🎓</span> Complete Your Onboarding</h2>
                     </div>
                     <div class="onboarding-prompt-content">
                         <p class="onboarding-prompt-description">
@@ -125,7 +125,7 @@
                 <!-- Statistics Section -->
                 <section class="home-section statistics-section" id="statistics-section" style="display: none;">
                     <div class="section-header">
-                        <h2>📊 Course Statistics</h2>
+                        <h2><span aria-hidden="true">📊</span> Course Statistics</h2>
                     </div>
                     <div class="statistics-content">
                         <div class="statistics-grid">
@@ -174,8 +174,8 @@
                     <div class="section-header clickable" onclick="toggleSection(this)">
                         <h2>
                             <span class="section-toggle-icon">▼</span>
-                            🧭 Approved Global Topics
-                            <span class="info-icon tooltip" data-tooltip="Per-course topics that the struggle bot is allowed to map students to. Unmatched topics are ignored.">ℹ️</span>
+                            <span aria-hidden="true">🧭</span> Approved Global Topics
+                            <button type="button" class="info-icon tooltip" data-tooltip="Per-course topics that the struggle bot is allowed to map students to. Unmatched topics are ignored." aria-label="More information"><span aria-hidden="true">ℹ️</span></button>
                         </h2>
                     </div>
                     <div class="approved-topics-content" id="approved-topics-content">
@@ -189,8 +189,8 @@
                     <div class="section-header clickable" onclick="toggleSection(this)" style="display: flex; align-items: center; flex-wrap: wrap;">
                         <h2>
                             <span class="section-toggle-icon">▼</span>
-                            📈 Cumulative Struggle Topics
-                            <span class="info-icon tooltip" data-tooltip="Total unique students who have struggled with this topic at any point during the course term. This helps identify long-term pain points.">ℹ️</span>
+                            <span aria-hidden="true">📈</span> Cumulative Struggle Topics
+                            <button type="button" class="info-icon tooltip" data-tooltip="Total unique students who have struggled with this topic at any point during the course term. This helps identify long-term pain points." aria-label="More information"><span aria-hidden="true">ℹ️</span></button>
                         </h2>
                         <span style="font-size: 0.85em; color: #666; font-weight: normal; margin-left: 10px;">(All Unique Students)</span>
                         <button type="button" id="download-persistence-topics-btn" onclick="event.stopPropagation(); downloadPersistenceTopics();" title="Download topics as .txt file" style="margin-left: auto; padding: 6px 14px; font-size: 0.9em; background: var(--primary-color, #0070f3); color: white; border: none; border-radius: 6px; cursor: pointer;">⬇ Download</button>
@@ -206,8 +206,8 @@
                     <div class="section-header clickable" onclick="toggleSection(this)">
                         <h2>
                             <span class="section-toggle-icon">▼</span>
-                            ⚠️ Struggle Topics
-                            <span class="info-icon tooltip" data-tooltip="Snapshot of students currently in Directive Mode (Active) or being monitored after a struggle (Inactive). Focus here for immediate interventions.">ℹ️</span>
+                            <span aria-hidden="true">⚠️</span> Struggle Topics
+                            <button type="button" class="info-icon tooltip" data-tooltip="Snapshot of students currently in Directive Mode (Active) or being monitored after a struggle (Inactive). Focus here for immediate interventions." aria-label="More information"><span aria-hidden="true">ℹ️</span></button>
                         </h2>
                     </div>
                     <div class="struggle-topics-content" id="struggle-topics-content">
@@ -220,7 +220,7 @@
                         <div class="chart-header">
                             <h3>
                                 Weekly Active Struggle Trends
-                                <span class="info-icon tooltip" data-tooltip="Shows the number of students with active struggles each week, broken down by topic. Decreasing bars indicate student improvement.">&#x2139;&#xFE0F;</span>
+                                <button type="button" class="info-icon tooltip" data-tooltip="Shows the number of students with active struggles each week, broken down by topic. Decreasing bars indicate student improvement." aria-label="More information"><span aria-hidden="true">&#x2139;&#xFE0F;</span></button>
                             </h3>
                             <div class="chart-nav-controls">
                                 <button class="action-btn secondary chart-nav-btn" id="chart-prev-weeks" title="Earlier weeks">&larr; Earlier</button>
@@ -229,7 +229,7 @@
                             </div>
                         </div>
                         <div class="chart-canvas-wrapper">
-                            <canvas id="weekly-struggle-chart"></canvas>
+                            <canvas id="weekly-struggle-chart" role="img" aria-label="Bar chart of weekly active struggle counts by topic. Data table not available; use the Download CSV button for the underlying data."></canvas>
                         </div>
                         <div class="chart-legend-note">
                             <span>Each bar shows unique students with active struggles that week, grouped by topic.</span>
@@ -240,8 +240,8 @@
                     <div class="live-struggle-table-container" id="live-struggle-container" style="display: none;">
                         <div class="table-header">
                             <h3>
-                                📋 Live Struggle Activity
-                                <span class="info-icon tooltip" data-tooltip="Real-time log of struggle interactions as they happen. Use this to see who is struggling right now.">ℹ️</span>
+                                <span aria-hidden="true">📋</span> Live Struggle Activity
+                                <button type="button" class="info-icon tooltip" data-tooltip="Real-time log of struggle interactions as they happen. Use this to see who is struggling right now." aria-label="More information"><span aria-hidden="true">ℹ️</span></button>
                             </h3>
                             <div class="table-controls">
                                 <label class="filter-checkbox">
@@ -257,10 +257,10 @@
                             <table class="live-struggle-table">
                                 <thead>
                                     <tr>
-                                        <th>Time (PST)</th>
-                                        <th id="struggle-name-th">Name</th>
-                                        <th>Topic</th>
-                                        <th>State</th>
+                                        <th scope="col">Time (PST)</th>
+                                        <th id="struggle-name-th" scope="col">Name</th>
+                                        <th scope="col">Topic</th>
+                                        <th scope="col">State</th>
                                     </tr>
                                 </thead>
                                 <tbody id="live-struggle-tbody">
@@ -298,7 +298,7 @@
                 <!-- Missing Items Alert Section -->
                 <section class="home-section missing-items-section" id="missing-items-section" style="display: none;">
                     <div class="section-header">
-                        <h2>⚠️ Missing Course Content</h2>
+                        <h2><span aria-hidden="true">⚠️</span> Missing Course Content</h2>
                     </div>
                     <div class="missing-items-content">
                         <p class="missing-items-description">
@@ -313,7 +313,7 @@
                 <!-- All Complete Message -->
                 <section class="home-section complete-section" id="complete-section" style="display: none;">
                     <div class="section-header">
-                        <h2>✅ All Units Complete</h2>
+                        <h2><span aria-hidden="true">✅</span> All Units Complete</h2>
                     </div>
                     <div class="complete-content">
                         <p>All units have the required learning objectives, lecture notes, and practice questions.</p>

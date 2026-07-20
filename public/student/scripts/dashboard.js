@@ -152,6 +152,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function showConfirmModal(topic) {
         topicToReset = topic;
         modal.style.display = 'flex';
+        a11yModal.open(modal, { onRequestClose: hideModal });
         
         if (topic === 'ALL') {
             modalTitle.textContent = 'Reset All Topics?';
@@ -165,6 +166,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function hideModal() {
+        a11yModal.close(modal);
         modal.style.display = 'none';
         topicToReset = null;
     }

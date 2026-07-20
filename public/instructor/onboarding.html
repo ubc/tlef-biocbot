@@ -52,7 +52,7 @@
         <main class="main-content">
             <!-- Progress Bar -->
             <div class="onboarding-progress">
-                <div class="progress-bar">
+                <div class="progress-bar" role="progressbar" aria-label="Onboarding progress">
                     <div class="progress-fill" id="progress-fill"></div>
                 </div>
                 <div class="progress-steps">
@@ -66,7 +66,7 @@
             <div id="onboarding-complete" class="onboarding-complete" style="display: none;">
                 <div class="step-content">
                     <div class="welcome-header">
-                        <h1>🎉 Onboarding Completed!</h1>
+                        <h1><span aria-hidden="true">🎉</span> Onboarding Completed!</h1>
                         <p class="welcome-subtitle">Your course has been successfully set up. You can now enjoy using BiocBot!</p>
                     </div>
                     
@@ -660,6 +660,7 @@
         </div>
     </div>
     
+    <script src="../common/scripts/modal-a11y.js"></script>
     <script src="../common/scripts/auth.js"></script>
     <script src="../common/scripts/notifications.js"></script>
     <script src="../common/scripts/ui-utils.js"></script>

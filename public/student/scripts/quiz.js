@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const progressEl = document.getElementById('quiz-progress');
     const progressText = document.getElementById('progress-text');
     const progressFill = document.getElementById('progress-fill');
+    const progressBar = progressFill?.closest('.progress-bar');
 
     const unitFilter = document.getElementById('unit-filter');
     const typeFilter = document.getElementById('type-filter');
@@ -183,6 +184,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Progress
         progressText.textContent = `Question ${currentIndex + 1} of ${filteredQuestions.length}`;
         progressFill.style.width = `${((currentIndex) / filteredQuestions.length) * 100}%`;
+        progressBar?.setAttribute('aria-valuenow', String(currentIndex));
+        progressBar?.setAttribute('aria-valuemin', '0');
+        progressBar?.setAttribute('aria-valuemax', String(filteredQuestions.length));
 
         // Meta
         document.getElementById('question-unit').textContent = q.lectureName;
@@ -659,6 +663,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('completion-total').textContent = sessionTotal;
 
         progressFill.style.width = '100%';
+        progressBar?.setAttribute('aria-valuenow', String(sessionTotal));
+        progressBar?.setAttribute('aria-valuemin', '0');
+        progressBar?.setAttribute('aria-valuemax', String(sessionTotal));
     }
 
     function updateGlobalStats(stats) {

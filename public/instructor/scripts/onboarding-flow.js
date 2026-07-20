@@ -520,6 +520,10 @@ function updateProgressBar() {
     if (progressFill) {
         const progress = (onboardingState.currentStep / onboardingState.totalSteps) * 100;
         progressFill.style.width = `${progress}%`;
+        const progressBar = progressFill.closest('.progress-bar');
+        progressBar?.setAttribute('aria-valuenow', String(onboardingState.currentStep));
+        progressBar?.setAttribute('aria-valuemin', '0');
+        progressBar?.setAttribute('aria-valuemax', String(onboardingState.totalSteps));
     }
 }
 

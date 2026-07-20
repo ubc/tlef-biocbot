@@ -62,11 +62,11 @@
 
         const modalHtml = `
             <div id="idle-timeout-modal" class="modal-overlay" style="display: none;">
-                <div class="modal-content">
+                <div class="modal-content" role="alertdialog" aria-modal="true" aria-labelledby="idle-modal-title" aria-describedby="idle-modal-desc">
                     <div class="modal-header">
-                        <h2>Are you still there?</h2>
+                        <h2 id="idle-modal-title" tabindex="-1">Are you still there?</h2>
                     </div>
-                    <div class="modal-body" role="status">
+                    <div class="modal-body" id="idle-modal-desc" role="status">
                         <p>You have been idle for a while.</p>
                         <p>You will be automatically signed out in <span id="idle-countdown-display" style="font-weight: bold; color: var(--primary-color);">--:--</span>.</p>
                     </div>
@@ -154,6 +154,7 @@
             
             if (modal) {
                 modal.style.display = 'flex'; // Uses flex because of .modal-overlay css
+                a11yModal.open(modal, { initialFocus: '#idle-stay-btn', escapable: false });
                 
                 // Handle buttons
                 // Need to remove old listeners to avoid duplicates if re-initialized? 
@@ -167,6 +168,7 @@
                 
                 stayBtn.onclick = () => {
                     console.log('🕒 [IDLE] User confirmed stay');
+                    a11yModal.close(modal);
                     modal.style.display = 'none';
                     resetTimer(); // Restart timer logic
                 };

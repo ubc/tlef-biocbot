@@ -297,6 +297,7 @@ function ensureTopicReviewModal(hintText = 'Edit, add, or remove topics before s
     document.body.appendChild(modal);
 
     const closeWithResult = (topics) => {
+        a11yModal.close(modal);
         modal.classList.remove('show');
         modal.style.display = 'none';
         const resolver = topicReviewResolve;
