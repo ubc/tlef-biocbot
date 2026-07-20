@@ -195,6 +195,7 @@ async function generateAIQuestionContent() {
  */
 function openRegenerateModal() {
     const modal = document.getElementById('regenerate-modal');
+    const questionModal = document.getElementById('question-modal');
     if (!modal) return;
     
     // Display current question for reference
@@ -224,6 +225,12 @@ function openRegenerateModal() {
         displayContainer.innerHTML = contentHtml;
     }
     
+    // Suspend the parent dialog without clearing its in-progress form. Native
+    // modal dialogs cannot be stacked, so the parent is restored on dismissal.
+    if (questionModal && a11yModal.isOpen(questionModal)) {
+        a11yModal.suspend(questionModal);
+    }
+
     modal.classList.add('show');
     a11yModal.open(modal, { onRequestClose: closeRegenerateModal });
 }
@@ -234,11 +241,16 @@ function openRegenerateModal() {
 function closeRegenerateModal() {
     const modal = document.getElementById('regenerate-modal');
     if (modal) {
-        a11yModal.close(modal);
+        a11yModal.close(modal, { restoreFocus: false });
         modal.classList.remove('show');
         // Reset feedback
         const feedback = document.getElementById('regenerate-feedback');
         if (feedback) feedback.value = '';
+    }
+
+    const questionModal = document.getElementById('question-modal');
+    if (questionModal?.classList.contains('show') && !a11yModal.isOpen(questionModal)) {
+        a11yModal.resume(questionModal, { onRequestClose: closeQuestionModal });
     }
 }
 

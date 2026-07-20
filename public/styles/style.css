@@ -293,7 +293,7 @@ textarea {
     overflow-y: auto;
 }
 
-header:not(.sidebar) {
+header {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -302,9 +302,17 @@ header:not(.sidebar) {
     border-bottom: 1px solid var(--border-color);
 }
 
-header:not(.sidebar) h1 {
+header h1 {
     font-size: 24px;
     font-weight: 500;
+}
+
+/* The sidebar is a landmark header, but it is not a page-content header. */
+header.sidebar {
+    justify-content: flex-start;
+    align-items: stretch;
+    margin-bottom: 0;
+    border-bottom: 0;
 }
 
 .course-selector select {
@@ -467,7 +475,7 @@ header:not(.sidebar) h1 {
     }
 
     /* Compact header on mobile */
-    header:not(.sidebar) {
+    header {
         margin-bottom: 10px;
         padding-bottom: 10px;
         flex-direction: column;
@@ -475,8 +483,15 @@ header:not(.sidebar) h1 {
         gap: 10px;
     }
 
-    header:not(.sidebar) h1 {
+    header h1 {
         font-size: 20px;
+    }
+
+    header.sidebar {
+        margin-bottom: 0;
+        padding-bottom: 10px;
+        align-items: stretch;
+        gap: 0;
     }
 
     /* Mobile Header Toggle Styles */

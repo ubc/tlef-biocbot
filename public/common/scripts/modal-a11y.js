@@ -1,6 +1,7 @@
 /* Shared native-dialog keyboard and focus contract for application modals. */
 (function () {
     const modalState = new WeakMap();
+    const suspendedModalState = new WeakMap();
     const focusableSelector = [
         'a[href]',
         'button:not([disabled])',
@@ -183,15 +184,17 @@
      * @param {(detail: {source: 'escape'|'backdrop'|'replacement'}) => void} [options.onRequestClose]
      * @param {HTMLElement|string} [options.dialogEl] Legacy compatibility only.
      * @param {HTMLElement|string} [options.fallbackFocus]
+     * @param {HTMLElement|string} [options.restoreFocusTarget] Internal resume support.
      * @param {string} [options.dismissalBlockedMessage]
      */
     function open(modalRootEl, options = {}) {
         if (!(modalRootEl instanceof HTMLElement)) return;
 
-        let restoreTarget = document.activeElement;
+        const explicitRestoreTarget = resolveElement(document, options.restoreFocusTarget);
+        let restoreTarget = explicitRestoreTarget || document.activeElement;
         const existingState = modalState.get(modalRootEl);
         if (existingState) {
-            restoreTarget = existingState.restoreTarget;
+            if (!explicitRestoreTarget) restoreTarget = existingState.restoreTarget;
             close(modalRootEl, { restoreFocus: false });
         }
 
@@ -201,7 +204,7 @@
                 throw new Error('A forced-choice modal must be completed before another modal opens.');
             }
             if (activeState) {
-                restoreTarget = activeState.restoreTarget;
+                if (!explicitRestoreTarget) restoreTarget = activeState.restoreTarget;
                 if (activeState.onRequestClose) activeState.onRequestClose({ source: 'replacement' });
                 if (modalState.has(activeModalRoot)) close(activeModalRoot, { restoreFocus: false });
             }
@@ -299,5 +302,27 @@
         return modalState.has(modalRootEl);
     }
 
-    window.a11yModal = { open, close, isOpen };
+    function suspend(modalRootEl) {
+        const state = modalState.get(modalRootEl);
+        if (!state) return false;
+
+        suspendedModalState.set(modalRootEl, {
+            restoreTarget: state.restoreTarget,
+            fallbackFocus: state.fallbackFocus
+        });
+        close(modalRootEl, { restoreFocus: false });
+        return true;
+    }
+
+    function resume(modalRootEl, options = {}) {
+        const suspendedState = suspendedModalState.get(modalRootEl);
+        suspendedModalState.delete(modalRootEl);
+        open(modalRootEl, {
+            ...options,
+            fallbackFocus: options.fallbackFocus || suspendedState?.fallbackFocus,
+            restoreFocusTarget: suspendedState?.restoreTarget
+        });
+    }
+
+    window.a11yModal = { open, close, isOpen, suspend, resume };
 })();

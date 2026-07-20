@@ -1,6 +1,6 @@
 // @ts-check
 /// <reference types="node" />
-const { test } = require('@playwright/test');
+const { test, expect } = require('@playwright/test');
 const { storageStatePath } = require('../e2e/helpers/users');
 const { expectModalKeyboardContract } = require('./helpers/modal-keyboard-contract');
 
@@ -127,8 +127,11 @@ test.describe('Accessibility: instructor onboarding modal keyboard contract', ()
         // The questions panel is normally selected through the preceding guided
         // flow. Select it here only to expose its real, user-visible trigger.
         await page.evaluate(() => {
-            /** @type {any} */ (window).showSubstep('questions');
+            const onboardingWindow = /** @type {any} */ (window);
+            onboardingWindow.showStep(3);
+            onboardingWindow.showSubstep('questions');
         });
+        await expect(page.locator('#step-3')).toHaveClass(/active/);
         await expect(page.locator('#substep-questions')).toHaveClass(/active/);
 
         await expectModalKeyboardContract(page, {

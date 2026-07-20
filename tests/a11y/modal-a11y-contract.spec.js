@@ -21,6 +21,7 @@ async function loadHarness(page) {
             <h2>Normal contract</h2>
             <button id="normal-first">First</button>
             <button id="normal-replace">Replace</button>
+            <button id="normal-suspend">Open child dialog</button>
             <button id="normal-async">Complete asynchronously</button>
             <button id="normal-last">Last</button>
         </dialog>
@@ -28,6 +29,11 @@ async function loadHarness(page) {
         <dialog id="replacement-dialog">
             <h2>Replacement contract</h2>
             <button id="replacement-close">Finish replacement</button>
+        </dialog>
+
+        <dialog id="child-dialog">
+            <h2>Child contract</h2>
+            <button id="child-close">Return to parent</button>
         </dialog>
 
         <dialog id="forced-dialog">
@@ -47,6 +53,7 @@ async function loadHarness(page) {
         const testWindow = /** @type {any} */ (window);
         const normal = /** @type {HTMLElement} */ (document.querySelector('#normal-dialog'));
         const replacement = /** @type {HTMLElement} */ (document.querySelector('#replacement-dialog'));
+        const child = /** @type {HTMLElement} */ (document.querySelector('#child-dialog'));
         const forced = /** @type {HTMLElement} */ (document.querySelector('#forced-dialog'));
         const legacy = /** @type {HTMLElement} */ (document.querySelector('#legacy-dialog'));
 
@@ -66,6 +73,14 @@ async function loadHarness(page) {
         });
         document.querySelector('#replacement-close')?.addEventListener('click', () => {
             testWindow.a11yModal.close(replacement);
+        });
+        document.querySelector('#normal-suspend')?.addEventListener('click', () => {
+            testWindow.a11yModal.suspend(normal);
+            testWindow.a11yModal.open(child);
+        });
+        document.querySelector('#child-close')?.addEventListener('click', () => {
+            testWindow.a11yModal.close(child, { restoreFocus: false });
+            testWindow.a11yModal.resume(normal, { onRequestClose: closeNormal });
         });
 
         document.querySelector('#forced-trigger')?.addEventListener('click', () => {
@@ -145,6 +160,19 @@ test('replacement and async completion restore the original outside trigger', as
         initialFocus: '#normal-dialog h2',
         completion: '#normal-async',
     });
+});
+
+test('suspended parent resumes without losing its original focus-return target', async ({ page }) => {
+    await page.locator('#normal-trigger').click();
+    await page.locator('#normal-suspend').click();
+    await expect(page.locator('#child-dialog')).toBeVisible();
+
+    await page.locator('#child-close').click();
+    await expect(page.locator('#normal-dialog')).toBeVisible();
+    await expect(page.locator('#normal-dialog h2')).toBeFocused();
+
+    await page.locator('#normal-last').click();
+    await expect(page.locator('#normal-trigger')).toBeFocused();
 });
 
 test('legacy helper callers use one temporary native host without accumulating overlays', async ({ page }) => {
