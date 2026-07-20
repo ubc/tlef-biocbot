@@ -66,7 +66,7 @@
                     <div class="modal-header">
                         <h2>Are you still there?</h2>
                     </div>
-                    <div class="modal-body">
+                    <div class="modal-body" role="status">
                         <p>You have been idle for a while.</p>
                         <p>You will be automatically signed out in <span id="idle-countdown-display" style="font-weight: bold; color: var(--primary-color);">--:--</span>.</p>
                     </div>

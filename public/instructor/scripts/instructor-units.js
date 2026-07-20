@@ -199,7 +199,7 @@ function createUnitElement(unitName, unitData, isExpanded = false) {
             <div class="header-actions">
                 <div class="publish-toggle">
                     <label class="toggle-switch">
-                        <input type="checkbox" id="publish-${unitId}" onchange="togglePublish('${unitName}', this.checked)">
+                        <input type="checkbox" id="publish-${unitId}" aria-label="Publish ${unitName} to students" onchange="togglePublish('${unitName}', this.checked)">
                         <span class="toggle-slider"></span>
                     </label>
                     <span class="toggle-label">Published</span>

@@ -16,9 +16,10 @@
     <link rel="stylesheet" href="../styles/quiz.css">
 </head>
 <body>
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
     <div class="app-container">
         <!-- Sidebar Navigation -->
-        <aside class="sidebar">
+        <header class="sidebar">
             <div class="logo-container">
                 <h2>BiocBot</h2>
             </div>
@@ -28,7 +29,7 @@
                     <li><a href="/student/history"><span class="icon"></span> Chat History</a></li>
                     <li><a href="/student/flagged"><span class="icon"></span> Flagged</a></li>
                     <li><a href="/student/dashboard.html"><span class="icon"></span> Topic Dashboard</a></li>
-                    <li class="active"><a href="/student/quiz"><span class="icon"></span> Quiz</a></li>
+                    <li class="active"><a href="/student/quiz" aria-current="page"><span class="icon"></span> Quiz</a></li>
                     <li id="super-course-nav-item" style="display: none;"><a href="/student/super-course"><span class="icon"></span> Super Course</a></li>
                     <li class="mobile-only-nav"><a href="#" id="mobile-logout-btn"><span class="icon"></span> Logout</a></li>
                 </ul>
@@ -41,12 +42,12 @@
                     <a href="#" id="logout-btn" class="user-action">Logout</a>
                 </div>
             </div>
-        </aside>
+        </header>
 
         <!-- Main Content Area -->
         <main class="main-content">
             <header class="page-header">
-                <h1>Quiz Practice</h1>
+                <h1 id="main" tabindex="-1">Quiz Practice</h1>
                 <p>Test your knowledge with practice questions. You can attempt questions as many times as you like.</p>
             </header>
 
@@ -97,7 +98,7 @@
             <!-- Question Display -->
             <div class="quiz-content" id="quiz-content">
                 <!-- Loading State -->
-                <div class="quiz-loading" id="quiz-loading">
+                <div class="quiz-loading" id="quiz-loading" role="status">
                     <div class="loading-spinner">Loading questions...</div>
                 </div>
 
@@ -153,7 +154,7 @@
 
                     <!-- Materials (shown on wrong answer) -->
                     <div class="materials-container" id="materials-container" style="display: none;">
-                        <h4>Review Materials</h4>
+                        <h2>Review Materials</h2>
                         <p>Review the lecture materials for this unit to strengthen your understanding:</p>
                         <div class="materials-list" id="materials-list"></div>
                     </div>
@@ -161,8 +162,8 @@
                     <!-- Quiz Help Chat (shown on wrong answer) -->
                     <div class="quiz-chat-container" id="quiz-chat-container" style="display: none;">
                         <div class="quiz-chat-header">
-                            <span class="quiz-chat-title">Need help understanding this?</span>
-                            <button class="quiz-chat-close" id="quiz-chat-close" title="Close chat">&times;</button>
+                            <h2 class="quiz-chat-title">Need help understanding this?</h2>
+                            <button class="quiz-chat-close" id="quiz-chat-close" title="Close chat" aria-label="Close"><span aria-hidden="true">&times;</span></button>
                         </div>
                         <div class="quiz-chat-messages" id="quiz-chat-messages"></div>
                         <div class="quiz-chat-typing" id="quiz-chat-typing" style="display: none;">

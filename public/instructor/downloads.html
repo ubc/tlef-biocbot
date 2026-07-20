@@ -16,9 +16,10 @@
     <link rel="stylesheet" href="../styles/downloads.css">
 </head>
 <body>
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
     <div class="app-container">
         <!-- Sidebar Navigation -->
-        <aside class="sidebar">
+        <header class="sidebar">
             <div class="logo-container">
                 <h2>BiocBot</h2>
             </div>
@@ -31,7 +32,7 @@
                     <li id="onboarding-nav-item" style="display: none;"><a href="/instructor/onboarding">Onboarding</a></li>
                     <li><a href="/instructor/flagged">Flagged Content</a></li>
                     <li id="nav-student-hub-li"><a href="/instructor/student-hub">Student Hub</a></li>
-                    <li id="instructor-downloads-nav" class="active" style="display: none;"><a href="/instructor/downloads">Download Chats</a></li>
+                    <li id="instructor-downloads-nav" class="active" style="display: none;"><a href="/instructor/downloads" aria-current="page">Download Chats</a></li>
                     <li><a href="/instructor/ta-hub">TA Hub</a></li>
                 </ul>
             </nav>
@@ -44,12 +45,12 @@
                     <a href="#" id="logout-btn" class="user-action">Logout</a>
                 </div>
             </div>
-        </aside>
+        </header>
 
         <!-- Main Content Area -->
         <main class="main-content">
             <header class="downloads-header">
-                <h1 id="course-title">BIOC202 - Chat Downloads</h1>
+                <h1 id="main" class="course-title" tabindex="-1">BIOC202 - Chat Downloads</h1>
                 <div class="course-selector" id="scope-selector-container" style="display: none;">
                     <select id="scope-selector" aria-label="Download scope">
                         <!-- Course + superchat bucket options populated dynamically -->
@@ -62,7 +63,7 @@
             </div>
 
             <!-- Loading State -->
-            <div id="loading-state" class="loading-container">
+            <div id="loading-state" class="loading-container" role="status">
                 <div class="loading-spinner"></div>
                 <p>Loading student data...</p>
             </div>
@@ -70,7 +71,7 @@
             <!-- Error State -->
             <div id="error-state" class="error-container" style="display: none;">
                 <div class="error-icon">⚠️</div>
-                <h3>Error Loading Data</h3>
+                <h2>Error Loading Data</h2>
                 <p id="error-message">Unable to load student data. Please try again.</p>
                 <button class="btn-primary" onclick="loadStudentData()">Retry</button>
             </div>
@@ -78,7 +79,7 @@
             <!-- Empty State -->
             <div id="empty-state" class="empty-container" style="display: none;">
                 <div class="empty-icon">📚</div>
-                <h3>No Students Found</h3>
+                <h2>No Students Found</h2>
                 <p>No students have saved chat sessions for this course yet.</p>
             </div>
 
@@ -114,7 +115,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="student-modal-title">Student Chat History</h2>
-                <button class="modal-close" onclick="closeStudentModal()">×</button>
+                <button class="modal-close" onclick="closeStudentModal()" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
             
             <div class="modal-body">
@@ -164,7 +165,7 @@
                     <div class="progress-bar">
                         <div class="progress-fill" id="progress-fill"></div>
                     </div>
-                    <p id="download-status">Preparing download...</p>
+                    <p id="download-status" role="status">Preparing download...</p>
                 </div>
             </div>
         </div>

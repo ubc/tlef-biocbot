@@ -17,9 +17,10 @@
     <link rel="stylesheet" href="./styles/ta-hub.css">
 </head>
 <body>
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
     <div class="app-container">
         <!-- Sidebar Navigation -->
-        <aside class="sidebar">
+        <header class="sidebar">
             <div class="logo-container">
                 <h2>BiocBot</h2>
             </div>
@@ -32,7 +33,7 @@
                     <li><a href="/instructor/flagged">Flagged Content</a></li>
                     <li id="nav-student-hub-li"><a href="/instructor/student-hub">Student Hub</a></li>
                     <li id="instructor-downloads-nav" style="display: none;"><a href="/instructor/downloads">Download Chats</a></li>
-                    <li class="active"><a href="/instructor/ta-hub">TA Hub</a></li>
+                    <li class="active"><a href="/instructor/ta-hub" aria-current="page">TA Hub</a></li>
                 </ul>
             </nav>
             <div class="user-info">
@@ -44,12 +45,12 @@
                     <a href="#" id="logout-btn" class="user-action">Logout</a>
                 </div>
             </div>
-        </aside>
+        </header>
 
         <!-- Main Content Area -->
         <main class="main-content">
             <div class="content-header">
-                <h1>TA Hub</h1>
+                <h1 id="main" tabindex="-1">TA Hub</h1>
                 <p>View Teaching Assistants assigned to your courses</p>
             </div>
 
@@ -79,7 +80,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Remove Teaching Assistant</h2>
-                <button class="modal-close" onclick="closeRemoveTAModal()">×</button>
+                <button class="modal-close" onclick="closeRemoveTAModal()" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
             <div class="modal-body">
                 <p>Are you sure you want to remove this Teaching Assistant from the course?</p>

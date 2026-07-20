@@ -43,7 +43,7 @@
     box-shadow: 0 2px 10px rgba(0, 33, 69, 0.12);
 }
 .hub-card .hub-icon { font-size: 1.7rem; margin-bottom: 0.5rem; }
-.hub-card h3 { margin: 0 0 0.4rem 0; color: var(--primary-color, #002145); font-size: 1.12rem; }
+.hub-card h2 { margin: 0 0 0.4rem 0; color: var(--primary-color, #002145); font-size: 1.12rem; }
 .hub-card p { margin: 0; color: var(--text-secondary, #666); font-size: 0.9rem; line-height: 1.45; }
 .hub-card .hub-count { font-weight: 600; color: var(--primary-color, #002145); }
 

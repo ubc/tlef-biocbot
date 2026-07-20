@@ -92,7 +92,7 @@
   border: 1px solid var(--border-color);
 }
 
-.selected-course-details .course-info h4 {
+.selected-course-details .course-info .selected-course-name-heading {
   font-size: 1.2rem;
   color: var(--text-color);
   margin: 0 0 10px 0;

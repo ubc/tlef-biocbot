@@ -17,15 +17,16 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
     <div class="app-container">
         <!-- Sidebar Navigation -->
-        <aside class="sidebar">
+        <header class="sidebar">
             <div class="logo-container">
                 <h2>BiocBot</h2>
             </div>
             <nav class="main-nav">
                 <ul>
-                    <li class="active"><a href="/instructor/home" id="nav-home">Home</a></li>
+                    <li class="active"><a href="/instructor/home" id="nav-home" aria-current="page">Home</a></li>
                     <li><a href="/instructor/chat" id="nav-chat">Super Chat</a></li>
                     <li><a href="/instructor/notes" id="nav-notes">Super Chat Notes</a></li>
                     <li><a href="/instructor/documents" id="nav-documents">Course Upload</a></li>
@@ -46,13 +47,13 @@
                     <a href="#" id="logout-btn" class="user-action">Logout</a>
                 </div>
             </div>
-        </aside>
+        </header>
 
         <!-- Main Content Area -->
         <main class="main-content">
             <header class="home-header">
                 <div class="header-content">
-                    <h1>Home</h1>
+                    <h1 id="main" tabindex="-1">Home</h1>
                     <!-- Course Selection Section -->
                     <div class="course-selection-container" id="course-selection-container" style="display: none;">
                         <div class="current-course-display" id="current-course-display">
@@ -85,7 +86,7 @@
 
                             <div id="selected-course-details" class="selected-course-details" style="display: none; margin-top: 14px;">
                                 <div class="course-info">
-                                    <h4 id="selected-course-name"></h4>
+                                    <h2 id="selected-course-name" class="selected-course-name-heading"></h2>
                                     <p><strong>Course ID:</strong> <span id="selected-course-id"></span></p>
                                     <p id="join-course-description">Enter the instructor course code to join this course.</p>
                                 </div>

@@ -17,15 +17,16 @@
     <link rel="stylesheet" href="./styles/onboarding.css">
 </head>
 <body>
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
     <div class="app-container">
         <!-- Sidebar Navigation -->
-        <aside class="sidebar">
+        <header class="sidebar">
             <div class="logo-container">
                 <h2>BiocBot</h2>
             </div>
             <nav class="main-nav">
                 <ul>
-                    <li class="active"><a href="/instructor/onboarding">Onboarding</a></li>
+                    <li class="active"><a href="/instructor/onboarding" aria-current="page">Onboarding</a></li>
                     <li><a href="/instructor/home">Home</a></li>
                     <li><a href="/instructor/chat">Super Chat</a></li>
                     <li><a href="/instructor/notes">Super Chat Notes</a></li>
@@ -45,7 +46,7 @@
                     <a href="#" id="logout-btn" class="user-action">Logout</a>
                 </div>
             </div>
-        </aside>
+        </header>
 
         <!-- Main Content Area -->
         <main class="main-content">
@@ -84,7 +85,7 @@
             <div id="step-1" class="onboarding-step active">
                 <div class="step-content">
                     <div class="welcome-header">
-                        <h1>Welcome to BiocBot!</h1>
+                        <h1 id="main" tabindex="-1">Welcome to BiocBot!</h1>
                         <p class="welcome-subtitle">Your AI-powered teaching assistant</p>
                     </div>
                     
@@ -94,21 +95,21 @@
                             <div class="workflow-step">
                                 <div class="step-number">1</div>
                                 <div class="step-details">
-                                    <h4>Upload Your Materials</h4>
+                                    <h3>Upload Your Materials</h3>
                                     <p>Upload PDFs, DOCX files, or text documents containing your lecture notes, readings, and course materials.</p>
                                 </div>
                             </div>
                             <div class="workflow-step">
                                 <div class="step-number">2</div>
                                 <div class="step-details">
-                                    <h4>AI Processing</h4>
+                                    <h3>AI Processing</h3>
                                     <p>Our AI automatically parses, chunks, and embeds your content into a searchable knowledge base.</p>
                                 </div>
                             </div>
                             <div class="workflow-step">
                                 <div class="step-number">3</div>
                                 <div class="step-details">
-                                    <h4>Student Interaction</h4>
+                                    <h3>Student Interaction</h3>
                                     <p>Students can ask questions and receive accurate, contextual answers based on your course content.</p>
                                 </div>
                             </div>
@@ -125,14 +126,14 @@
             <div id="step-2" class="onboarding-step">
                 <div class="step-content">
                     <div class="step-header">
-                        <h2>Let's Set Up Your Course</h2>
+                        <h1 class="step-title">Let's Set Up Your Course</h1>
                         <p>Tell us about your course structure so we can organize your content effectively.</p>
                         
                     </div>
 
                     <form id="course-setup-form" class="setup-form">
                         <div class="form-section">
-                            <h3>Course Information</h3>
+                            <h2>Course Information</h2>
                             <div class="form-group">
                                 <label for="course-select">Select Your Course</label>
                                 <select id="course-select" name="course" required>
@@ -147,7 +148,7 @@
                         </div>
 
                         <div id="academic-sync-section" class="form-section" style="display: none;">
-                            <h3>Class List Sync</h3>
+                            <h2>Class List Sync</h2>
                             <div class="form-row academic-sync-controls">
                                 <div class="form-group">
                                     <label for="academic-period-input">Session</label>
@@ -173,7 +174,7 @@
                         </div>
 
                         <div id="course-structure-section" class="form-section">
-                            <h3>Course Structure</h3>
+                            <h2>Course Structure</h2>
                             <div class="form-row">
                                 <div class="form-group">
                                     <label for="weeks-count">Number of Weeks</label>
@@ -192,7 +193,7 @@
 
                         <div id="join-course-section" class="form-section" style="display: none;">
                             <div class="join-course-info">
-                                <h3>Join Existing Course</h3>
+                                <h2>Join Existing Course</h2>
                                 <p>You've selected an existing course. Enter the instructor course code to become an instructor for this course.</p>
                                 <div class="course-details" id="selected-course-details">
                                     <!-- Course details will be populated here -->
@@ -219,7 +220,7 @@
             <div id="step-3" class="onboarding-step">
                 <div class="step-content">
                     <div class="step-header">
-                        <h2>Set Up Your First Unit</h2>
+                        <h1 class="step-title">Set Up Your First Unit</h1>
                         <p>Let's walk through setting up Unit 1 step by step. We'll guide you through each required component.</p>
                     </div>
 
@@ -228,21 +229,21 @@
                         <div class="progress-card active" data-substep="objectives">
                             <div class="progress-icon">1</div>
                             <div class="progress-text">
-                                <h4>Learning Objectives</h4>
+                                <h2>Learning Objectives</h2>
                                 <p>Define what students should learn</p>
                             </div>
                         </div>
                         <div class="progress-card" data-substep="materials">
                             <div class="progress-icon">2</div>
                             <div class="progress-text">
-                                <h4>Course Materials</h4>
+                                <h2>Course Materials</h2>
                                 <p>Upload your lecture materials</p>
                             </div>
                         </div>
                         <div class="progress-card" data-substep="questions">
                             <div class="progress-icon">3</div>
                             <div class="progress-text">
-                                <h4>Assessment Questions</h4>
+                                <h2>Assessment Questions</h2>
                                 <p>Create questions to evaluate student readiness</p>
                             </div>
                         </div>
@@ -251,7 +252,7 @@
                     <!-- Sub-step 1: Learning Objectives -->
                     <div id="substep-objectives" class="guided-substep active">
                         <div class="substep-header">
-                            <h3>Step 1: Learning Objectives</h3>
+                            <h2>Step 1: Learning Objectives</h2>
                             <p>Define clear learning objectives for your units. These will help students understand what they should learn and help AI generate better responses.</p>
                         </div>
                         
@@ -259,7 +260,7 @@
                             <div id="units-objectives-container">
                                 <!-- Unit 1 Learning Objectives -->
                                 <div class="unit-objectives-section">
-                                    <h4>Unit 1 Learning Objectives</h4>
+                                    <h3>Unit 1 Learning Objectives</h3>
                                     <div class="objectives-input-section">
                                         <div class="input-group">
                                             <input type="text" id="objective-input" class="objective-input" placeholder="Enter learning objective">
@@ -285,7 +286,7 @@
                     <!-- Sub-step 2: Course Materials -->
                     <div id="substep-materials" class="guided-substep">
                         <div class="substep-header">
-                            <h3>Step 2: Course Materials</h3>
+                            <h2>Step 2: Course Materials</h2>
                             <p>Upload your lecture notes and practice materials for your units. These are required for students to access the content.</p>
                         </div>
                         
@@ -293,11 +294,11 @@
                             <div id="units-materials-container">
                                 <!-- Unit 1 Course Materials -->
                                 <div class="unit-materials-section">
-                                    <h4>Unit 1 Course Materials</h4>
+                                    <h3>Unit 1 Course Materials</h3>
                                     <div class="materials-section">
                                         <div class="material-item required">
                                             <div class="material-info">
-                                                <h5>Lecture Notes</h5>
+                                                <h4>Lecture Notes</h4>
                                                 <p>Upload your lecture slides, notes, or readings for Unit 1</p>
                                                 <span class="status-badge" id="lecture-status">Not Uploaded</span>
                                             </div>
@@ -306,7 +307,7 @@
                                         
                                         <div class="material-item required">
                                             <div class="material-info">
-                                                <h5>Practice Questions/Tutorial</h5>
+                                                <h4>Practice Questions/Tutorial</h4>
                                                 <p>Upload practice questions, assignments, or tutorial materials</p>
                                                 <span class="status-badge" id="practice-status">Not Uploaded</span>
                                             </div>
@@ -315,7 +316,7 @@
                                         
                                         <div class="material-item optional">
                                             <div class="material-info">
-                                                <h5>Additional Materials (Optional)</h5>
+                                                <h4>Additional Materials (Optional)</h4>
                                                 <p>Add supplementary readings, videos, or other resources</p>
                                                 <span class="status-badge" id="additional-status">Optional</span>
                                             </div>
@@ -335,7 +336,7 @@
                     <!-- Sub-step 3: Probing Questions -->
                     <div id="substep-questions" class="guided-substep">
                         <div class="substep-header">
-                            <h3>Step 3: Assessment Questions</h3>
+                            <h2>Step 3: Assessment Questions</h2>
                             <p>Create assessment questions to determine student readiness for tutor/protégé mode. These help evaluate student understanding.</p>
                         </div>
                         
@@ -391,12 +392,12 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="modal-title">Upload Content</h2>
-                <button class="modal-close" onclick="closeUploadModal()">×</button>
+                <button class="modal-close" onclick="closeUploadModal()" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
             
             <div class="modal-body">
                 <!-- Loading Indicator (shown during upload) -->
-                <div id="upload-loading-indicator" class="upload-loading-indicator" style="display: none;">
+                <div id="upload-loading-indicator" class="upload-loading-indicator" style="display: none;" role="status">
                     <div class="loading-spinner"></div>
                     <div class="loading-message">
                         <p><strong>Uploading and processing document...</strong></p>
@@ -460,7 +461,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Create Assessment Question</h2>
-                <button class="modal-close" onclick="closeQuestionModal()">×</button>
+                <button class="modal-close" onclick="closeQuestionModal()" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
             
             <div class="modal-body">
@@ -564,7 +565,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Edit Learning Objective</h2>
-                <button class="modal-close" onclick="closeQuestionLearningObjectiveModal()">×</button>
+                <button class="modal-close" onclick="closeQuestionLearningObjectiveModal()" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
 
             <div class="modal-body">
@@ -596,7 +597,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Auto-link Questions?</h2>
-                <button class="modal-close" onclick="closeAutoLinkConfirmationModal()">×</button>
+                <button class="modal-close" onclick="closeAutoLinkConfirmationModal()" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
 
             <div class="modal-body">
@@ -624,7 +625,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Regenerate AI Question</h2>
-                <button class="modal-close" onclick="closeRegenerateModal()">×</button>
+                <button class="modal-close" onclick="closeRegenerateModal()" aria-label="Close"><span aria-hidden="true">×</span></button>
             </div>
             
             <div class="modal-body">
