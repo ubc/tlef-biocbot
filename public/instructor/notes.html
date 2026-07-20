@@ -57,16 +57,16 @@
             </div>
 
             <div class="hub-cards">
-                <div class="hub-card active" data-target="panel-browse" id="card-browse">
+                <button type="button" class="hub-card active" data-target="panel-browse" id="card-browse">
                     <div class="hub-icon">&#128218;</div>
                     <h2>Browse shared notes</h2>
                     <p><span class="hub-count" id="notes-count">0 notes</span> added by the department. Read others', manage your own.</p>
-                </div>
-                <div class="hub-card" data-target="panel-new" id="card-new">
+                </button>
+                <button type="button" class="hub-card" data-target="panel-new" id="card-new">
                     <div class="hub-icon">&#9998;</div>
                     <h2>Add a new note</h2>
                     <p>Write something you want the bot to know. Takes about a minute, in plain English.</p>
-                </div>
+                </button>
             </div>
 
             <!-- BROWSE -->
@@ -88,9 +88,11 @@
                         </div>
                     </div>
 
+                    <label class="visually-hidden" for="note-title">Note title</label>
                     <input type="text" id="note-title" maxlength="120"
                            placeholder="Title (optional — we'll generate one if you leave it blank)" />
 
+                    <label class="visually-hidden" for="note-body">Note body</label>
                     <textarea id="note-body" maxlength="5000"
                               placeholder="Write this the way you'd explain it to a student..."></textarea>
                     <div class="editor-row">
@@ -100,7 +102,7 @@
 
                     <div class="editor-footer">
                         <div class="editor-tags" id="editor-tags">
-                            <input type="text" id="tag-input" placeholder="add tag + Enter" />
+                            <input type="text" id="tag-input" placeholder="add tag + Enter" aria-label="Add tag" />
                         </div>
                         <div class="editor-actions">
                             <button class="btn-secondary" id="cancel-note">Cancel</button>

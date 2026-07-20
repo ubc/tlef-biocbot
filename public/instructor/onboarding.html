@@ -440,7 +440,7 @@
                     <div class="topic-review-list" id="upload-topic-review-list"></div>
                     <div class="topic-review-add-row">
                         <input id="upload-topic-new-input" class="topic-review-input" type="text" placeholder="Add a topic (e.g., Enzyme Kinetics)" />
-                        <select id="upload-topic-unit-select" class="topic-review-unit-select" title="Topic unit"></select>
+                        <select id="upload-topic-unit-select" class="topic-review-unit-select" title="Topic unit" aria-label="Unit for new topic"></select>
                         <button class="btn-secondary" id="upload-topic-add-btn">Add Topic</button>
                     </div>
                 </div>
@@ -493,8 +493,9 @@
                     
                     <!-- True/False Answer -->
                     <div class="form-section" id="tf-answer-section" style="display: none;">
-                        <label>Correct Answer</label>
-                        <div class="radio-group">
+                        <fieldset class="radio-group-fieldset">
+                            <legend class="form-label-legend">Correct Answer</legend>
+                            <div class="radio-group">
                             <label class="radio-option">
                                 <input type="radio" name="tf-answer" value="true">
                                 <span>True</span>
@@ -503,42 +504,45 @@
                                 <input type="radio" name="tf-answer" value="false">
                                 <span>False</span>
                             </label>
-                        </div>
+                            </div>
+                        </fieldset>
                     </div>
                     
                     <!-- Multiple Choice Options -->
                     <div class="form-section" id="mcq-answer-section" style="display: none;">
-                        <label>Answer Options</label>
-                        <div class="mcq-options">
+                        <fieldset class="radio-group-fieldset">
+                            <legend class="form-label-legend">Answer Options</legend>
+                            <div class="mcq-options">
                             <div class="mcq-option">
-                                <input type="text" placeholder="Option A" class="mcq-input" data-option="A">
+                                <input type="text" placeholder="Option A" class="mcq-input" data-option="A" aria-label="Option A text">
                                 <label class="radio-option">
                                     <input type="radio" name="mcq-correct" value="A">
                                     <span class="correct-label">Correct</span>
                                 </label>
                             </div>
                             <div class="mcq-option">
-                                <input type="text" placeholder="Option B" class="mcq-input" data-option="B">
+                                <input type="text" placeholder="Option B" class="mcq-input" data-option="B" aria-label="Option B text">
                                 <label class="radio-option">
                                     <input type="radio" name="mcq-correct" value="B">
                                     <span class="correct-label">Correct</span>
                                 </label>
                             </div>
                             <div class="mcq-option">
-                                <input type="text" placeholder="Option C" class="mcq-input" data-option="C">
+                                <input type="text" placeholder="Option C" class="mcq-input" data-option="C" aria-label="Option C text">
                                 <label class="radio-option">
                                     <input type="radio" name="mcq-correct" value="C">
                                     <span class="correct-label">Correct</span>
                                 </label>
                             </div>
                             <div class="mcq-option">
-                                <input type="text" placeholder="Option D" class="mcq-input" data-option="D">
+                                <input type="text" placeholder="Option D" class="mcq-input" data-option="D" aria-label="Option D text">
                                 <label class="radio-option">
                                     <input type="radio" name="mcq-correct" value="D">
                                     <span class="correct-label">Correct</span>
                                 </label>
                             </div>
-                        </div>
+                            </div>
+                        </fieldset>
                     </div>
                     
                     <!-- Short Answer Expected -->
@@ -653,9 +657,6 @@
                         Regenerate Question
                     </button>
                 </div>
-            </div>
-        </div>
-    </div>
             </div>
         </div>
     </div>

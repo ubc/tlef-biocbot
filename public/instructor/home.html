@@ -79,7 +79,7 @@
                             </div>
 
                             <div style="margin-top: 18px;">
-                                <label>Set Up One of Your Sections:</label>
+                                <p class="form-label-text">Set Up One of Your Sections:</p>
                                 <p style="margin: 4px 0 8px; color: #666; font-size: 0.9rem;">Set up a new BiocBot course for a section you teach — no instructor code needed.</p>
                                 <a class="action-btn secondary" id="setup-section-btn" href="/instructor/onboarding?addCourse=1" style="display: inline-block; text-decoration: none;">+ Set Up Another Section</a>
                             </div>
@@ -171,7 +171,7 @@
 
                 <!-- Approved Global Topics Section -->
                 <section class="home-section approved-topics-section" id="approved-topics-section" style="display: none;">
-                    <div class="section-header clickable" onclick="toggleSection(this)">
+                    <div class="section-header clickable" onclick="toggleSection(this)" role="button" tabindex="0" aria-expanded="true">
                         <h2>
                             <span class="section-toggle-icon">▼</span>
                             <span aria-hidden="true">🧭</span> Approved Global Topics
@@ -186,7 +186,7 @@
 
                 <!-- Persistence Topics Section (All-Time) -->
                 <section class="home-section persistence-topics-section" id="persistence-topics-section" style="display: none;">
-                    <div class="section-header clickable" onclick="toggleSection(this)" style="display: flex; align-items: center; flex-wrap: wrap;">
+                    <div class="section-header clickable" onclick="toggleSection(this)" role="button" tabindex="0" aria-expanded="true" style="display: flex; align-items: center; flex-wrap: wrap;">
                         <h2>
                             <span class="section-toggle-icon">▼</span>
                             <span aria-hidden="true">📈</span> Cumulative Struggle Topics
@@ -203,7 +203,7 @@
 
                 <!-- Struggle Topics Section -->
                 <section class="home-section struggle-topics-section" id="struggle-topics-section" style="display: none;">
-                    <div class="section-header clickable" onclick="toggleSection(this)">
+                    <div class="section-header clickable" onclick="toggleSection(this)" role="button" tabindex="0" aria-expanded="true">
                         <h2>
                             <span class="section-toggle-icon">▼</span>
                             <span aria-hidden="true">⚠️</span> Struggle Topics

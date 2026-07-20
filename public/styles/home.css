@@ -61,6 +61,14 @@
   font-weight: 500;
 }
 
+.course-selector .form-label-text {
+  display: block;
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: var(--text-color);
+  font-weight: 500;
+}
+
 .course-selector .course-select-dropdown {
   width: 100%;
   max-width: 470px;

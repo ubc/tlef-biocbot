@@ -293,7 +293,7 @@ test.describe('Instructor downloads page branch coverage', () => {
         await expect(page.locator('#student-modal')).toBeVisible();
         await expect(page.locator('#sessions-list')).toContainText('No saved chat sessions found.');
         await expect(page.locator('#download-all-btn')).toBeHidden();
-        await page.getByRole('button', { name: 'Close' }).click();
+        await page.locator('#student-modal .modal-close').click();
 
         const dialogPromise = page.waitForEvent('dialog');
         await page.locator('.student-card', { hasText: 'Failing Modal Student' })

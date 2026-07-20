@@ -180,7 +180,7 @@ class AgreementModal {
         this.modal.style.display = 'flex';
         document.body.style.overflow = 'hidden'; // Prevent background scrolling
         
-        a11yModal.open(this.modal, {
+        window.a11yModal?.open(this.modal, {
             dialogEl: this.modal.querySelector('#agreement-modal'),
             labelledBy: 'agreement-modal-title',
             initialFocus: '#agreement-modal-title',
@@ -218,7 +218,7 @@ class AgreementModal {
         if (!this.isVisible) return;
 
         this.isVisible = false;
-        a11yModal.close(this.modal);
+        window.a11yModal?.close(this.modal);
         this.modal.style.display = 'none';
         document.body.style.overflow = ''; // Restore scrolling
     }

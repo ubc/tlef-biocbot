@@ -173,6 +173,12 @@
     margin-bottom: 1.5rem;
 }
 
+fieldset.answer-options {
+    border: 0;
+    padding: 0;
+    min-inline-size: 0;
+}
+
 .option-label {
     display: flex;
     align-items: flex-start;

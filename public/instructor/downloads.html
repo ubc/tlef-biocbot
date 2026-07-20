@@ -92,7 +92,7 @@
                             <span id="total-students">0</span> students with saved chats
                         </div>
                         <div class="download-dropdown">
-                            <button class="btn-primary download-dropdown-toggle" id="download-course-btn" onclick="toggleDownloadMenu(event, 'course-all')">
+                            <button class="btn-primary download-dropdown-toggle" id="download-course-btn" onclick="toggleDownloadMenu(event, 'course-all')" aria-expanded="false" aria-haspopup="menu">
                                 <span id="download-all-label">Download All Course Data</span> &#9662;
                             </button>
                             <div class="download-dropdown-menu" id="download-menu-course-all">
@@ -140,7 +140,7 @@
                 <div class="modal-actions">
                     <button class="btn-secondary" onclick="closeStudentModal()">Close</button>
                     <div class="download-dropdown" id="download-all-btn" style="display: none;">
-                        <button class="btn-primary download-dropdown-toggle" onclick="toggleDownloadMenu(event, 'student-all')">
+                            <button class="btn-primary download-dropdown-toggle" onclick="toggleDownloadMenu(event, 'student-all')" aria-expanded="false" aria-haspopup="menu">
                             Download All Sessions &#9662;
                         </button>
                         <div class="download-dropdown-menu" id="download-menu-student-all">

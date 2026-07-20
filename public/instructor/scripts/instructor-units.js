@@ -186,7 +186,7 @@ function createUnitElement(unitName, unitData, isExpanded = false) {
     const formattedName = displayName ? `${unitNum}. ${displayName}` : unitName;
     
     unitDiv.innerHTML = `
-        <div class="accordion-header">
+        <div class="accordion-header" role="button" tabindex="0" aria-expanded="${isExpanded}">
             <div class="unit-name-container">
                 <span class="folder-name">${formattedName}</span>
                 <button class="unit-rename-btn" onclick="event.stopPropagation(); openRenameUnitInput('${unitName}')" title="Rename unit">✏️</button>
@@ -423,7 +423,7 @@ function initializeUnitEventListeners() {
     // Setup accordion toggling
     const accordionHeaders = document.querySelectorAll('.accordion-header');
     accordionHeaders.forEach(header => {
-        header.addEventListener('click', (e) => {
+        const toggleAccordion = (e) => {
             // Don't toggle if clicking on the toggle switch
             if (e.target.closest('.publish-toggle')) {
                 return;
@@ -436,10 +436,20 @@ function initializeUnitEventListeners() {
             if (content.classList.contains('collapsed')) {
                 content.classList.remove('collapsed');
                 toggle.textContent = '▼';
+                header.setAttribute('aria-expanded', 'true');
             } else {
                 content.classList.add('collapsed');
                 toggle.textContent = '▶';
+                header.setAttribute('aria-expanded', 'false');
             }
+        };
+
+        header.addEventListener('click', toggleAccordion);
+        header.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            if (e.target.closest('.publish-toggle')) return;
+            e.preventDefault();
+            toggleAccordion(e);
         });
     });
     

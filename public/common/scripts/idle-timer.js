@@ -154,7 +154,7 @@
             
             if (modal) {
                 modal.style.display = 'flex'; // Uses flex because of .modal-overlay css
-                a11yModal.open(modal, { initialFocus: '#idle-stay-btn', escapable: false });
+                window.a11yModal?.open(modal, { initialFocus: '#idle-stay-btn', escapable: false });
                 
                 // Handle buttons
                 // Need to remove old listeners to avoid duplicates if re-initialized? 
@@ -168,7 +168,7 @@
                 
                 stayBtn.onclick = () => {
                     console.log('🕒 [IDLE] User confirmed stay');
-                    a11yModal.close(modal);
+                    window.a11yModal?.close(modal);
                     modal.style.display = 'none';
                     resetTimer(); // Restart timer logic
                 };

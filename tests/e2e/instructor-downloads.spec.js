@@ -397,7 +397,7 @@ test.describe('Instructor downloads page — system admin UI', () => {
         await openDownloadsPage(page);
         const modal = await openStudentModal(page);
 
-        await modal.getByRole('button', { name: 'Close' }).click();
+        await modal.locator('.modal-close').click();
         await expect(modal).toBeHidden();
     });
 
