@@ -162,6 +162,37 @@ describe('POST /:courseId/extract-topics — mocked LLM', () => {
         expect(sendMessage.mock.calls[2][1].systemPrompt).toContain('consolidate and deduplicate');
     });
 
+    test('retains general chemistry struggle topics across extraction and consolidation', async () => {
+        const slideOne = `Slide 1\n${'Stoichiometry, acid-base chemistry, chemical equilibrium, and thermochemistry. '.repeat(120)}`;
+        const slideTwo = `Slide 2\n${'Atomic structure, chemical bonding, solutions, and electrochemistry. '.repeat(130)}`;
+        const finalTopics = [
+            'Stoichiometry',
+            'Acid-Base Chemistry',
+            'Chemical Equilibrium',
+            'Thermochemistry',
+            'Atomic Structure',
+            'Chemical Bonding',
+            'Solutions',
+            'Electrochemistry',
+        ];
+        const sendMessage = jest.fn()
+            .mockResolvedValueOnce({ content: '{"topics":["Stoichiometry","Acid-Base Chemistry","Chemical Equilibrium","Thermochemistry"]}' })
+            .mockResolvedValueOnce({ content: '{"topics":["Atomic Structure","Chemical Bonding","Solutions","Electrochemistry"]}' })
+            .mockResolvedValueOnce({ content: JSON.stringify({ topics: finalTopics }) });
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage } });
+
+        const res = await request(app({ db: memoryDb({ courses: [topicCourse] }), user: instructor }))
+            .post('/C1/extract-topics')
+            .send({ content: `${slideOne}\n\n${slideTwo}`, maxTopics: 8 });
+
+        expect(res.status).toBe(200);
+        expect(res.body.data.topics).toEqual(finalTopics);
+        expect(sendMessage).toHaveBeenCalledTimes(3);
+        expect(sendMessage.mock.calls[0][1].systemPrompt).toContain('chemistry and biochemistry');
+        expect(sendMessage.mock.calls[2][0]).toContain('Stoichiometry');
+        expect(sendMessage.mock.calls[2][0]).toContain('Electrochemistry');
+    });
+
     test('covers an entire 95,000-character document in roughly 10,000-character batches', async () => {
         const lateDocumentTopic = 'Protein Folding';
         const content = `${'ATP synthesis and bioenergetics. '.repeat(3000)}`.slice(

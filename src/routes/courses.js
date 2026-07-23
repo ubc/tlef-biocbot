@@ -298,13 +298,13 @@ function splitTopicExtractionBatches(content, maxChars = TOPIC_EXTRACTION_BATCH_
 function buildTopicExtractionPrompt(content, maxTopics = 8) {
     return `
 You are BIOCBOT, an expert chemistry/biochemistry curriculum analyst.
-Read the uploaded course content and extract only biochemistry concepts that students might struggle with.
+Read the uploaded course content and extract chemistry or biochemistry concepts that students might struggle with.
 
 Requirements:
 1. Return ${maxTopics} or fewer concise topic labels.
 2. Each topic should be 1-5 words.
-3. Include only topics that are directly relevant to biochemistry, molecular biology, metabolism, enzymes, proteins, nucleic acids, membranes, cellular signaling, or biochemical methods.
-4. If the content is not about biochemistry, return an empty topics array.
+3. Include only topics directly relevant to chemistry or biochemistry, including stoichiometry, atomic structure, bonding, solutions, equilibrium, acids and bases, thermochemistry, electrochemistry, molecular biology, metabolism, enzymes, proteins, nucleic acids, membranes, cellular signaling, or biochemical methods.
+4. If the content is not about chemistry or biochemistry, return an empty topics array.
 5. Do not extract humanities, literature, history, politics, geography, legal, or general social-science topics.
 6. Prefer concept-level terms (e.g., "Hydrophilic Interactions", "Enzyme Kinetics", "Protein Structure").
 7. Avoid duplicates and overly generic labels like "Chemistry" or "General".
@@ -325,14 +325,14 @@ ${content}
 function buildTopicConsolidationPrompt(candidateTopics, maxTopics = 8) {
     return `
 You are BIOCBOT, an expert chemistry/biochemistry curriculum analyst.
-Consolidate candidate struggle topics extracted from every batch of one course document.
+Consolidate chemistry and biochemistry struggle-topic candidates extracted from every batch of one course document.
 
 Requirements:
 1. Return ${maxTopics} or fewer concise topic labels.
 2. Each topic should be 1-5 words.
 3. Merge duplicates and near-duplicates (for example, "Enzyme Rate" and "Enzyme Kinetics").
 4. Keep the most specific, concept-level label for each distinct idea.
-5. Include only biochemistry topics represented in the candidate list; do not invent new topics.
+5. Include only chemistry or biochemistry topics represented in the candidate list; do not invent new topics.
 6. Return JSON ONLY.
 
 JSON format:
@@ -345,8 +345,8 @@ ${JSON.stringify(candidateTopics)}
 `;
 }
 
-function filterBiochemistryTopics(topics = []) {
-    const biochemistryPattern = /\b(amino acid|protein|peptide|enzyme|kinetic|cataly|substrate|active site|alloster|metabol|glycolysis|gluconeogenesis|krebs|citric acid|tca|electron transport|oxidative phosphorylation|atp|bioenergetic|carbohydrate|glucose|glycogen|lipid|fatty acid|cholesterol|membrane|phospholipid|hydrophilic|hydrophobic|polarity|polar|nonpolar|nucleic acid|dna|rna|nucleotide|transcription|translation|replication|gene expression|molecular biology|cell signal|signal transduction|receptor|ligand|hormone|cofactor|vitamin|redox|oxidation|reduction|buffer|ph\b|acid-base|equilibrium|thermodynamic|hemoglobin|myoglobin|collagen|antibody|immunoglobulin|western blot|pcr|electrophoresis|chromatography|spectrophotometry|assay)\b/i;
+function filterChemistryTopics(topics = []) {
+    const biochemistryPattern = /\b(amino acid|protein|peptide|enzyme|kinetic|cataly|substrate|active site|alloster|metabol|glycolysis|gluconeogenesis|krebs|citric acid|tca|electron transport|oxidative phosphorylation|atp|bioenergetic|carbohydrate|glucose|glycogen|lipid|fatty acid|cholesterol|membrane|phospholipid|hydrophilic|hydrophobic|polarity|polar|nonpolar|nucleic acid|dna|rna|nucleotide|transcription|translation|replication|gene expression|molecular biology|cell signal|signal transduction|receptor|ligand|hormone|cofactor|vitamin|redox|oxidation|reduction|buffer|ph\b|acid-base|equilibrium|thermodynamic\w*|thermochemistry|enthalpy|entropy|calorimetry|hess|gibbs|free energy|stoichiometr\w*|moles?|limiting reactant\w*|chemical equation\w*|atomic structure|electron configuration|orbital\w*|periodic trend\w*|ion formation|chemical bond\w*|lewis structure\w*|vsepr|intermolecular force\w*|solution\w*|concentration|molarity|dilution|solubility|precipitation|electrochem\w*|galvanic|standard potential\w*|electrolysis|hemoglobin|myoglobin|collagen|antibody|immunoglobulin|western blot|pcr|electrophoresis|chromatography|spectrophotometry|assay)\b/i;
     const nonBiochemistryPattern = /\b(erasure|poetry|poetic|literary|literature|treaty|indigenous|colonial|dispossession|endowment|territory|musqueam|university|crown land|government|policy|rights|legal|historical|history|geography|map)\b/i;
 
     return CourseModel.normalizeTopicList(topics)
@@ -1542,7 +1542,7 @@ router.post('/:courseId/extract-topics', async (req, res) => {
             const extractionOptions = {
                 temperature: 0.1,
                 maxTokens: 300,
-                systemPrompt: 'You extract concise biochemistry topic labels only. If the content is not biochemistry, return {"topics":[]}. Return strict JSON only.'
+                systemPrompt: 'You extract concise chemistry and biochemistry topic labels only. If the content is not chemistry or biochemistry, return {"topics":[]}. Return strict JSON only.'
             };
 
             if (contentBatches.length === 1) {
@@ -1565,13 +1565,13 @@ router.post('/:courseId/extract-topics', async (req, res) => {
                     }
                 }
 
-                const filteredCandidates = filterBiochemistryTopics(candidateTopics);
+                const filteredCandidates = filterChemistryTopics(candidateTopics);
                 if (filteredCandidates.length > 0) {
                     const consolidationPrompt = buildTopicConsolidationPrompt(filteredCandidates, topicLimit);
                     const consolidationResponse = await llm.sendMessage(consolidationPrompt, {
                         temperature: 0.1,
                         maxTokens: 300,
-                        systemPrompt: 'You consolidate and deduplicate biochemistry topic labels. Return strict JSON only.'
+                        systemPrompt: 'You consolidate and deduplicate chemistry and biochemistry topic labels. Return strict JSON only.'
                     });
                     const parsed = extractFirstJSONObject(consolidationResponse?.content || '');
                     if (parsed && Array.isArray(parsed.topics)) {
@@ -1583,7 +1583,7 @@ router.post('/:courseId/extract-topics', async (req, res) => {
             console.warn('LLM service unavailable for /extract-topics; returning empty suggestions');
         }
 
-        suggestedTopics = filterBiochemistryTopics(suggestedTopics).slice(0, topicLimit);
+        suggestedTopics = filterChemistryTopics(suggestedTopics).slice(0, topicLimit);
 
         return res.json({
             success: true,

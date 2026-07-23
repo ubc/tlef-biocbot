@@ -56,12 +56,18 @@ const llm = {
     async sendMessage(prompt, options = {}) {
         llmCallCount += 1;
         if (String(options.systemPrompt || '').includes('consolidate')) {
-            return { content: '{"topics":["Enzyme Kinetics","Protein Folding","ATP Synthesis"]}' };
+            return {
+                content: '{"topics":["Stoichiometry","Acid-Base Chemistry","Chemical Equilibrium","Thermochemistry","Atomic Structure","Chemical Bonding","Solutions","Electrochemistry"]}',
+            };
         }
         if (String(prompt).includes('Slide 1')) {
-            return { content: '{"topics":["Enzyme Kinetics","ATP Synthesis"]}' };
+            return {
+                content: '{"topics":["Stoichiometry","Acid-Base Chemistry","Chemical Equilibrium","Thermochemistry"]}',
+            };
         }
-        return { content: '{"topics":["Protein Folding","Enzyme Kinetics"]}' };
+        return {
+            content: '{"topics":["Atomic Structure","Chemical Bonding","Solutions","Electrochemistry"]}',
+        };
     },
 };
 
@@ -108,11 +114,11 @@ test.beforeEach(() => {
     llmCallCount = 0;
 });
 
-test('batches large slide content and consolidates candidates for instructor approval', async () => {
+test('retains general chemistry topics when batching and consolidating large content', async () => {
     if (!api) throw new Error('Topic extraction API context is not initialized');
     const content = [
-        `Slide 1\n${'Enzyme kinetics and ATP synthesis. '.repeat(190)}`,
-        `Slide 2\n${'Protein folding and hydrophobic interactions. '.repeat(160)}`,
+        `Slide 1\n${'Stoichiometry, acid-base chemistry, chemical equilibrium, and thermochemistry. '.repeat(120)}`,
+        `Slide 2\n${'Atomic structure, chemical bonding, solutions, and electrochemistry. '.repeat(130)}`,
     ].join('\n\n');
 
     const res = await api.post('/api/courses/BIOC-TOPIC-BATCHING/extract-topics', {
@@ -125,7 +131,16 @@ test('batches large slide content and consolidates candidates for instructor app
         success: true,
         data: {
             courseId: 'BIOC-TOPIC-BATCHING',
-            topics: ['Enzyme Kinetics', 'Protein Folding', 'ATP Synthesis'],
+            topics: [
+                'Stoichiometry',
+                'Acid-Base Chemistry',
+                'Chemical Equilibrium',
+                'Thermochemistry',
+                'Atomic Structure',
+                'Chemical Bonding',
+                'Solutions',
+                'Electrochemistry',
+            ],
         },
     });
     expect(llmCallCount).toBe(3);
