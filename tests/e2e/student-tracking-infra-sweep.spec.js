@@ -7,19 +7,12 @@
  *   - src/routes/student-tracker.js        (GET state, POST /reset with topic / 'ALL' / missing)
  *   - src/routes/struggle-activity.js      (extra branches not in models-and-misc spec)
  *   - src/routes/mentalHealthFlags.js      (admin vs non-admin, every status transition)
- *   - src/services/tracker.js              (covered via in-process harness)
- *   - src/services/systemAdmin.js          (covered via in-process harness)
- *   - src/services/config.js               (covered via in-process harness)
  *   - src/server.js                        (legacy redirects, /test-qdrant, /qdrant-test)
- *   - src/models/StruggleActivity.js       (extra branches via harness)
- *   - src/models/MentalHealthFlag.js       (extra branches via harness)
- *   - src/models/QuizAttempt.js            (no-attempts fallback + unused export via harness)
+ *
+ * Service and model branch coverage lives in tests/unit.
  */
 
 const { test, expect, request } = require('./fixtures/monocart');
-const { spawn } = require('child_process');
-const path = require('path');
-const { once } = require('events');
 const { TEST_USERS, storageStatePath } = require('./helpers/users');
 const {
     withDb,
@@ -707,69 +700,3 @@ test.describe('server.js — pages and legacy endpoints', () => {
 // uncovered: src/server.js startup error paths (MongoDB connection failure
 //            calls process.exit), production-only NODE_ENV branches, and
 //            handlers that fire only when LLM/Passport initialization throws.
-
-// ---------------------------------------------------------------------------
-// In-process harnesses for services that aren't reachable from the live server
-// without setting up unusual conditions: systemAdmin (DB-only flow), config
-// (env-var manipulation across full process), tracker (needs to control LLM
-// responses), plus a handful of model branches that aren't called by any route.
-// ---------------------------------------------------------------------------
-function spawnHarness(harnessFile) {
-    return new Promise((resolve) => {
-        const env = {
-            ...process.env,
-            NODE_V8_COVERAGE: path.resolve(__dirname, '../../coverage-reports/.v8-server'),
-            BIOCBOT_COVERAGE_RUN_ID: process.env.BIOCBOT_COVERAGE_RUN_ID || String(Date.now()),
-        };
-        const child = spawn(process.execPath, [
-            path.resolve(__dirname, 'helpers', harnessFile),
-        ], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-
-        const stdoutChunks = [];
-        const stderrChunks = [];
-        child.stdout.on('data', (c) => stdoutChunks.push(c));
-        child.stderr.on('data', (c) => stderrChunks.push(c));
-
-        once(child, 'exit').then(([code]) => {
-            resolve({
-                code,
-                stdout: Buffer.concat(stdoutChunks).toString('utf8'),
-                stderr: Buffer.concat(stderrChunks).toString('utf8'),
-            });
-        });
-    });
-}
-
-// Harness stdout/stderr can include benign console.log/error from production code
-// paths under test; we only assert on the exit code.
-async function expectHarnessClean(harnessFile) {
-    const { code, stderr } = await spawnHarness(harnessFile);
-    if (code !== 0) {
-        throw new Error(`Harness ${harnessFile} exited with ${code}\nstderr:\n${stderr}`);
-    }
-    expect(code).toBe(0);
-}
-
-test('systemAdmin service branches are exercised in a coverage harness', async () => {
-    await expectHarnessClean('systemAdmin-harness.js');
-});
-
-test('config service env-var branches are exercised in a coverage harness', async () => {
-    await expectHarnessClean('config-harness.js');
-});
-
-test('tracker service LLM-parsing branches are exercised in a coverage harness', async () => {
-    await expectHarnessClean('tracker-harness.js');
-});
-
-test('QuizAttempt unused export + branches are exercised in a coverage harness', async () => {
-    await expectHarnessClean('quizAttempt-harness.js');
-});
-
-test('StruggleActivity + MentalHealthFlag model edge branches are exercised in a coverage harness', async () => {
-    await expectHarnessClean('struggleActivity-mhFlag-harness.js');
-});
-
-test('Super Chat struggle attribution (updateUserStruggleState options + service helper) is exercised in a coverage harness', async () => {
-    await expectHarnessClean('superCourseStruggle-harness.js');
-});

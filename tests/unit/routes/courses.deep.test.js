@@ -138,6 +138,89 @@ describe('POST /:courseId/extract-topics — mocked LLM', () => {
         expect(sendMessage.mock.calls[0][0]).toContain('Protein folding');
     });
 
+    test('extracts candidates from every slide batch before consolidating the final topics', async () => {
+        const slideOne = `Slide 1\n${'Enzyme kinetics and catalysis. '.repeat(220)}`;
+        const slideTwo = `Slide 2\n${'Protein folding and hydrophobic interactions. '.repeat(180)}`;
+        const sendMessage = jest.fn()
+            .mockResolvedValueOnce({ content: '{"topics":["Enzyme Kinetics","ATP Synthesis"]}' })
+            .mockResolvedValueOnce({ content: '{"topics":["Protein Folding","Enzyme Kinetics"]}' })
+            .mockResolvedValueOnce({ content: '{"topics":["Enzyme Kinetics","Protein Folding","ATP Synthesis"]}' });
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage } });
+
+        const res = await request(app({ db: memoryDb({ courses: [topicCourse] }), user: instructor }))
+            .post('/C1/extract-topics')
+            .send({ content: `${slideOne}\n\n${slideTwo}`, maxTopics: 8 });
+
+        expect(res.status).toBe(200);
+        expect(res.body.data.topics).toEqual(['Enzyme Kinetics', 'Protein Folding', 'ATP Synthesis']);
+        expect(sendMessage).toHaveBeenCalledTimes(3);
+        expect(sendMessage.mock.calls[0][0]).toContain('Slide 1');
+        expect(sendMessage.mock.calls[0][0]).not.toContain('Slide 2');
+        expect(sendMessage.mock.calls[1][0]).toContain('Slide 2');
+        expect(sendMessage.mock.calls[2][0]).toContain('Candidate topics from all document batches');
+        expect(sendMessage.mock.calls[2][0]).toContain('Protein Folding');
+        expect(sendMessage.mock.calls[2][1].systemPrompt).toContain('consolidate and deduplicate');
+    });
+
+    test('retains general chemistry struggle topics across extraction and consolidation', async () => {
+        const slideOne = `Slide 1\n${'Stoichiometry, acid-base chemistry, chemical equilibrium, and thermochemistry. '.repeat(120)}`;
+        const slideTwo = `Slide 2\n${'Atomic structure, chemical bonding, solutions, and electrochemistry. '.repeat(130)}`;
+        const finalTopics = [
+            'Stoichiometry',
+            'Acid-Base Chemistry',
+            'Chemical Equilibrium',
+            'Thermochemistry',
+            'Atomic Structure',
+            'Chemical Bonding',
+            'Solutions',
+            'Electrochemistry',
+        ];
+        const sendMessage = jest.fn()
+            .mockResolvedValueOnce({ content: '{"topics":["Stoichiometry","Acid-Base Chemistry","Chemical Equilibrium","Thermochemistry"]}' })
+            .mockResolvedValueOnce({ content: '{"topics":["Atomic Structure","Chemical Bonding","Solutions","Electrochemistry"]}' })
+            .mockResolvedValueOnce({ content: JSON.stringify({ topics: finalTopics }) });
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage } });
+
+        const res = await request(app({ db: memoryDb({ courses: [topicCourse] }), user: instructor }))
+            .post('/C1/extract-topics')
+            .send({ content: `${slideOne}\n\n${slideTwo}`, maxTopics: 8 });
+
+        expect(res.status).toBe(200);
+        expect(res.body.data.topics).toEqual(finalTopics);
+        expect(sendMessage).toHaveBeenCalledTimes(3);
+        expect(sendMessage.mock.calls[0][1].systemPrompt).toContain('chemistry and biochemistry');
+        expect(sendMessage.mock.calls[2][0]).toContain('Stoichiometry');
+        expect(sendMessage.mock.calls[2][0]).toContain('Electrochemistry');
+    });
+
+    test('covers an entire 95,000-character document in roughly 10,000-character batches', async () => {
+        const lateDocumentTopic = 'Protein Folding';
+        const content = `${'ATP synthesis and bioenergetics. '.repeat(3000)}`.slice(
+            0,
+            95000 - lateDocumentTopic.length - 1
+        ) + ` ${lateDocumentTopic}`;
+        const sendMessage = jest.fn(async (_prompt, options) => ({
+            content: options.systemPrompt.includes('consolidate')
+                ? '{"topics":["ATP Synthesis","Protein Folding"]}'
+                : '{"topics":["ATP Synthesis"]}',
+        }));
+        resolveCourseAi.mockResolvedValueOnce({ llm: { sendMessage } });
+
+        const res = await request(app({ db: memoryDb({ courses: [topicCourse] }), user: instructor }))
+            .post('/C1/extract-topics')
+            .send({ content });
+
+        expect(res.status).toBe(200);
+        expect(res.body.data.topics).toEqual(['ATP Synthesis', 'Protein Folding']);
+        const extractionCalls = sendMessage.mock.calls.filter(([, options]) =>
+            options.systemPrompt.includes('extract concise')
+        );
+        expect(extractionCalls).toHaveLength(10);
+        expect(extractionCalls.at(-1)[0]).toContain(lateDocumentTopic);
+        expect(extractionCalls.every(([prompt]) => prompt.includes('Return 5 or fewer'))).toBe(true);
+        expect(sendMessage).toHaveBeenCalledTimes(11);
+    });
+
     test('skips secondary additional material without invoking an LLM', async () => {
         const db = memoryDb({
             courses: [{ ...topicCourse, additionalMaterialSecondarySearch: true }],

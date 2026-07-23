@@ -27,6 +27,14 @@ const { memoryDb } = require('../helpers/memory-db');
 
 const DEFAULTS = prompts.DEFAULT_SUPER_COURSE_CHAT_SETTINGS;
 
+function courseHits(prefix, count, topScore) {
+    return Array.from({ length: count }, (_, index) => ({
+        id: `${prefix}-${index}`,
+        score: topScore - index * 0.01,
+        courseId: prefix,
+    }));
+}
+
 describe('superCourseService.resolveSuperCourseChatSettings', () => {
     test('an empty settings doc yields the documented defaults', () => {
         const s = superCourse.resolveSuperCourseChatSettings({});
@@ -131,6 +139,46 @@ describe('superCourseService.mergeBalancedCourseResults', () => {
         // target 2, two courses -> floor 1: each course's top chunk is guaranteed.
         const merged = superCourse.mergeBalancedCourseResults(map, 2);
         expect(merged.map((m) => m.id)).toEqual(['a1', 'b1']);
+    });
+
+    test('guarantees representation when one course has uniformly lower scores', () => {
+        const map = new Map([
+            ['BIOC-202', courseHits('BIOC-202', 10, 0.9)],
+            ['BIOC-302', courseHits('BIOC-302', 10, 0.4)],
+        ]);
+
+        const merged = superCourse.mergeBalancedCourseResults(map, 8);
+        const counts = merged.reduce((byCourse, result) => {
+            byCourse[result.courseId] = (byCourse[result.courseId] || 0) + 1;
+            return byCourse;
+        }, {});
+
+        expect(merged).toHaveLength(8);
+        expect(counts).toEqual({ 'BIOC-202': 4, 'BIOC-302': 4 });
+        expect(new Set(merged.map(result => result.id)).size).toBe(8);
+    });
+
+    test('lets populated courses use the budget left by empty or thin courses', () => {
+        const emptyCourse = new Map([
+            ['A', courseHits('A', 10, 0.9)],
+            ['B', []],
+        ]);
+        expect(superCourse.mergeBalancedCourseResults(emptyCourse, 8))
+            .toHaveLength(8);
+
+        const thinCourse = new Map([
+            ['A', courseHits('A', 10, 0.9)],
+            ['B', courseHits('B', 2, 0.5)],
+        ]);
+        const merged = superCourse.mergeBalancedCourseResults(thinCourse, 8);
+        expect(merged.filter(result => result.courseId === 'A')).toHaveLength(6);
+        expect(merged.filter(result => result.courseId === 'B')).toHaveLength(2);
+    });
+
+    test('a single course behaves like a score-ordered top-K', () => {
+        const map = new Map([['A', courseHits('A', 10, 0.9)]]);
+        expect(superCourse.mergeBalancedCourseResults(map, 5).map(result => result.id))
+            .toEqual(['A-0', 'A-1', 'A-2', 'A-3', 'A-4']);
     });
 
     test('dedupes shared ids and skips empty course lists', () => {

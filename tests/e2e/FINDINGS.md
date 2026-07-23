@@ -1068,7 +1068,8 @@ no longer renders the corresponding UI.
 
 ### ✅ FIXED — qdrant harness branches reached 401 before exercising the failure under test
 
-- **Where:** `tests/e2e/helpers/src-route-model-harness.js`.
+- **Where:** Formerly `tests/e2e/helpers/src-route-model-harness.js`; these
+  branches now live in `tests/unit/routes/qdrant.test.js`.
 - **Was:** The harness modes for `qdrant-process-fails`, `qdrant-search-throws`,
   `qdrant-delete-fails`, `qdrant-collection-fails`, `qdrant-cleanup-no-db`,
   etc. did not set `state.user`. `requireDirectQdrantAccess` then short-circuits
