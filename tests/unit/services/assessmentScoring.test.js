@@ -53,6 +53,20 @@ describe('assessment scoring', () => {
         expect(result.reason).toContain('not a recognized MC index');
     });
 
+    test('formats numeric-keyed option objects with A-D labels', () => {
+        const question = {
+            type: 'multiple-choice',
+            options: { 0: 'Bruce Wayne', 1: 'Peter', 2: 'Spiderbite', 3: 'Asdc' },
+            correctAnswer: 0
+        };
+
+        expect(scoring.evaluateQuestion(question, 0)).toMatchObject({
+            isCorrect: true,
+            displayStudentAnswer: 'A) Bruce Wayne',
+            displayExpectedAnswer: 'A) Bruce Wayne'
+        });
+    });
+
     test('authoritative 3/3 mode, HTML, and text summaries agree', () => {
         const questions = [
             { type: 'multiple-choice', question: 'MC?', options: arrayOptions, correctAnswer: 0 },

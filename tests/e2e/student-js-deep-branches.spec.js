@@ -317,7 +317,7 @@ test.describe('student.js uncovered deep branches', () => {
                         id: 'mc-zero',
                         question: 'Which phase comes first?',
                         questionType: 'multiple-choice',
-                        options: ['Initiation', 'Termination', 'Elongation'],
+                        options: { 0: 'Initiation', 1: 'Termination', 2: 'Elongation' },
                         correctAnswer: 0,
                     },
                     {

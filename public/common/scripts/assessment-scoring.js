@@ -6,6 +6,7 @@
     'use strict';
 
     const LEGACY_MC_INDEX = Object.freeze({ A: 0, B: 1, C: 2, D: 3 });
+    const OPTION_LABELS = Object.freeze(['A', 'B', 'C', 'D']);
 
     function getExpectedAnswer(question) {
         return question?.correctAnswer ?? question?.expectedAnswer ?? question?.answer;
@@ -34,12 +35,28 @@
         if (Array.isArray(options)) {
             return options.map((value, index) => ({
                 index,
-                key: String.fromCharCode(65 + index),
+                key: OPTION_LABELS[index],
                 value
             }));
         }
         if (!options || typeof options !== 'object') return [];
         const entries = Object.entries(options);
+        const allNumericIndices = entries.every(([key]) => {
+            const index = Number(key);
+            return Number.isInteger(index) && index >= 0 && index <= 3;
+        });
+        if (allNumericIndices) {
+            return entries
+                .map(([key, value]) => {
+                    const index = Number(key);
+                    return {
+                        index,
+                        key: OPTION_LABELS[index],
+                        value
+                    };
+                })
+                .sort((a, b) => a.index - b.index);
+        }
         const allLetters = entries.every(([key]) =>
             Object.prototype.hasOwnProperty.call(LEGACY_MC_INDEX, String(key).toUpperCase())
         );
@@ -240,6 +257,7 @@
 
     return {
         LEGACY_MC_INDEX,
+        OPTION_LABELS,
         getQuestionType,
         getExpectedAnswer,
         getOptionEntries,
