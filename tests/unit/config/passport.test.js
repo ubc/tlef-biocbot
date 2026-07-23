@@ -89,6 +89,63 @@ describe('Passport configuration', () => {
         expect(mockPassport.ubcShibHelpers).toBeDefined();
     });
 
+    test('maps optional SAML environment settings into both strategy configurations', () => {
+        Object.assign(process.env, {
+            SAML_PRIVATE_KEY: 'inline-private-key',
+            SAML_PRIVATE_KEY_PATH: '/mock/private-key.pem',
+            SAML_SIGNATURE_ALGORITHM: 'sha512',
+            SAML_DIGEST_ALGORITHM: 'sha512',
+            SAML_CLOCK_SKEW_MS: '4500',
+            SAML_VALIDATE_IN_RESPONSE_TO: 'true',
+            SAML_DISABLE_REQUEST_ACS_URL: 'true',
+            SAML_LOGOUT_URL: 'https://idp.test/logout',
+            ENABLE_SLO: 'false',
+        });
+
+        initializePassport(db);
+
+        expect(captured.strategies.saml.options).toMatchObject({
+            privateKey: 'inline-private-key',
+            signatureAlgorithm: 'sha512',
+            digestAlgorithm: 'sha512',
+            acceptedClockSkewMs: 4500,
+            validateInResponseTo: true,
+            disableRequestAcsUrl: true,
+        });
+        expect(captured.strategies.ubcshib.options).toMatchObject({
+            acceptedClockSkewMs: 4500,
+            validateInResponseTo: true,
+            logoutUrl: 'https://idp.test/logout',
+            enableSLO: false,
+        });
+    });
+
+    test('uses safe SAML option defaults when optional environment values are invalid or absent', () => {
+        process.env.SAML_CLOCK_SKEW_MS = 'not-a-number';
+        process.env.SAML_VALIDATE_IN_RESPONSE_TO = 'false';
+        process.env.SAML_DISABLE_REQUEST_ACS_URL = 'false';
+        delete process.env.SAML_PRIVATE_KEY;
+        delete process.env.SAML_PRIVATE_KEY_PATH;
+        delete process.env.SAML_SIGNATURE_ALGORITHM;
+        delete process.env.SAML_DIGEST_ALGORITHM;
+
+        initializePassport(db);
+
+        expect(captured.strategies.saml.options).toMatchObject({
+            privateKey: null,
+            signatureAlgorithm: 'sha256',
+            digestAlgorithm: 'sha256',
+            acceptedClockSkewMs: 0,
+            validateInResponseTo: false,
+            disableRequestAcsUrl: false,
+        });
+        expect(captured.strategies.ubcshib.options).toMatchObject({
+            acceptedClockSkewMs: 0,
+            validateInResponseTo: false,
+            logoutUrl: process.env.SAML_ENTRY_POINT,
+        });
+    });
+
     test('local strategy returns authenticated users, failures, and errors', async () => {
         initializePassport(db);
         User.authenticateUser.mockResolvedValueOnce({ success: true, user: { userId: 'u1' } });
@@ -122,6 +179,51 @@ describe('Passport configuration', () => {
         const profile = { attributes: { ubcEduCwlPuid: 'P123', mail: 'person@ubc.ca', displayName: 'Person', eduPersonAffiliation: affiliation } };
         expect(await callVerify(captured.strategies.ubcshib, profile)).toEqual([null, { userId: 'ubc' }]);
         expect(User.createOrGetSAMLUser.mock.calls[0][1]).toMatchObject({ puid: 'P123', username: 'P123', role: expectedRole });
+    });
+
+    test.each([
+        [
+            {
+                'urn:mace:dir:attribute-def:ubcEduCwlPuid': 'puid-mace',
+                'urn:oid:0.9.2342.19200300.100.1.3': 'mace@test.ca',
+                'urn:oid:2.16.840.1.113730.3.1.241': 'Mace User',
+                'urn:oid:1.3.6.1.4.1.5923.1.1.1.1': 'faculty',
+            },
+            { puid: 'puid-mace', email: 'mace@test.ca', displayName: 'Mace User', role: 'instructor' },
+        ],
+        [
+            {
+                'urn:oid:1.3.6.1.4.1.60.6.1.6': 'puid-oid',
+                mail: 'oid@test.ca',
+            },
+            { puid: 'puid-oid', email: 'oid@test.ca', displayName: 'oid@test.ca', role: 'student' },
+        ],
+    ])('UBC strategy reads supported alternate attribute names', async (profile, expected) => {
+        initializePassport(db);
+        User.createOrGetSAMLUser.mockResolvedValueOnce({ success: true, user: { userId: expected.puid } });
+
+        await expect(callVerify(captured.strategies.ubcshib, profile))
+            .resolves.toEqual([null, { userId: expected.puid }]);
+        expect(User.createOrGetSAMLUser).toHaveBeenCalledWith(db, expect.objectContaining(expected));
+    });
+
+    test('UBC strategy falls back to profile email or nameID when attributes omit email', async () => {
+        initializePassport(db);
+        User.createOrGetSAMLUser
+            .mockResolvedValueOnce({ success: true, user: { userId: 'profile-email' } })
+            .mockResolvedValueOnce({ success: true, user: { userId: 'name-id-email' } });
+
+        await callVerify(captured.strategies.ubcshib, {
+            email: 'profile@test.ca',
+            attributes: { ubcEduCwlPuid: 'profile-email' },
+        });
+        await callVerify(captured.strategies.ubcshib, {
+            nameID: 'nameid@test.ca',
+            attributes: { ubcEduCwlPuid: 'name-id-email' },
+        });
+
+        expect(User.createOrGetSAMLUser.mock.calls[0][1].email).toBe('profile@test.ca');
+        expect(User.createOrGetSAMLUser.mock.calls[1][1].email).toBe('nameid@test.ca');
     });
 
     test('UBC strategy rejects profiles without PUID or email', async () => {

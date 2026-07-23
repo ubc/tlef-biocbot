@@ -2,16 +2,11 @@
 /**
  * Focused coverage for src/models/PersistenceTopic.js.
  *
- * The read path is exercised through the real instructor API. The write path is
- * normally reached only after chat directive-mode activation, which also pulls
- * in Qdrant and LLM dependencies, so the remaining model branches run in a
- * small child-process harness whose V8 coverage is merged by global teardown.
+ * The read path is exercised through the real instructor API. Model write-path
+ * coverage lives in tests/unit/models/PersistenceTopic.test.js.
  */
 
 const { test, expect } = require('./fixtures/monocart');
-const { spawn } = require('child_process');
-const path = require('path');
-const { once } = require('events');
 const { TEST_USERS, storageStatePath } = require('./helpers/users');
 const {
     withDb,
@@ -94,27 +89,5 @@ test.describe('/api/struggle-activity/persistence/:courseId', () => {
         expect(body.data.map((topic) => topic.topic)).toEqual(['photosynthesis', 'glycolysis']);
         expect(body.data.map((topic) => topic.studentCount)).toEqual([3, 1]);
         expect(body.data.some((topic) => topic.courseId === COURSE_B)).toBe(false);
-    });
-});
-
-test('PersistenceTopic model write branches update counts and fallback results in coverage harness', async () => {
-    const env = {
-        ...process.env,
-        NODE_V8_COVERAGE: path.resolve(__dirname, '../../coverage-reports/.v8-server'),
-        BIOCBOT_COVERAGE_RUN_ID: process.env.BIOCBOT_COVERAGE_RUN_ID || String(Date.now()),
-    };
-
-    const child = spawn(process.execPath, [
-        path.resolve(__dirname, 'helpers/persistence-topic-harness.js'),
-    ], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-
-    const [code] = await once(child, 'exit');
-    const stdout = child.stdout ? child.stdout.read()?.toString() || '' : '';
-    const stderr = child.stderr ? child.stderr.read()?.toString() || '' : '';
-
-    expect({ code, stdout, stderr }).toEqual({
-        code: 0,
-        stdout: '',
-        stderr: '',
     });
 });

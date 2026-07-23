@@ -2,14 +2,14 @@
 /**
  * Tests for the Course "year level" feature (issue #351):
  *
- *   1. Pure helpers in src/models/Course.js — parseYearLevelFromName() and
- *      normalizeYearLevel().
- *   2. Course API — PUT /api/courses/:courseId persists `yearLevel`, and
+ *   1. Course API — PUT /api/courses/:courseId persists `yearLevel`, and
  *      GET /api/courses/:courseId returns it (deriving a default from the
  *      course name for courses created before the field existed).
- *   3. Super Course — GET /api/student/super-course/pool reports
+ *   2. Super Course — GET /api/student/super-course/pool reports
  *      `hasHigherLevelCourses` by comparing the pool's highest level against
  *      the student's highest enrolled-course level.
+ *
+ * Pure year-level helper coverage lives in tests/unit/models/Course.pure.test.js.
  */
 
 require('dotenv').config();
@@ -22,7 +22,6 @@ const {
     cleanupCourses,
 } = require('./helpers/courses-test');
 const { seedSuperchat, cleanupSuperchats } = require('./helpers/superchats-test');
-const CourseModel = require('../../src/models/Course');
 
 const PREFIX = 'BIOC-E2E-YEARLEVEL';
 const COURSE_LEGACY = `${PREFIX}-LEGACY`;     // no stored yearLevel
@@ -43,49 +42,7 @@ const ALL_COURSE_IDS = [
 ];
 
 // ---------------------------------------------------------------------------
-// 1. Pure helpers (no DB / no server needed)
-// ---------------------------------------------------------------------------
-test.describe('Course year-level helpers (pure)', () => {
-    test('parseYearLevelFromName uses the leading digit of the course number', () => {
-        expect(CourseModel.parseYearLevelFromName('BIOC 401')).toBe(4);
-        expect(CourseModel.parseYearLevelFromName('CHEM 121 - Intro')).toBe(1);
-        expect(CourseModel.parseYearLevelFromName('MATH 200')).toBe(2);
-        // A standalone digit is accepted only when it is a valid year label (1-5).
-        expect(CourseModel.parseYearLevelFromName('Year 3 Seminar')).toBe(3);
-        // 4-digit codes: leading digit is still the year.
-        expect(CourseModel.parseYearLevelFromName('PHYS 1010')).toBe(1);
-        // 5xx+ maps to Graduate (clamped to 5).
-        expect(CourseModel.parseYearLevelFromName('BIOC 530')).toBe(5);
-        expect(CourseModel.parseYearLevelFromName('BIOC 600')).toBe(5);
-    });
-
-    test('parseYearLevelFromName returns null when no usable number is present', () => {
-        expect(CourseModel.parseYearLevelFromName('Special Topics')).toBeNull();
-        // Course numbers glued to letters no longer match (no word boundary),
-        // and the old any-integer fallback is gone.
-        expect(CourseModel.parseYearLevelFromName('BIOC401')).toBeNull();
-        expect(CourseModel.parseYearLevelFromName('Section 7')).toBeNull(); // standalone digit outside 1-5
-        expect(CourseModel.parseYearLevelFromName('course 099')).toBeNull(); // leading 0
-        expect(CourseModel.parseYearLevelFromName('')).toBeNull();
-        expect(CourseModel.parseYearLevelFromName(null)).toBeNull();
-        expect(CourseModel.parseYearLevelFromName(undefined)).toBeNull();
-    });
-
-    test('normalizeYearLevel accepts integers 1-5 and rejects everything else', () => {
-        expect(CourseModel.normalizeYearLevel(1)).toBe(1);
-        expect(CourseModel.normalizeYearLevel(5)).toBe(5);
-        expect(CourseModel.normalizeYearLevel('4')).toBe(4); // numeric strings coerce
-        expect(CourseModel.normalizeYearLevel(0)).toBeNull();
-        expect(CourseModel.normalizeYearLevel(6)).toBeNull();
-        expect(CourseModel.normalizeYearLevel(2.5)).toBeNull();
-        expect(CourseModel.normalizeYearLevel('abc')).toBeNull();
-        expect(CourseModel.normalizeYearLevel(null)).toBeNull();
-        expect(CourseModel.normalizeYearLevel(undefined)).toBeNull();
-    });
-});
-
-// ---------------------------------------------------------------------------
-// 2. Course API — instructor reads/writes the year level
+// 1. Course API — instructor reads/writes the year level
 // ---------------------------------------------------------------------------
 test.describe('Course year-level API', () => {
     test.use({ storageState: storageStatePath('instructor') });
@@ -156,7 +113,7 @@ test.describe('Course year-level API', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. Super Course — "above your level" detection
+// 2. Super Course — "above your level" detection
 //
 // Under the multi-superchat model the pool comes from a bucket's member courses,
 // and the student must be enrolled in >=1 of those courses to access it. The

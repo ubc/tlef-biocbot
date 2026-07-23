@@ -1,10 +1,8 @@
 /**
  * In-memory MongoDB collection/db doubles for unit tests.
  *
- * This is a self-contained reimplementation of the MemoryCollection pattern used
- * by tests/e2e/helpers/src-route-model-harness.js — intentionally NOT imported
- * from there, because that harness boots a live Express server on require. Unit
- * tests need a side-effect-free fake.
+ * This is a self-contained Mongo-style fake for unit tests. It intentionally
+ * avoids booting an Express server or requiring any E2E infrastructure.
  *
  * Supported query operators: $or, $and, $ne, $in, $nin, $exists, $size,
  * $gt/$gte/$lt/$lte, dotted field paths, and Mongo's "scalar matches an array by
