@@ -507,6 +507,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         studentAnswers = [];
         window.studentAnswers = studentAnswers;
         window.studentEvaluations = [];
+        window.currentAssessmentScore = null;
     }
 
     function createFreshSummarySession(courseId, unitName) {
@@ -916,7 +917,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                         studentResponse += `${index + 1}. ${question.question}\n`;
                         studentResponse += `   My Answer: ${answer.answer}\n`;
                         studentResponse += `   Correct: ${question.correctAnswer}\n`;
-                        studentResponse += `   Result: ${answer.isCorrect ? 'Correct' : 'Incorrect'}\n\n`;
+                        const result = chatData.assessmentScore?.results?.[index]
+                            ?? chatData.practiceTests.score?.results?.[index];
+                        studentResponse += `   Result: ${(result?.isCorrect ?? question.isCorrect ?? answer.isCorrect) ? 'Correct' : 'Incorrect'}\n\n`;
                     }
                 });
 
@@ -927,14 +930,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // 4) Hardcoded assistant response acknowledging the test
                 // Calculate overall performance
-                const correctAnswers = chatData.studentAnswers.answers.filter(a => a.isCorrect).length;
-                const totalAnswers = chatData.studentAnswers.answers.length;
-                const performance = correctAnswers / totalAnswers;
-                const passThreshold = chatData.practiceTests.passThreshold / 100;
-
+                const restoredScore = chatData.assessmentScore ?? chatData.practiceTests.score
+                    ?? AssessmentScoring.evaluateAssessment(
+                        chatData.practiceTests.questions,
+                        chatData.studentAnswers.answers.map(answer => answer.answer),
+                        chatData.practiceTests.passThreshold
+                    );
                 conversationMessages.push({
                     role: 'assistant',
-                    content: `Thank you for that. Based on your responses, I can see you ${performance >= passThreshold ? 'demonstrated good understanding' : 'need some additional support'}. So how can I help you today?`
+                    content: `Thank you for that. Based on your responses, I can see you ${restoredScore.passed ? 'demonstrated good understanding' : 'need some additional support'}. So how can I help you today?`
                 });
             }
 

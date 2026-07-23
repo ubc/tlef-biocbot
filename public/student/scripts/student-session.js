@@ -486,89 +486,51 @@ function shouldCreateNewSession(chatData) {
  */
 function updateAssessmentDataInAutoSave(chatData) {
     try {
-        // Get current assessment questions and answers from the correct variables
         const questions = window.currentCalibrationQuestions || [];
         const studentAnswers = window.studentAnswers || [];
+        const score = window.currentAssessmentScore?.totalQuestions === questions.length
+            ? window.currentAssessmentScore
+            : AssessmentScoring.evaluateAssessment(
+                questions,
+                studentAnswers,
+                window.currentPassThreshold,
+                window.studentEvaluations
+            );
 
-        // Update practice test data
-        // Initialize practiceTests if it doesn't exist
         if (!chatData.practiceTests) {
-            chatData.practiceTests = {
-                questions: [],
-                passThreshold: null
-            };
+            chatData.practiceTests = { questions: [], passThreshold: null };
         }
 
         if (questions.length > 0) {
-            chatData.practiceTests.questions = questions.map((q, index) => {
-                const studentAnswerIndex = studentAnswers[index];
-                let studentAnswerText = null;
-                let isCorrect = null;
-
-                if (studentAnswerIndex !== undefined && studentAnswerIndex !== null) {
-                    // Convert student answer index to actual answer text
-                    if (q.type === 'true-false') {
-                        studentAnswerText = studentAnswerIndex === 0 ? 'True' : 'False';
-                    } else if (q.type === 'multiple-choice' && q.options) {
-                        const optionKeys = Object.keys(q.options);
-                        if (optionKeys[studentAnswerIndex]) {
-                            studentAnswerText = q.options[optionKeys[studentAnswerIndex]];
-                        } else {
-                            studentAnswerText = `Option ${studentAnswerIndex}`;
-                        }
-                    } else {
-                        studentAnswerText = studentAnswerIndex;
-                    }
-
-                    // Check if answer is correct
-                    if (q.type === 'true-false') {
-                        const expectedAnswer = q.correctAnswer === true || q.correctAnswer === 'true';
-                        isCorrect = (studentAnswerIndex === 0) === expectedAnswer;
-                    } else if (q.type === 'multiple-choice') {
-                        let expectedIndex = q.correctAnswer;
-                        if (typeof expectedIndex === 'string') {
-                            const optionKeys = Object.keys(q.options);
-                            expectedIndex = optionKeys.indexOf(expectedIndex);
-                            if (expectedIndex === -1) expectedIndex = 0;
-                        }
-                        isCorrect = (studentAnswerIndex === expectedIndex);
-                    } else {
-                        isCorrect = (studentAnswerIndex === q.correctAnswer ||
-                                   studentAnswerIndex === q.correctAnswer.toString());
-                    }
-                }
-
-                return {
-                    questionId: q.id || index,
-                    question: q.question,
-                    questionType: q.type || q.questionType,
-                    options: q.options || {},
-                    correctAnswer: q.correctAnswer,
-                    explanation: q.explanation || '',
-                    unitName: q.unitName || chatData.metadata.unitName,
-                    studentAnswer: studentAnswerText,
-                    isCorrect: isCorrect
-                };
-            });
+            chatData.practiceTests.questions = questions.map((q, index) => ({
+                questionId: q.id || index,
+                question: q.question,
+                questionType: q.type || q.questionType,
+                options: q.options || {},
+                correctAnswer: AssessmentScoring.getExpectedAnswer(q),
+                explanation: q.explanation || '',
+                unitName: q.unitName || chatData.metadata.unitName,
+                studentAnswer: studentAnswers[index] ?? null,
+                isCorrect: score.results[index]?.isCorrect ?? null
+            }));
+            chatData.practiceTests.score = score;
+            chatData.assessmentScore = score;
         }
 
-        // Update student answers
+        if (!chatData.studentAnswers) chatData.studentAnswers = { answers: [] };
         chatData.studentAnswers.answers = studentAnswers.map((answer, index) => ({
             questionIndex: index,
             answer: answer,
+            isCorrect: score.results[index]?.isCorrect ?? null,
             timestamp: new Date().toISOString()
         }));
 
-        // Update pass threshold to use the actual calculated threshold
         if (window.currentPassThreshold !== undefined && questions.length > 0) {
             chatData.practiceTests.passThreshold = window.currentPassThreshold;
         } else if (questions.length === 0) {
-            // If no questions, set practiceTests to null
             chatData.practiceTests = null;
+            chatData.assessmentScore = null;
         }
-
-
-
     } catch (error) {
         console.error('Error updating assessment data in auto-save:', error);
     }
@@ -626,33 +588,24 @@ async function syncAutoSaveWithServer(chatData) {
             console.warn('🔄 [SERVER-SYNC] ⚠️ Invalid studentName:', serverData.studentName);
         }
 
-        // Use a simple fetch without await to avoid blocking the UI
-        // This ensures the student's message is saved even if the server is slow
-        fetch('/api/chat/save', {
+        const response = await fetch('/api/chat/save', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             credentials: 'include',
             body: JSON.stringify(serverData)
-        }).then(response => {
-            if (response.ok) {
-                return response.json();
-            } else {
-                throw new Error(`Server sync failed: ${response.status} ${response.statusText}`);
-            }
-        }).then(result => {
-            if (result.success) {
-
-            } else {
-                console.warn('🔄 [SERVER-SYNC] ⚠️ Server returned error:', result.message);
-            }
-        }).catch(error => {
-            console.warn('🔄 [SERVER-SYNC] ⚠️ Server sync failed:', error.message);
         });
+        if (!response.ok) {
+            throw new Error(`Server sync failed: ${response.status} ${response.statusText}`);
+        }
+        const result = await response.json();
+        if (!result.success) throw new Error(result.message || 'Server sync failed');
+        return result;
 
     } catch (error) {
         console.error('🔄 [SERVER-SYNC] ❌ Error syncing with server:', error);
+        return null;
     }
 }
 
@@ -1231,6 +1184,7 @@ async function collectAllChatData() {
         messages: messages,
         practiceTests: practiceTestData,
         studentAnswers: studentAnswersData,
+        assessmentScore: practiceTestData?.score ?? null,
         sessionInfo: {
             startTime: getSessionStartTime(messages),
             endTime: new Date().toISOString(),
@@ -1282,6 +1236,9 @@ function extractMessageData(messageElement, index) {
             isModeToggleResult: messageElement.classList.contains('mode-toggle-result'),
             isAssessmentStart: isAssessmentStart
         };
+        if (isModeResult && messageElement.dataset.assessmentContent) {
+            messageData.content = messageElement.dataset.assessmentContent;
+        }
 
         if (messageElement.dataset.messageId) {
             messageData.messageId = messageElement.dataset.messageId;
@@ -1502,6 +1459,14 @@ function collectPracticeTestData() {
         return null;
     }
 
+    const score = window.currentAssessmentScore?.totalQuestions === currentCalibrationQuestions.length
+        ? window.currentAssessmentScore
+        : AssessmentScoring.evaluateAssessment(
+            currentCalibrationQuestions,
+            studentAnswers,
+            currentPassThreshold,
+            window.studentEvaluations
+        );
     return {
         questions: currentCalibrationQuestions.map((question, index) => ({
             questionId: question.id,
@@ -1509,14 +1474,17 @@ function collectPracticeTestData() {
             questionType: question.type,
             question: question.question,
             options: question.options,
-            correctAnswer: question.correctAnswer,
+            correctAnswer: AssessmentScoring.getExpectedAnswer(question),
             explanation: question.explanation,
             unitName: question.unitName,
-            passThreshold: question.passThreshold
+            passThreshold: question.passThreshold,
+            studentAnswer: studentAnswers[index] ?? null,
+            isCorrect: score.results[index]?.isCorrect ?? null
         })),
         totalQuestions: currentCalibrationQuestions.length,
         passThreshold: currentPassThreshold,
-        currentQuestionIndex: currentQuestionIndex
+        currentQuestionIndex: currentQuestionIndex,
+        score
     };
 }
 
@@ -1525,10 +1493,12 @@ function collectPracticeTestData() {
  * @returns {Object} Student answers data
  */
 function collectStudentAnswersData() {
+    const score = window.currentAssessmentScore;
     return {
         answers: studentAnswers.map((answer, index) => ({
             questionIndex: index,
             answer: answer,
+            isCorrect: score?.results[index]?.isCorrect ?? null,
             question: currentCalibrationQuestions[index] ? {
                 id: currentCalibrationQuestions[index].id,
                 question: currentCalibrationQuestions[index].question,

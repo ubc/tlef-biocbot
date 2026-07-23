@@ -214,6 +214,7 @@ async function openDeepHarness(page, options = {}) {
         };
     })();
     </script>
+    <script src="/common/scripts/assessment-scoring.js"></script>
     <script src="/student/scripts/student-state.js"></script>
     <script src="/student/scripts/student-chat-core.js"></script>
     <script src="/student/scripts/student-practice.js"></script>
@@ -307,6 +308,94 @@ test.describe('student.js uncovered deep branches', () => {
         await expect.poll(() => page.evaluate(() => localStorage.getItem('studentMode'))).toBe('protege');
     });
 
+    test('authoritative 3/3 summary, persistence, and restoration stay identical', async ({ page }) => {
+        await openDeepHarness(page);
+        await loadChatDataInHarness(page, buildChatData({
+            practiceTests: {
+                questions: [
+                    {
+                        id: 'mc-zero',
+                        question: 'Which phase comes first?',
+                        questionType: 'multiple-choice',
+                        options: ['Initiation', 'Termination', 'Elongation'],
+                        correctAnswer: 0,
+                    },
+                    {
+                        id: 'tf-false',
+                        question: 'Is this statement true?',
+                        questionType: 'true-false',
+                        correctAnswer: false,
+                    },
+                    {
+                        id: 'mc-legacy',
+                        question: 'Which legacy option?',
+                        questionType: 'multiple-choice',
+                        options: { A: 'Alpha', B: 'Beta' },
+                        correctAnswer: 'B',
+                    },
+                ],
+                passThreshold: 3,
+                currentQuestionIndex: 3,
+            },
+            studentAnswers: {
+                answers: [{ answer: 0 }, { answer: 1 }, { answer: 1 }],
+            },
+        }));
+
+        await page.evaluate(async () => {
+            const deepWindow = /** @type {DeepStudentWindow} */ (/** @type {unknown} */ (window));
+            await deepWindow.calculateStudentMode?.();
+        });
+
+        const result = await page.evaluate(() => {
+            const deepWindow = /** @type {any} */ (window);
+            const saveCall = [...deepWindow.__fetchLog]
+                .reverse()
+                .find(entry => entry.url === '/api/chat/save');
+            return {
+                displayed: document.querySelector('.assessment-summary-score')?.textContent,
+                expectedAnswers: [...document.querySelectorAll('.answer-box.expected .answer-box-content')]
+                    .map(element => element.textContent),
+                body: saveCall?.body,
+            };
+        });
+
+        expect(result.displayed).toBe('Score: 3/3');
+        expect(result.expectedAnswers).toEqual(['A) Initiation', 'False', 'B) Beta']);
+        const savedChatData = /** @type {any} */ (result.body.chatData);
+        expect(savedChatData.metadata.currentMode).toBe('protege');
+        expect(savedChatData.assessmentScore).toMatchObject({
+            totalCorrect: 3,
+            totalQuestions: 3,
+            mode: 'protege',
+            passed: true,
+        });
+        expect(savedChatData.practiceTests.questions.map((/** @type {any} */ q) => q.correctAnswer))
+            .toEqual([0, false, 'B']);
+        expect(savedChatData.practiceTests.questions.map((/** @type {any} */ q) => q.isCorrect))
+            .toEqual([true, true, true]);
+        expect(savedChatData.studentAnswers.answers.map((/** @type {any} */ a) => a.isCorrect))
+            .toEqual([true, true, true]);
+        const modeResult = savedChatData.messages.find(
+            (/** @type {any} */ message) => message.messageType === 'mode-result'
+        );
+        expect(modeResult.content).toContain('Score: 3/3');
+        expect(modeResult.content).toContain('Expected Answer: A) Initiation');
+        expect(modeResult.content).toContain('Expected Answer: False');
+        expect(modeResult.htmlContent).toContain('Score: 3/3');
+        expect(modeResult.htmlContent).not.toContain('N/A');
+
+        await page.evaluate((chatData) => {
+            const messages = document.getElementById('chat-messages');
+            if (messages) messages.innerHTML = '';
+            const deepWindow = /** @type {any} */ (window);
+            deepWindow.loadChatData(chatData);
+        }, savedChatData);
+        await expect(page.locator('.mode-result .assessment-summary-score')).toHaveText('Score: 3/3');
+        await expect(page.locator('.mode-result')).toContainText('A) Initiation');
+        await expect(page.locator('.mode-result')).toContainText('False');
+    });
+
     test('submitShortAnswer alerts and returns when the restored short answer is blank', async ({ page }) => {
         await openDeepHarness(page);
         await loadChatDataInHarness(page, buildChatData({
@@ -390,7 +479,7 @@ test.describe('student.js uncovered deep branches', () => {
         });
 
         await expect(page.locator('.mode-result')).toBeVisible({ timeout: 2_000 });
-        await expect(page.locator('.assessment-summary-container')).toContainText('Score:');
+        await expect(page.locator('.assessment-summary-container')).toContainText('Score: 0/4');
         await expect.poll(() => page.evaluate(() => localStorage.getItem('studentMode'))).toBe('tutor');
     });
 

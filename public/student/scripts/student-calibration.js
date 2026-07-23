@@ -505,13 +505,6 @@ async function loadQuestionsForSelectedUnit(unitName) {
                         const transformedQuestions = questionsData.data.questions.map(q => {
 
 
-                            // Fix the correct answer format - remove "A" prefix if present
-                            let cleanCorrectAnswer = q.correctAnswer;
-                            if (typeof cleanCorrectAnswer === 'string' && cleanCorrectAnswer.startsWith('A')) {
-                                cleanCorrectAnswer = cleanCorrectAnswer.substring(1);
-
-                            }
-
                             // Fix the options format - remove "A,", "B,", "C," prefixes if present
                             let cleanOptions = q.options;
                             if (q.options && typeof q.options === 'object') {
@@ -540,7 +533,7 @@ async function loadQuestionsForSelectedUnit(unitName) {
                                 type: q.questionType || 'multiple-choice',
                                 question: q.question,
                                 options: cleanOptions,
-                                correctAnswer: cleanCorrectAnswer,
+                                correctAnswer: q.correctAnswer,
                                 explanation: q.explanation || '',
                                 unitName: selectedUnit.name,
                                 passThreshold: selectedUnit.passThreshold !== undefined && selectedUnit.passThreshold !== null ? selectedUnit.passThreshold : 0
@@ -670,6 +663,8 @@ function startAssessmentWithQuestions(questions, passThreshold = 0) {
     currentQuestionIndex = 0;
     studentAnswers = [];
     window.studentAnswers = studentAnswers; // Update global reference
+    window.studentEvaluations = [];
+    window.currentAssessmentScore = null;
 
 
 
@@ -1090,7 +1085,7 @@ async function submitShortAnswer(answer, questionIndex) {
 
         const question = currentCalibrationQuestions[questionIndex];
         // Determine expected answer field
-        const expectedAnswer = question.expectedAnswer || question.correctAnswer || question.answer;
+        const expectedAnswer = question.correctAnswer ?? question.expectedAnswer ?? question.answer;
 
         // Get student name for personalized feedback
         let studentName = 'Student';
@@ -1197,156 +1192,40 @@ async function submitShortAnswer(answer, questionIndex) {
  */
 async function calculateStudentMode() {
     try {
-    
-
-        // Calculate total correct answers
-        let totalCorrect = 0;
-        const totalQuestions = currentCalibrationQuestions.length;
-
-        // Check each answer against the correct answer
-        for (let i = 0; i < Math.min(studentAnswers.length, totalQuestions); i++) {
-            const question = currentCalibrationQuestions[i];
-            const studentAnswerIndex = studentAnswers[i];
-
-            // Convert student answer index to actual answer text for display
-            let studentAnswerText = '';
-            if (question.type === 'true-false') {
-                studentAnswerText = studentAnswerIndex === 0 ? 'True' : 'False';
-            } else if (question.type === 'multiple-choice' && question.options) {
-                // Get the actual option text from the options object
-                const optionKeys = Object.keys(question.options);
-                if (optionKeys[studentAnswerIndex]) {
-                    studentAnswerText = question.options[optionKeys[studentAnswerIndex]];
-                } else {
-                    studentAnswerText = `Option ${studentAnswerIndex}`;
-                }
-            } else {
-                studentAnswerText = studentAnswerIndex;
-            }
-
-
-
-            let isCorrect = false;
-
-            if (question.type === 'true-false') {
-                // For true-false, check if the answer matches
-                // Handle both string and boolean formats
-                const expectedAnswer = question.correctAnswer;
-                const studentAnswerText = studentAnswerIndex === 0 ? 'True' : 'False';
-
-                if (typeof expectedAnswer === 'string') {
-                    // Convert to lowercase for comparison
-                    isCorrect = (studentAnswerText.toLowerCase() === expectedAnswer.toLowerCase());
-                } else if (typeof expectedAnswer === 'boolean') {
-                    // Handle boolean format
-                    isCorrect = (studentAnswerIndex === (expectedAnswer ? 0 : 1));
-                } else {
-                    // Default comparison
-                    isCorrect = (studentAnswerIndex === expectedAnswer);
-                }
-
-
-
-            } else if (question.type === 'multiple-choice') {
-                // For multiple choice, check if the answer index matches
-                // Convert correct answer key to index
-                let expectedIndex = question.correctAnswer;
-                if (typeof expectedIndex === 'string') {
-                    // Find the index of the correct answer key in the options
-                    const optionKeys = Object.keys(question.options);
-                    expectedIndex = optionKeys.indexOf(expectedIndex);
-                    if (expectedIndex === -1) expectedIndex = 0; // Default to 0 if not found
-                }
-                isCorrect = (studentAnswerIndex === expectedIndex);
-
-            } else if (question.type === 'short-answer') {
-                // Use AI evaluation if available
-                if (window.studentEvaluations && window.studentEvaluations[i]) {
-                    isCorrect = window.studentEvaluations[i].correct;
-
-                } else {
-                    // Fallback: consider it correct if they provided any meaningful answer
-                    isCorrect = (studentAnswerIndex && studentAnswerIndex.trim().length > 10);
-
-                }
-            } else {
-                // For unknown types, default to checking if answer matches
-                isCorrect = (studentAnswerIndex === question.correctAnswer);
-            }
-
-            if (isCorrect) {
-                totalCorrect++;
-
-            } else {
-
-            }
-        }
-
-
-
-        // Calculate percentage
-        const percentage = (totalCorrect / totalQuestions) * 100;
-
-
-        // Determine mode based on performance using the instructor's pass threshold
-        // If they get the required number of questions correct, they're in protégé mode
-        // Otherwise, they're in tutor mode (need more guidance)
-        const passed = totalCorrect >= currentPassThreshold;
-        const mode = passed ? 'protege' : 'tutor';
-
-
-
-        const score = {
-            totalCorrect: totalCorrect,
-            totalQuestions: totalQuestions,
-            percentage: percentage,
-            passThreshold: currentPassThreshold,
-            passed: passed,
-            mode: mode
-        };
-
-
-
+        const score = AssessmentScoring.evaluateAssessment(
+            currentCalibrationQuestions,
+            studentAnswers,
+            currentPassThreshold,
+            window.studentEvaluations
+        );
+        const mode = score.mode;
+        window.currentAssessmentScore = score;
+        currentCalibrationQuestions.forEach((question, index) => {
+            question.isCorrect = score.results[index].isCorrect;
+        });
         // Store mode in localStorage
         localStorage.setItem('studentMode', mode);
-
-        // Update mode toggle UI to reflect the determined mode
         updateModeToggleUI(mode);
-
-        // Show mode result message
         showModeResult(mode, score);
-
-        // Autosave the mode result message immediately
-        // This ensures the rich HTML content we just created is saved
-        try {
-            const studentId = getCurrentStudentId();
-            // detailed autosave logic similar to selectCalibrationAnswer
-            const autoSaveKey = `biocbot_current_chat_${studentId}`;
-            
-            // We need to wait a tick for the DOM to update with the new message
-            setTimeout(async () => {
-                const currentChatData = await collectAllChatData();
-                if (currentChatData) {
-                    currentChatData.lastActivityTimestamp = new Date().toISOString();
-                    localStorage.setItem(autoSaveKey, JSON.stringify(currentChatData));
-                    scheduleChatSessionExpiration(currentChatData);
-                }
-            }, 100);
-        } catch (e) {
-            console.error('Error auto-saving mode result:', e);
-        }
-
-        // Re-enable chat (clears noPublishedUnits flag and enables inputs)
         enableChatInput();
 
+        // Capture the completed result after it is in the DOM, then await the
+        // server write so instructors do not need a later student message.
+        const studentId = getCurrentStudentId();
+        const currentChatData = await collectAllChatData();
+        if (studentId && currentChatData) {
+            currentChatData.lastActivityTimestamp = new Date().toISOString();
+            localStorage.setItem(`biocbot_current_chat_${studentId}`, JSON.stringify(currentChatData));
+            scheduleChatSessionExpiration(currentChatData);
+            await syncAutoSaveWithServer(currentChatData);
+        }
+        return score;
     } catch (error) {
         console.error('Error calculating mode:', error);
-        // Default to tutor mode on error
         localStorage.setItem('studentMode', 'tutor');
         updateModeToggleUI('tutor');
-
-        // Re-enable chat (clears noPublishedUnits flag and enables inputs)
         enableChatInput();
+        return null;
     }
 }
 
@@ -1356,8 +1235,13 @@ async function calculateStudentMode() {
  * @param {object} score - Assessment score object
  */
 function showModeResult(mode, score) {
+    mode = score.mode;
     const modeMessage = document.createElement('div');
     modeMessage.classList.add('message', 'bot-message', 'mode-result', 'standard-mode-result');
+    modeMessage.dataset.assessmentContent = AssessmentScoring.buildModeResultText(
+        { ...score, mode },
+        window.currentCalibrationQuestions
+    );
 
     const avatarDiv = document.createElement('div');
     avatarDiv.classList.add('message-avatar');
@@ -1365,190 +1249,40 @@ function showModeResult(mode, score) {
 
     const contentDiv = document.createElement('div');
     contentDiv.classList.add('message-content', 'standard-mode-content');
-
-    const resultText = document.createElement('p');
-
-
-    // Show mode explanation
-    const modeExplanation = document.createElement('div');
-    modeExplanation.classList.add('mode-explanation');
-
-    if (mode === 'protege') {
-        modeExplanation.innerHTML = `
-            <strong>BiocBot is in protégé mode</strong><br>
-            Excellent work! You've demonstrated strong understanding of the course material. I'm ready to be your study partner and help you explore advanced topics together. What questions do you have about the course material?`;
-    } else {
-        modeExplanation.innerHTML = `
-            <strong>BiocBot is in tutor mode</strong><br>
-            Thanks for completing the assessment! I'm here to guide your learning and help explain concepts clearly. What questions do you have about the course material?`;
+    contentDiv.innerHTML = AssessmentScoring.buildModeResultHtml(
+        { ...score, mode },
+        window.currentCalibrationQuestions
+    );
+    const scoreElement = contentDiv.querySelector('.assessment-summary-score');
+    if (scoreElement) {
+        scoreElement.textContent = `Score: ${score.totalCorrect}/${score.totalQuestions}`;
     }
-
-    contentDiv.appendChild(modeExplanation);
-
-    // Add Assessment Summary
-    if (window.currentCalibrationQuestions && window.currentCalibrationQuestions.length > 0) {
-        const summaryContainer = document.createElement('div');
-        summaryContainer.className = 'assessment-summary-container';
-
-        // Header
-        const header = document.createElement('div');
-        header.className = 'assessment-summary-header';
-        
-        const title = document.createElement('h4');
-        title.className = 'assessment-summary-title';
-        title.innerHTML = 'Assessment Summary';
-        
-        const score = document.createElement('div');
-        score.className = 'assessment-summary-score';
-        // Score set after loop
-
-        header.appendChild(title);
-        header.appendChild(score);
-        summaryContainer.appendChild(header);
-
-        // Questions List
-        const list = document.createElement('div');
-        list.className = 'assessment-questions-list';
-
-        let correctCount = 0;
-        let totalCount = window.currentCalibrationQuestions.length;
-        let hasEvaluations = window.studentEvaluations && Array.isArray(window.studentEvaluations);
-
-        window.currentCalibrationQuestions.forEach((q, index) => {
-            const card = document.createElement('div');
-            card.className = 'summary-question-card';
-
-            const questionHeader = document.createElement('div');
-            questionHeader.className = 'summary-question-header';
-            questionHeader.innerHTML = `
-                <span class="summary-q-number">#${index + 1}</span>
-                <span class="summary-q-text">${q.question}</span>
-            `;
-            card.appendChild(questionHeader);
-
-            const studentAnsIndex = window.studentAnswers[index];
-            let displayStudentAns = studentAnsIndex;
-            let displayCorrectAns = q.correctAnswer || q.expectedAnswer || q.answer;
-            let feedback = '';
-            let isCorrect = false;
-
-            // Logic to format answers
-            if (q.type === 'true-false') {
-                displayStudentAns = studentAnsIndex === 0 ? 'True' : (studentAnsIndex === 1 ? 'False' : studentAnsIndex);
-                if (typeof displayCorrectAns === 'boolean') {
-                    displayCorrectAns = displayCorrectAns ? 'True' : 'False';
-                } else if (typeof displayCorrectAns === 'string') {
-                    displayCorrectAns = displayCorrectAns.charAt(0).toUpperCase() + displayCorrectAns.slice(1);
-                }
-            } else if (q.type === 'multiple-choice' && q.options) {
-                const optionKeys = Object.keys(q.options);
-                if (optionKeys[studentAnsIndex]) {
-                    displayStudentAns = `${optionKeys[studentAnsIndex]}) ${q.options[optionKeys[studentAnsIndex]]}`;
-                }
-                if (q.options[displayCorrectAns]) {
-                    displayCorrectAns = `${displayCorrectAns}) ${q.options[displayCorrectAns]}`;
-                }
-            }
-            
-            // Check correctness
-            if (hasEvaluations && window.studentEvaluations[index]) {
-                 isCorrect = window.studentEvaluations[index].correct;
-                 feedback = window.studentEvaluations[index].feedback;
-            } else {
-                 // Fallback logic
-                 if (q.type === 'true-false' || q.type === 'multiple-choice') {
-                      const sAns = String(displayStudentAns).trim().toLowerCase();
-                      const cAns = String(displayCorrectAns).trim().toLowerCase();
-                      if (sAns === cAns) {
-                          isCorrect = true;
-                      }
-                 }
-            }
-            
-            if (isCorrect) correctCount++;
-
-            const answerSection = document.createElement('div');
-            answerSection.className = 'summary-answer-section';
-            
-            const safeStudentAns = displayStudentAns !== undefined && displayStudentAns !== null ? displayStudentAns : 'No answer provided';
-            const safeCorrectAns = displayCorrectAns !== undefined && displayCorrectAns !== null ? displayCorrectAns : 'N/A';
-            
-            answerSection.innerHTML = `
-                <div class="answer-box student">
-                    <span class="answer-box-label">Your Answer</span>
-                    <div class="answer-box-content">${safeStudentAns}</div>
-                </div>
-                <div class="answer-box expected">
-                    <span class="answer-box-label">Expected Answer</span>
-                    <div class="answer-box-content">${safeCorrectAns}</div>
-                </div>
-            `;
-            card.appendChild(answerSection);
-
-            if (feedback) {
-                const feedbackDiv = document.createElement('div');
-                feedbackDiv.className = `summary-feedback-section ${isCorrect ? 'correct' : 'incorrect'}`;
-                feedbackDiv.innerHTML = `
-                    <div class="feedback-icon">${isCorrect ? '✅' : '❌'}</div>
-                    <div class="feedback-content">
-                        <strong>Feedback:</strong> ${feedback}
-                    </div>
-                `;
-                card.appendChild(feedbackDiv);
-            }
-
-            list.appendChild(card);
-        });
-
-        if (score) score.textContent = `Score: ${correctCount}/${totalCount}`;
-        summaryContainer.appendChild(list);
-        contentDiv.appendChild(summaryContainer);
-    }
-
-    // Add unit selection option after assessment completion
-    // const unitSelectionOption = document.createElement('div');
-    // unitSelectionOption.classList.add('unit-selection-option');
-    // unitSelectionOption.innerHTML = `
-    //     <div style="margin-top: 15px; padding: 12px; background-color: #f8f9fa; border-radius: 6px; border-left: 4px solid var(--primary-color);">
-    //         <strong>Want to try another unit?</strong><br>
-    //         You can select a different unit from the dropdown above to take another assessment, or continue chatting with me about any topics you'd like to discuss.
-    //     </div>
-    // `;
-    // contentDiv.appendChild(unitSelectionOption);
 
     // Add timestamp
     const timestamp = document.createElement('span');
     timestamp.classList.add('timestamp');
 
-        // Create real timestamp for mode result
-        const modeTime = new Date();
-        timestamp.textContent = formatTimestamp(modeTime);
-
-        // Store timestamp in mode message div for future updates
-        modeMessage.dataset.timestamp = modeTime.getTime();
-
-        // Add title attribute for exact time on hover
-        timestamp.title = modeTime.toLocaleString('en-US', {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: true
-        });
+    const modeTime = new Date();
+    timestamp.textContent = formatTimestamp(modeTime);
+    modeMessage.dataset.timestamp = modeTime.getTime();
+    timestamp.title = modeTime.toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+    });
 
     contentDiv.appendChild(timestamp);
 
     modeMessage.appendChild(avatarDiv);
     modeMessage.appendChild(contentDiv);
 
-    // Add to chat
     const chatMessages = document.getElementById('chat-messages');
     chatMessages.appendChild(modeMessage);
-
-    // Scroll to bottom
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
