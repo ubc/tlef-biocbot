@@ -223,6 +223,13 @@ function loadChatData(chatData) {
                 
                 studentAnswers = chatData.studentAnswers.answers.map(answer => answer.answer);
                 window.studentAnswers = studentAnswers; // Sync global
+                window.currentAssessmentScore = chatData.assessmentScore
+                    ?? chatData.practiceTests.score
+                    ?? AssessmentScoring.evaluateAssessment(
+                        currentCalibrationQuestions,
+                        studentAnswers,
+                        currentPassThreshold
+                    );
 
                 // Calculate the correct current question index based on answers provided
                 // This is more reliable than the saved index which might be stale

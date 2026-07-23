@@ -17,6 +17,8 @@ let studentAnswers = [];
 
 window.studentEvaluations = [];
 
+window.currentAssessmentScore = null;
+
 // Make variables globally accessible for auto-save
 window.currentCalibrationQuestions = currentCalibrationQuestions;
 
