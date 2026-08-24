@@ -89,12 +89,6 @@ router.post('/course/:scopeId/import', express.text({ type: ['text/csv', 'text/p
     }
 });
 
-router.get('/course/:scopeId/template.csv', (req, res) => {
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="BiocBot_${req.params.scopeId}_Pseudonym_Template.csv"`);
-    res.send('Student,Student_ID\n0042,user_1770000000000_example\n');
-});
-
 router.get('/:scopeType/:scopeId/mapping.csv', async (req, res) => {
     try {
         const db = req.app.locals.db;

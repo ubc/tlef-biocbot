@@ -45,9 +45,15 @@
         </header>
 
         <main class="main-content">
-            <div class="content-header">
-                <h1 id="main" tabindex="-1">Student Hub</h1>
-                <p>View and manage student enrollment in your courses</p>
+            <div class="content-header student-hub-page-header">
+                <div>
+                    <h1 id="main" tabindex="-1">Student Hub</h1>
+                    <p>View and manage student enrollment in your courses</p>
+                </div>
+                <button class="btn-primary pseudonym-launch-button" id="open-pseudonym-manager" type="button"
+                        aria-haspopup="dialog" aria-controls="pseudonym-manager" hidden>
+                    Manage anonymization IDs
+                </button>
             </div>
 
             <div class="dashboard-section">
@@ -87,50 +93,6 @@
 
                 <div id="students-container" class="students-grid"></div>
             </div>
-
-            <section class="dashboard-section pseudonym-manager" id="pseudonym-manager" hidden>
-                <div class="pseudonym-manager-header">
-                    <div>
-                        <h2>Student anonymization IDs</h2>
-                        <p>System-admin only. Assign each student a stable four-character ID before creating anonymized chat exports.</p>
-                    </div>
-                    <span class="pseudonym-admin-badge">Admin only</span>
-                </div>
-
-                <div class="pseudonym-controls">
-                    <label for="pseudonym-scope-type">Scope</label>
-                    <select id="pseudonym-scope-type">
-                        <option value="course">Course offering</option>
-                        <option value="superchat">Superchat bucket</option>
-                    </select>
-                    <label for="pseudonym-scope-id">Course or bucket</label>
-                    <select id="pseudonym-scope-id"></select>
-                    <button class="btn-small btn-primary" id="generate-pseudonyms" type="button">Generate missing IDs</button>
-                </div>
-
-                <div class="pseudonym-controls" id="pseudonym-import-controls">
-                    <label class="btn-small btn-secondary pseudonym-file-label" for="pseudonym-csv-file">Upload historical CSV</label>
-                    <input id="pseudonym-csv-file" type="file" accept=".csv,text/csv" hidden>
-                    <button class="btn-small btn-secondary" id="download-pseudonym-template" type="button">Download CSV template</button>
-                    <button class="btn-small btn-secondary" id="download-pseudonym-mapping" type="button">Download mapping CSV</button>
-                </div>
-
-                <div id="pseudonym-status" class="pseudonym-status" role="status" aria-live="polite">Choose a course or superchat bucket.</div>
-                <div class="pseudonym-table-wrap">
-                    <table class="pseudonym-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">Student</th>
-                                <th scope="col">Name</th>
-                                <th scope="col">Student_ID</th>
-                                <th scope="col">PUID</th>
-                                <th scope="col">Source</th>
-                            </tr>
-                        </thead>
-                        <tbody id="pseudonym-table-body"></tbody>
-                    </table>
-                </div>
-            </section>
 
             <div class="dashboard-section survey-responses-section">
                 <div class="survey-section-header">
@@ -179,6 +141,62 @@
                 <div id="survey-responses-container" class="survey-responses-list"></div>
             </div>
         </main>
+    </div>
+
+    <div class="pseudonym-modal" id="pseudonym-manager" hidden>
+        <div class="pseudonym-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="pseudonym-modal-title">
+            <header class="pseudonym-modal-header">
+                <div>
+                    <div class="pseudonym-modal-eyebrow">System admin</div>
+                    <h2 id="pseudonym-modal-title">Student anonymization IDs</h2>
+                    <p>Assign stable four-character IDs before creating anonymized chat exports.</p>
+                </div>
+                <button class="pseudonym-modal-close" id="close-pseudonym-manager" type="button" aria-label="Close anonymization ID manager">&times;</button>
+            </header>
+
+            <div class="pseudonym-modal-body">
+                <div class="pseudonym-scope-grid">
+                    <label class="pseudonym-field" for="pseudonym-scope-type">
+                        <span>Scope</span>
+                        <select id="pseudonym-scope-type">
+                            <option value="course">Course offering</option>
+                            <option value="superchat">Superchat bucket</option>
+                        </select>
+                    </label>
+                    <label class="pseudonym-field" for="pseudonym-scope-id">
+                        <span>Course or bucket</span>
+                        <select id="pseudonym-scope-id"></select>
+                    </label>
+                </div>
+
+                <div class="pseudonym-actions" id="pseudonym-import-controls">
+                    <button class="btn-primary" id="generate-pseudonyms" type="button">Generate missing IDs</button>
+                    <label class="btn-secondary pseudonym-file-label" for="pseudonym-csv-file">Upload historical CSV</label>
+                    <input id="pseudonym-csv-file" type="file" accept=".csv,text/csv" hidden>
+                    <button class="btn-secondary" id="download-pseudonym-mapping" type="button">Download mapping CSV</button>
+                </div>
+
+                <div id="pseudonym-status" class="pseudonym-status" role="status" aria-live="polite">Choose a course or superchat bucket.</div>
+                <div class="pseudonym-table-wrap">
+                    <table class="pseudonym-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Student</th>
+                                <th scope="col">Name</th>
+                                <th scope="col">Student_ID</th>
+                                <th scope="col">PUID</th>
+                                <th scope="col">Source</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pseudonym-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <footer class="pseudonym-modal-footer">
+                <button class="btn-secondary" id="close-pseudonym-manager-footer" type="button">Done</button>
+            </footer>
+        </div>
     </div>
 
     <script src="../common/scripts/auth.js"></script>

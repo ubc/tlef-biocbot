@@ -27,19 +27,28 @@ document.addEventListener('DOMContentLoaded', async function() {
 });
 
 let pseudonymScopes = { courses: [], superchats: [] };
+let pseudonymModalReturnFocus = null;
 
 async function initializePseudonymManager() {
     if (typeof isSystemAdmin !== 'function' || !isSystemAdmin()) return;
 
     const manager = document.getElementById('pseudonym-manager');
-    if (!manager) return;
-    manager.hidden = false;
+    const launchButton = document.getElementById('open-pseudonym-manager');
+    if (!manager || !launchButton) return;
+    launchButton.hidden = false;
+
+    launchButton.addEventListener('click', openPseudonymManager);
+    document.getElementById('close-pseudonym-manager')?.addEventListener('click', closePseudonymManager);
+    document.getElementById('close-pseudonym-manager-footer')?.addEventListener('click', closePseudonymManager);
+    manager.addEventListener('click', event => {
+        if (event.target === manager) closePseudonymManager();
+    });
+    manager.addEventListener('keydown', handlePseudonymModalKeydown);
 
     document.getElementById('pseudonym-scope-type')?.addEventListener('change', populatePseudonymScopeOptions);
     document.getElementById('pseudonym-scope-id')?.addEventListener('change', loadPseudonymStatus);
     document.getElementById('generate-pseudonyms')?.addEventListener('click', generatePseudonyms);
     document.getElementById('pseudonym-csv-file')?.addEventListener('change', importPseudonymCsv);
-    document.getElementById('download-pseudonym-template')?.addEventListener('click', downloadPseudonymTemplate);
     document.getElementById('download-pseudonym-mapping')?.addEventListener('click', downloadPseudonymMapping);
 
     try {
@@ -53,8 +62,52 @@ async function initializePseudonymManager() {
             typeSelect.value = requestedType;
         }
         populatePseudonymScopeOptions();
+        if (requestedType === 'course' || requestedType === 'superchat') openPseudonymManager();
     } catch (error) {
         setPseudonymStatus(`Could not load anonymization scopes: ${error.message}`, 'error');
+    }
+}
+
+function openPseudonymManager() {
+    const manager = document.getElementById('pseudonym-manager');
+    if (!manager) return;
+    pseudonymModalReturnFocus = document.activeElement;
+    manager.hidden = false;
+    document.body.classList.add('pseudonym-modal-open');
+    document.getElementById('close-pseudonym-manager')?.focus();
+}
+
+function closePseudonymManager() {
+    const manager = document.getElementById('pseudonym-manager');
+    if (!manager || manager.hidden) return;
+    manager.hidden = true;
+    document.body.classList.remove('pseudonym-modal-open');
+    if (pseudonymModalReturnFocus && typeof pseudonymModalReturnFocus.focus === 'function') {
+        pseudonymModalReturnFocus.focus();
+    }
+}
+
+function handlePseudonymModalKeydown(event) {
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closePseudonymManager();
+        return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const manager = document.getElementById('pseudonym-manager');
+    const focusable = Array.from(manager.querySelectorAll(
+        'button:not([disabled]):not([hidden]), select:not([disabled]), input:not([disabled]):not([hidden]), [tabindex]:not([tabindex="-1"])'
+    )).filter(element => element.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
     }
 }
 
@@ -84,8 +137,6 @@ function populatePseudonymScopeOptions() {
     });
     if (!select.value && select.options.length) select.selectedIndex = 0;
     if (importControls) importControls.querySelector('.pseudonym-file-label').hidden = type !== 'course';
-    const templateButton = document.getElementById('download-pseudonym-template');
-    if (templateButton) templateButton.hidden = type !== 'course';
     loadPseudonymStatus();
 }
 
@@ -187,12 +238,6 @@ async function importPseudonymCsv(event) {
     } finally {
         event.target.value = '';
     }
-}
-
-function downloadPseudonymTemplate() {
-    const scope = currentPseudonymScope();
-    if (scope.type !== 'course' || !scope.id) return;
-    window.location.assign(`/api/student-pseudonyms/course/${encodeURIComponent(scope.id)}/template.csv`);
 }
 
 function downloadPseudonymMapping() {
