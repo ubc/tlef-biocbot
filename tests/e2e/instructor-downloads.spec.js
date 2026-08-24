@@ -613,7 +613,7 @@ test.describe('Instructor downloads API — system admin direct access', () => {
         expect(softDeleted.status()).toBe(404);
     });
 
-    test('does not leak sessions across course IDs or unrelated instructor courses', async ({ request: api }) => {
+    test('allows system-admin course access without leaking sessions across course IDs', async ({ request: api }) => {
         const otherCourse = await api.get(`/api/students/${DOWNLOAD_OTHER_COURSE_ID}`);
         expect(otherCourse.ok()).toBeTruthy();
         const otherBody = await otherCourse.json();
@@ -628,7 +628,11 @@ test.describe('Instructor downloads API — system admin direct access', () => {
         expect(wrongCourseForSession.status()).toBe(404);
 
         const unrelatedCourse = await api.get(`/api/students/BIOC-E2E-DOWNLOADS-UNRELATED`);
-        expect(unrelatedCourse.status()).toBe(404);
+        expect(unrelatedCourse.ok()).toBeTruthy();
+        const unrelatedBody = await unrelatedCourse.json();
+        expect(unrelatedBody.data.students[0].sessions.map((session) => session.sessionId)).toEqual([
+            SESSION_UNRELATED_ID,
+        ]);
 
         const unrelatedSession = await api.get(
             `/api/students/${DOWNLOAD_COURSE_ID}/${DOWNLOAD_STUDENT_ID}/sessions/${SESSION_UNRELATED_ID}`
