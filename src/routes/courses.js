@@ -1053,7 +1053,10 @@ router.get('/', async (req, res) => {
         
         // Query database for instructor's courses (exclude soft-deleted).
         const collection = db.collection('courses');
-        const courses = await collection.find({ instructorId, status: { $ne: 'deleted' } }).toArray();
+        const courseQuery = hasSystemAdminAccess(user)
+            ? { status: { $ne: 'deleted' } }
+            : { instructorId, status: { $ne: 'deleted' } };
+        const courses = await collection.find(courseQuery).toArray();
         
         // Transform the data to match expected format
         const transformedCourses = courses.map(course => ({
@@ -2608,7 +2611,7 @@ router.get('/available/all', async (req, res) => {
 
         let availableCourses = courses;
 
-        if (user && user.role === 'instructor') {
+        if (user && user.role === 'instructor' && !hasSystemAdminAccess(user)) {
             availableCourses = availableCourses.filter(course => hasInstructorAccess(course, user.userId));
         }
 
@@ -3617,7 +3620,8 @@ router.get('/:courseId/students', async (req, res) => {
 
         // Check course access. TAs may access inactive courses as long as they remain assigned.
         const accessRole = user.role === 'ta' ? 'ta' : 'instructor';
-        const hasAccess = await CourseModel.userHasCourseAccess(db, courseId, user.userId, accessRole);
+        const hasAccess = hasSystemAdminAccess(user)
+            || await CourseModel.userHasCourseAccess(db, courseId, user.userId, accessRole);
         if (!hasAccess) {
             return res.status(403).json({ success: false, message: 'Access denied. You can only view courses you have access to.' });
         }

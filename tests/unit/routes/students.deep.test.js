@@ -31,10 +31,10 @@ describe('GET /:courseId/:studentId/sessions — admin list', () => {
         expect((await request(app({ db: memoryDb({}), user: plainInstructor })).get('/C1/s1/sessions')).status).toBe(403);
     });
 
-    test('404 when the admin has no access to the course', async () => {
+    test('allows a system admin to read a course they do not teach', async () => {
         const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'someone-else' }] });
         const res = await request(app({ db, user: adminInstructor })).get('/C1/s1/sessions');
-        expect(res.status).toBe(404);
+        expect(res.status).toBe(200);
     });
 
     test('503 when the db is unavailable', async () => {

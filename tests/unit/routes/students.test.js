@@ -35,10 +35,11 @@ describe('GET /:courseId — instructor-admin student list', () => {
         expect(res.body.message).toMatch(/system admins/i);
     });
 
-    test('404 when the admin has no access to the course', async () => {
+    test('system admins can download from courses they do not teach', async () => {
         const db = memoryDb({ courses: [{ courseId: 'C1', instructorId: 'someone-else' }] });
         const res = await request(makeRouteApp(studentsRouter, { db, user: adminInstructor })).get('/C1');
-        expect(res.status).toBe(404);
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ courseId: 'C1', totalStudents: 0, totalSessions: 0 });
     });
 
     test('200 groups sessions by student, extracts names, and computes duration', async () => {
@@ -211,11 +212,11 @@ describe('GET /:courseId/:studentId/sessions/own — student access', () => {
         expect(res.status).toBe(403);
     });
 
-    test('allows a system admin only when they own the course', async () => {
-        const denied = await request(makeRouteApp(studentsRouter, {
+    test('allows a system admin to access any course', async () => {
+        const otherCourse = await request(makeRouteApp(studentsRouter, {
             db: memoryDb({ courses: [{ courseId: 'C1', instructorId: 'other' }] }), user: adminInstructor,
         })).get('/C1/s1/sessions/own');
-        expect(denied.status).toBe(404);
+        expect(otherCourse.status).toBe(200);
 
         const allowed = await request(makeRouteApp(studentsRouter, {
             db: memoryDb({ courses: [{ courseId: 'C1', instructorId: 'i1' }], chat_sessions: [] }), user: adminInstructor,

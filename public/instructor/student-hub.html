@@ -88,6 +88,50 @@
                 <div id="students-container" class="students-grid"></div>
             </div>
 
+            <section class="dashboard-section pseudonym-manager" id="pseudonym-manager" hidden>
+                <div class="pseudonym-manager-header">
+                    <div>
+                        <h2>Student anonymization IDs</h2>
+                        <p>System-admin only. Assign each student a stable four-character ID before creating anonymized chat exports.</p>
+                    </div>
+                    <span class="pseudonym-admin-badge">Admin only</span>
+                </div>
+
+                <div class="pseudonym-controls">
+                    <label for="pseudonym-scope-type">Scope</label>
+                    <select id="pseudonym-scope-type">
+                        <option value="course">Course offering</option>
+                        <option value="superchat">Superchat bucket</option>
+                    </select>
+                    <label for="pseudonym-scope-id">Course or bucket</label>
+                    <select id="pseudonym-scope-id"></select>
+                    <button class="btn-small btn-primary" id="generate-pseudonyms" type="button">Generate missing IDs</button>
+                </div>
+
+                <div class="pseudonym-controls" id="pseudonym-import-controls">
+                    <label class="btn-small btn-secondary pseudonym-file-label" for="pseudonym-csv-file">Upload historical CSV</label>
+                    <input id="pseudonym-csv-file" type="file" accept=".csv,text/csv" hidden>
+                    <button class="btn-small btn-secondary" id="download-pseudonym-template" type="button">Download CSV template</button>
+                    <button class="btn-small btn-secondary" id="download-pseudonym-mapping" type="button">Download mapping CSV</button>
+                </div>
+
+                <div id="pseudonym-status" class="pseudonym-status" role="status" aria-live="polite">Choose a course or superchat bucket.</div>
+                <div class="pseudonym-table-wrap">
+                    <table class="pseudonym-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Student</th>
+                                <th scope="col">Name</th>
+                                <th scope="col">Student_ID</th>
+                                <th scope="col">PUID</th>
+                                <th scope="col">Source</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pseudonym-table-body"></tbody>
+                    </table>
+                </div>
+            </section>
+
             <div class="dashboard-section survey-responses-section">
                 <div class="survey-section-header">
                     <div>

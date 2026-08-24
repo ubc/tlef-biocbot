@@ -41,6 +41,7 @@ const superchatsRoutes = require('./routes/superchats');
 const exportChangeLogRoutes = require('./routes/exportChangeLog');
 const providerMigrationsRoutes = require('./routes/providerMigrations');
 const academicSyncRoutes = require('./routes/academicSync');
+const studentPseudonymRoutes = require('./routes/studentPseudonyms');
 const previewRoutes = require('./routes/preview');
 const { createCanvasLmsRouter } = require('./routes/canvasLms');
 const { createLmsGradesRouter } = require('./routes/lmsGrades');
@@ -669,6 +670,7 @@ function setupAPIRoutes() {
     app.use('/api/export-change-log', authMiddleware.requireAuth, authMiddleware.populateUser, exportChangeLogRoutes);
     app.use('/api/provider-migrations', authMiddleware.requireAuth, authMiddleware.populateUser, providerMigrationsRoutes);
     app.use('/api/academic-sync', authMiddleware.requireAuth, authMiddleware.populateUser, authMiddleware.requireInstructor, academicSyncRoutes);
+    app.use('/api/student-pseudonyms', authMiddleware.requireAuth, authMiddleware.populateUser, studentPseudonymRoutes);
     app.get(
         '/api/lms/configuration',
         authMiddleware.requireAuth,

@@ -135,15 +135,9 @@ router.get('/:courseId', async (req, res) => {
             return;
         }
         
-        // Verify the instructor has access to this course
+        // System admins can download from any course.
         const coursesCollection = db.collection('courses');
-        const course = await coursesCollection.findOne({ 
-            courseId: courseId,
-            $or: [
-                { instructorId: user.userId },
-                { instructors: { $in: [user.userId] } }
-            ]
-        });
+        const course = await coursesCollection.findOne({ courseId });
         
         if (!course) {
             return res.status(404).json({
@@ -329,13 +323,16 @@ router.get('/:courseId/:studentId/sessions/own', async (req, res) => {
         // For instructors, verify they have access to this course
         if (user.role === 'instructor') {
             const coursesCollection = db.collection('courses');
-            const course = await coursesCollection.findOne({
-                courseId: courseId,
-                $or: [
-                    { instructorId: user.userId },
-                    { instructors: { $in: [user.userId] } }
-                ]
-            });
+            const courseQuery = hasSystemAdminAccess(user)
+                ? { courseId }
+                : {
+                    courseId,
+                    $or: [
+                        { instructorId: user.userId },
+                        { instructors: { $in: [user.userId] } }
+                    ]
+                };
+            const course = await coursesCollection.findOne(courseQuery);
             
             if (!course) {
                 return res.status(404).json({
@@ -413,15 +410,9 @@ router.get('/:courseId/:studentId/sessions', async (req, res) => {
             return;
         }
         
-        // Verify the instructor has access to this course
+        // System admins can download from any course.
         const coursesCollection = db.collection('courses');
-        const course = await coursesCollection.findOne({ 
-            courseId: courseId,
-            $or: [
-                { instructorId: user.userId },
-                { instructors: { $in: [user.userId] } }
-            ]
-        });
+        const course = await coursesCollection.findOne({ courseId });
         
         if (!course) {
             return res.status(404).json({
@@ -499,15 +490,9 @@ router.get('/:courseId/:studentId/sessions/:sessionId', async (req, res) => {
             return;
         }
         
-        // Verify the instructor has access to this course
+        // System admins can download from any course.
         const coursesCollection = db.collection('courses');
-        const course = await coursesCollection.findOne({ 
-            courseId: courseId,
-            $or: [
-                { instructorId: user.userId },
-                { instructors: { $in: [user.userId] } }
-            ]
-        });
+        const course = await coursesCollection.findOne({ courseId });
         
         if (!course) {
             return res.status(404).json({

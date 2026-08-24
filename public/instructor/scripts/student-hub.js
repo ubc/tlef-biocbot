@@ -22,8 +22,184 @@ document.addEventListener('DOMContentLoaded', async function() {
     await waitForAuth();
 
     initializeStudentHub();
+    await initializePseudonymManager();
     await loadInstructorCourses();
 });
+
+let pseudonymScopes = { courses: [], superchats: [] };
+
+async function initializePseudonymManager() {
+    if (typeof isSystemAdmin !== 'function' || !isSystemAdmin()) return;
+
+    const manager = document.getElementById('pseudonym-manager');
+    if (!manager) return;
+    manager.hidden = false;
+
+    document.getElementById('pseudonym-scope-type')?.addEventListener('change', populatePseudonymScopeOptions);
+    document.getElementById('pseudonym-scope-id')?.addEventListener('change', loadPseudonymStatus);
+    document.getElementById('generate-pseudonyms')?.addEventListener('click', generatePseudonyms);
+    document.getElementById('pseudonym-csv-file')?.addEventListener('change', importPseudonymCsv);
+    document.getElementById('download-pseudonym-template')?.addEventListener('click', downloadPseudonymTemplate);
+    document.getElementById('download-pseudonym-mapping')?.addEventListener('click', downloadPseudonymMapping);
+
+    try {
+        const response = await authenticatedFetch('/api/student-pseudonyms/scopes');
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.message || `HTTP ${response.status}`);
+        pseudonymScopes = result.data || pseudonymScopes;
+        const requestedType = new URLSearchParams(window.location.search).get('pseudonymScope');
+        const typeSelect = document.getElementById('pseudonym-scope-type');
+        if (typeSelect && (requestedType === 'course' || requestedType === 'superchat')) {
+            typeSelect.value = requestedType;
+        }
+        populatePseudonymScopeOptions();
+    } catch (error) {
+        setPseudonymStatus(`Could not load anonymization scopes: ${error.message}`, 'error');
+    }
+}
+
+function currentPseudonymScope() {
+    return {
+        type: document.getElementById('pseudonym-scope-type')?.value || 'course',
+        id: document.getElementById('pseudonym-scope-id')?.value || ''
+    };
+}
+
+function populatePseudonymScopeOptions() {
+    const type = document.getElementById('pseudonym-scope-type')?.value || 'course';
+    const select = document.getElementById('pseudonym-scope-id');
+    const importControls = document.getElementById('pseudonym-import-controls');
+    if (!select) return;
+
+    const selectedCourseId = new URLSearchParams(window.location.search).get('courseId') || localStorage.getItem('selectedCourseId');
+    const requestedScopeId = new URLSearchParams(window.location.search).get('pseudonymScopeId');
+    const options = type === 'course' ? pseudonymScopes.courses : pseudonymScopes.superchats;
+    select.innerHTML = '';
+    options.forEach(scope => {
+        const id = type === 'course' ? scope.courseId : scope.superchatId;
+        const label = type === 'course' ? (scope.courseName || scope.courseId) : (scope.name || scope.superchatId);
+        appendOption(select, id, `${label} (${id})`, {
+            selected: id === requestedScopeId || (type === 'course' && !requestedScopeId && id === selectedCourseId)
+        });
+    });
+    if (!select.value && select.options.length) select.selectedIndex = 0;
+    if (importControls) importControls.querySelector('.pseudonym-file-label').hidden = type !== 'course';
+    const templateButton = document.getElementById('download-pseudonym-template');
+    if (templateButton) templateButton.hidden = type !== 'course';
+    loadPseudonymStatus();
+}
+
+function setPseudonymStatus(message, state = '') {
+    const status = document.getElementById('pseudonym-status');
+    if (!status) return;
+    status.textContent = message;
+    status.dataset.state = state;
+}
+
+async function loadPseudonymStatus() {
+    const scope = currentPseudonymScope();
+    const body = document.getElementById('pseudonym-table-body');
+    if (!scope.id) {
+        setPseudonymStatus(`No ${scope.type === 'course' ? 'courses' : 'superchat buckets'} are available.`, 'error');
+        if (body) body.innerHTML = '';
+        return;
+    }
+
+    setPseudonymStatus('Loading student IDs…');
+    try {
+        const response = await authenticatedFetch(`/api/student-pseudonyms/${scope.type}/${encodeURIComponent(scope.id)}`);
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.message || `HTTP ${response.status}`);
+        const data = result.data;
+        setPseudonymStatus(
+            data.complete
+                ? `Ready for anonymized downloads: ${data.mappingCount} of ${data.studentCount} students have IDs.`
+                : `${data.mappingCount} of ${data.studentCount} students have IDs; ${data.missingStudentIds.length} still need one.`,
+            data.complete ? 'complete' : 'incomplete'
+        );
+        if (body) {
+            body.innerHTML = data.mappings.length
+                ? data.mappings.map(row => `
+                    <tr>
+                        <td class="pseudonym-code">${escapeHTML(row.student)}</td>
+                        <td>${escapeHTML(row.displayName || '—')}</td>
+                        <td>${escapeHTML(row.studentId)}</td>
+                        <td>${escapeHTML(row.puid || '—')}</td>
+                        <td>${escapeHTML(row.source)}</td>
+                    </tr>
+                `).join('')
+                : '<tr><td colspan="5">No IDs have been assigned yet.</td></tr>';
+        }
+    } catch (error) {
+        setPseudonymStatus(`Could not load student IDs: ${error.message}`, 'error');
+        if (body) body.innerHTML = '';
+    }
+}
+
+async function generatePseudonyms() {
+    const scope = currentPseudonymScope();
+    if (!scope.id) return;
+    const button = document.getElementById('generate-pseudonyms');
+    if (button) button.disabled = true;
+    setPseudonymStatus('Generating IDs for students who do not already have one…');
+    try {
+        const response = await authenticatedFetch(
+            `/api/student-pseudonyms/${scope.type}/${encodeURIComponent(scope.id)}/generate`,
+            { method: 'POST' }
+        );
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.message || `HTTP ${response.status}`);
+        showNotification(
+            result.data.createdCount
+                ? `Generated ${result.data.createdCount} student IDs.`
+                : 'Every student already has an ID; nothing was changed.',
+            'success'
+        );
+        await loadPseudonymStatus();
+    } catch (error) {
+        setPseudonymStatus(`Generation failed: ${error.message}`, 'error');
+        showNotification(`Could not generate student IDs: ${error.message}`, 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+async function importPseudonymCsv(event) {
+    const file = event.target.files?.[0];
+    const scope = currentPseudonymScope();
+    if (!file || scope.type !== 'course' || !scope.id) return;
+    setPseudonymStatus(`Validating ${file.name}…`);
+    try {
+        const response = await authenticatedFetch(
+            `/api/student-pseudonyms/course/${encodeURIComponent(scope.id)}/import`,
+            { method: 'POST', headers: { 'Content-Type': 'text/csv' }, body: await file.text() }
+        );
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            const details = (result.errors || []).map(error => `Line ${error.line}: ${error.message}`).join('\n');
+            throw new Error([result.message, details].filter(Boolean).join('\n'));
+        }
+        showNotification(`Imported ${result.data.importedCount} historical student IDs.`, 'success');
+        await loadPseudonymStatus();
+    } catch (error) {
+        setPseudonymStatus(`Import failed: ${error.message}`, 'error');
+        showNotification(error.message, 'error');
+    } finally {
+        event.target.value = '';
+    }
+}
+
+function downloadPseudonymTemplate() {
+    const scope = currentPseudonymScope();
+    if (scope.type !== 'course' || !scope.id) return;
+    window.location.assign(`/api/student-pseudonyms/course/${encodeURIComponent(scope.id)}/template.csv`);
+}
+
+function downloadPseudonymMapping() {
+    const scope = currentPseudonymScope();
+    if (!scope.id) return;
+    window.location.assign(`/api/student-pseudonyms/${scope.type}/${encodeURIComponent(scope.id)}/mapping.csv`);
+}
 
 function initializeStudentHub() {
     // Course selection is now handled by the home page
