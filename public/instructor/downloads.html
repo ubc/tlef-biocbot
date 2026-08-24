@@ -100,7 +100,9 @@
                             </button>
                             <div class="download-dropdown-menu" id="download-menu-course-all">
                                 <button onclick="downloadAllCourseSessions('json')">Download JSON</button>
+                                <button onclick="downloadAllCourseSessions('json', true)">Download anonymized JSON</button>
                                 <button onclick="downloadAllCourseSessions('txt')">Download TXT</button>
+                                <button onclick="downloadAllCourseSessions('txt', true)">Download anonymized TXT</button>
                             </div>
                         </div>
                     </div>
@@ -148,7 +150,9 @@
                         </button>
                         <div class="download-dropdown-menu" id="download-menu-student-all">
                             <button onclick="downloadAllSessions('json')">Download JSON</button>
+                            <button onclick="downloadAllSessions('json', true)">Download anonymized JSON</button>
                             <button onclick="downloadAllSessions('txt')">Download TXT</button>
+                            <button onclick="downloadAllSessions('txt', true)">Download anonymized TXT</button>
                         </div>
                     </div>
                 </div>

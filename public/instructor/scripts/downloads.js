@@ -12,6 +12,7 @@ let currentStudentSessions = [];
 // { type: 'course' } or { type: 'superchat', superchatId, name }
 let currentScope = { type: 'course' };
 let currentCourseName = null;
+let activePseudonymMappings = new Map();
 
 // Global variables to prevent multiple API calls and redirects
 let courseIdCache = null;
@@ -449,7 +450,7 @@ function displayStudents(students) {
 /**
  * Download all chat sessions for all students in the course
  */
-async function downloadAllCourseSessions(format = 'json') {
+async function downloadAllCourseSessions(format = 'json', anonymized = false) {
     try {
         console.log(`Downloading all course sessions as ${format}...`);
         document.querySelectorAll('.download-dropdown-menu.open').forEach(menu => closeDownloadMenu(menu));
@@ -459,9 +460,11 @@ async function downloadAllCourseSessions(format = 'json') {
             return;
         }
 
+        if (anonymized && !(await requireCompletePseudonymScope())) return;
+
         // Superchat scope: the export endpoint returns the whole bucket in one request
         if (currentScope.type === 'superchat') {
-            await downloadSuperchatExport(format);
+            await downloadSuperchatExport(format, undefined, anonymized);
             return;
         }
 
@@ -539,11 +542,13 @@ async function downloadAllCourseSessions(format = 'json') {
         }
         
         // Download in chosen format
-        const baseFileName = `BiocBot_Course_${currentCourseId}_AllSessions_${new Date().toISOString().split('T')[0]}`;
+        const payload = anonymized ? anonymizeGroupedExport(allCourseData) : allCourseData;
+        const suffix = anonymized ? '_Anonymized' : '';
+        const baseFileName = `BiocBot_Course_${currentCourseId}_AllSessions${suffix}_${new Date().toISOString().split('T')[0]}`;
         if (format === 'txt') {
-            downloadTXT(allCourseData, `${baseFileName}.txt`);
+            downloadTXT(payload, `${baseFileName}.txt`);
         } else {
-            downloadJSON(allCourseData, `${baseFileName}.json`);
+            downloadJSON(payload, `${baseFileName}.json`);
         }
         
         // Hide progress modal
@@ -564,7 +569,7 @@ async function downloadAllCourseSessions(format = 'json') {
  * @param {string} format - 'json' or 'txt'
  * @param {string} [studentId] - Limit the export to a single student
  */
-async function downloadSuperchatExport(format, studentId) {
+async function downloadSuperchatExport(format, studentId, anonymized = false) {
     try {
         showDownloadProgress();
         const downloadStatus = document.getElementById('download-status');
@@ -585,7 +590,7 @@ async function downloadSuperchatExport(format, studentId) {
             throw new Error(result.message || 'Failed to export superchat sessions');
         }
 
-        const exportData = result.data;
+        const exportData = anonymized ? anonymizeGroupedExport(result.data) : result.data;
         const dateStamp = new Date().toISOString().split('T')[0];
         let payload = exportData;
         let baseFileName = `BiocBot_Superchat_${currentScope.name}_AllSessions_${dateStamp}`;
@@ -594,15 +599,19 @@ async function downloadSuperchatExport(format, studentId) {
             // Flatten the single-student export so it matches the per-student combined shape
             const student = (exportData.students && exportData.students[0]) || { sessions: [] };
             payload = {
-                studentName: student.studentName || 'Unknown Student',
+                ...(anonymized
+                    ? { student: student.student || 'Unknown' }
+                    : { studentName: student.studentName || 'Unknown Student' }),
                 superchatId: exportData.superchatId,
                 superchatName: exportData.superchatName,
                 totalSessions: student.sessions.length,
                 exportDate: exportData.exportDate,
                 sessions: student.sessions
             };
-            baseFileName = `BiocBot_Superchat_${currentScope.name}_${payload.studentName}_${dateStamp}`;
+            baseFileName = `BiocBot_Superchat_${currentScope.name}_${anonymized ? payload.student : payload.studentName}_${dateStamp}`;
         }
+
+        if (anonymized) baseFileName += '_Anonymized';
 
         if (format === 'txt') {
             downloadTXT(payload, `${baseFileName}.txt`);
@@ -625,6 +634,74 @@ function getStudentDisplayName(student) {
     if (!student || !student.studentName) return 'Unknown Student';
     if (typeof student.studentName === 'string') return student.studentName;
     return student.studentName.displayName || student.studentName.name || 'Unknown Student';
+}
+
+function pseudonymScopeDetails() {
+    return currentScope.type === 'superchat'
+        ? { type: 'superchat', id: currentScope.superchatId }
+        : { type: 'course', id: currentCourseId };
+}
+
+async function requireCompletePseudonymScope() {
+    const scope = pseudonymScopeDetails();
+    try {
+        const response = await fetch(
+            `/api/student-pseudonyms/${scope.type}/${encodeURIComponent(scope.id)}`,
+            { credentials: 'include' }
+        );
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.message || `HTTP ${response.status}`);
+
+        if (!result.data.complete) {
+            const count = result.data.missingStudentIds.length;
+            const goToHub = confirm(
+                `Anonymized download blocked: ${count} student${count === 1 ? '' : 's'} still need a four-character ID. ` +
+                'Generate the missing IDs in Student Hub before downloading. Open Student Hub now?'
+            );
+            if (goToHub) {
+                const params = new URLSearchParams({ pseudonymScope: scope.type, pseudonymScopeId: scope.id });
+                if (currentCourseId) params.set('courseId', currentCourseId);
+                window.location.assign(`/instructor/student-hub?${params.toString()}`);
+            }
+            return false;
+        }
+
+        activePseudonymMappings = new Map(
+            result.data.mappings.map(mapping => [String(mapping.studentId), mapping.student])
+        );
+        return true;
+    } catch (error) {
+        console.error('Could not verify anonymization IDs:', error);
+        alert(`Could not verify anonymization IDs: ${error.message}`);
+        return false;
+    }
+}
+
+const ANONYMIZED_EXPORT_KEYS = new Set([
+    'studentId', 'studentName', 'username', 'email', 'puid', 'academicStudentId', '_id'
+]);
+
+function stripExportIdentifiers(value) {
+    if (Array.isArray(value)) return value.map(stripExportIdentifiers);
+    if (!value || typeof value !== 'object') return value;
+    const clean = {};
+    Object.entries(value).forEach(([key, child]) => {
+        if (!ANONYMIZED_EXPORT_KEYS.has(key)) clean[key] = stripExportIdentifiers(child);
+    });
+    return clean;
+}
+
+function anonymizeStudentExport(student, mappings = activePseudonymMappings) {
+    const pseudonym = mappings.get(String(student.studentId));
+    if (!pseudonym) throw new Error(`No anonymization ID exists for ${student.studentId}`);
+    return { student: pseudonym, ...stripExportIdentifiers(student) };
+}
+
+function anonymizeGroupedExport(data, mappings = activePseudonymMappings) {
+    return {
+        ...stripExportIdentifiers(data),
+        students: (data.students || []).map(student => anonymizeStudentExport(student, mappings))
+    };
 }
 
 /**
@@ -809,7 +886,9 @@ function createSessionElement(session) {
                     </button>
                     <div class="download-dropdown-menu" id="download-menu-${session.sessionId}">
                         <button onclick="downloadSession('${session.sessionId}', 'json')">Download JSON</button>
+                        <button onclick="downloadSession('${session.sessionId}', 'json', true)">Download anonymized JSON</button>
                         <button onclick="downloadSession('${session.sessionId}', 'txt')">Download TXT</button>
+                        <button onclick="downloadSession('${session.sessionId}', 'txt', true)">Download anonymized TXT</button>
                     </div>
                 </div>
             </div>
@@ -1063,7 +1142,7 @@ function normalizeChatExportOrder(data) {
  * @param {string} sessionId - Session ID to download
  * @param {string} format - Download format: 'json' or 'txt'
  */
-async function downloadSession(sessionId, format = 'json') {
+async function downloadSession(sessionId, format = 'json', anonymized = false) {
     try {
         console.log(`Downloading session: ${sessionId} as ${format}`);
 
@@ -1084,6 +1163,8 @@ async function downloadSession(sessionId, format = 'json') {
             return;
         }
 
+        if (anonymized && !(await requireCompletePseudonymScope())) return;
+
         const url = isSuperchat
             ? `/api/superchats/${currentScope.superchatId}/chat-sessions/${session.studentId}/${sessionId}`
             : `/api/students/${currentCourseId}/${session.studentId}/sessions/${sessionId}`;
@@ -1103,9 +1184,15 @@ async function downloadSession(sessionId, format = 'json') {
         }
 
         const sessionData = result.data;
-        const chatData = sessionData.chatData;
+        const pseudonym = anonymized ? activePseudonymMappings.get(String(session.studentId)) : null;
+        if (anonymized && !pseudonym) throw new Error('This student does not have an anonymization ID');
+        const chatData = anonymized
+            ? { student: pseudonym, ...stripExportIdentifiers(sessionData.chatData) }
+            : sessionData.chatData;
         const scopeLabel = isSuperchat ? `Superchat_${currentScope.name}` : sessionData.courseId;
-        const baseFileName = `BiocBot_Chat_${scopeLabel}_${sessionData.studentName}_${new Date(sessionData.savedAt).toISOString().split('T')[0]}`;
+        const identityLabel = anonymized ? pseudonym : sessionData.studentName;
+        const anonSuffix = anonymized ? '_Anonymized' : '';
+        const baseFileName = `BiocBot_Chat_${scopeLabel}_${identityLabel}${anonSuffix}_${new Date(sessionData.savedAt).toISOString().split('T')[0]}`;
 
         if (format === 'txt') {
             downloadTXT(chatData, `${baseFileName}.txt`);
@@ -1124,7 +1211,7 @@ async function downloadSession(sessionId, format = 'json') {
 /**
  * Download all sessions for the current student
  */
-async function downloadAllSessions(format = 'json') {
+async function downloadAllSessions(format = 'json', anonymized = false) {
     try {
         console.log(`Downloading all sessions for current student as ${format}`);
         document.querySelectorAll('.download-dropdown-menu.open').forEach(menu => closeDownloadMenu(menu));
@@ -1134,9 +1221,11 @@ async function downloadAllSessions(format = 'json') {
             return;
         }
 
+        if (anonymized && !(await requireCompletePseudonymScope())) return;
+
         // Superchat scope: the export endpoint returns every session in one request
         if (currentScope.type === 'superchat') {
-            await downloadSuperchatExport(format, currentStudentSessions[0].studentId);
+            await downloadSuperchatExport(format, currentStudentSessions[0].studentId, anonymized);
             return;
         }
 
@@ -1179,18 +1268,26 @@ async function downloadAllSessions(format = 'json') {
             sessions: allSessionsData
         };
         
-        const baseFileName = `BiocBot_AllSessions_${currentCourseId}_${combinedData.studentName}_${new Date().toISOString().split('T')[0]}`;
+        const studentId = currentStudentSessions[0].studentId;
+        const pseudonym = anonymized ? activePseudonymMappings.get(String(studentId)) : null;
+        if (anonymized && !pseudonym) throw new Error('This student does not have an anonymization ID');
+        const payload = anonymized
+            ? { student: pseudonym, ...stripExportIdentifiers(combinedData) }
+            : combinedData;
+        const identityLabel = anonymized ? pseudonym : combinedData.studentName;
+        const anonSuffix = anonymized ? '_Anonymized' : '';
+        const baseFileName = `BiocBot_AllSessions_${currentCourseId}_${identityLabel}${anonSuffix}_${new Date().toISOString().split('T')[0]}`;
 
         if (format === 'txt') {
-            downloadTXT(combinedData, `${baseFileName}.txt`);
+            downloadTXT(payload, `${baseFileName}.txt`);
         } else {
-            downloadJSON(combinedData, `${baseFileName}.json`);
+            downloadJSON(payload, `${baseFileName}.json`);
         }
         
         // Hide progress modal
         hideDownloadProgress();
         
-        console.log(`Downloaded ${allSessionsData.length} sessions: ${fileName}`);
+        console.log(`Downloaded ${allSessionsData.length} sessions: ${baseFileName}.${format}`);
         
     } catch (error) {
         console.error('Error downloading all sessions:', error);
@@ -1239,8 +1336,8 @@ function formatChatAsText(data) {
         lines.push('');
 
         data.students.forEach(student => {
-            lines.push(`Student: ${student.studentName}`);
-            lines.push(`Student ID: ${student.studentId}`);
+            lines.push(`Student: ${student.student || student.studentName}`);
+            if (student.studentId) lines.push(`Student ID: ${student.studentId}`);
             lines.push('-'.repeat(40));
 
             student.sessions.forEach(session => {
@@ -1257,7 +1354,7 @@ function formatChatAsText(data) {
 
     // If it's a combined export for one student (multiple sessions)
     if (data.sessions && Array.isArray(data.sessions)) {
-        lines.push(`Student: ${data.studentName}`);
+        lines.push(`Student: ${data.student || data.studentName}`);
         if (data.superchatName) {
             lines.push(`Superchat: ${data.superchatName}`);
         } else {
@@ -1279,6 +1376,7 @@ function formatChatAsText(data) {
     // Single session chat data (just messages)
     if (data.messages || Array.isArray(data)) {
         const messages = data.messages || data;
+        if (data.student) lines.push(`Student: ${data.student}`);
         lines.push(`Chat Session`);
         lines.push('-'.repeat(40));
         messages.forEach(msg => {
