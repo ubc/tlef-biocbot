@@ -897,16 +897,19 @@ router.post('/', async (req, res) => {
             { courseId },
             { $set: { ...credentialSetFields(selectedProvider, llmApiKey), updatedAt: new Date() } }
         );
-        const scopedSettings = await scopeModelSettings.materialize(
-            db,
-            { type: 'course', id: courseId },
-            {
-                availableModelsByProvider: Array.isArray(validation.models)
-                    ? { [selectedProvider]: validation.models }
-                    : {},
-                updatedBy: user.userId
-            }
-        );
+        const courseScope = { type: 'course', id: courseId };
+        await scopeModelSettings.materialize(db, courseScope, { updatedBy: user.userId });
+        if (Array.isArray(validation.models)) {
+            await scopeModelSettings.applyCredentialRoster(
+                db,
+                courseScope,
+                selectedProvider,
+                validation.models,
+                user.userId,
+                validation.defaultConfiguration
+            );
+        }
+        const scopedSettings = await scopeModelSettings.getAll(db, courseScope);
 
         if (req.app.locals.llmRegistry) {
             req.app.locals.llmRegistry.evictCourse(courseId);
@@ -2170,16 +2173,19 @@ router.post('/:courseId/transfer', async (req, res) => {
         }
 
         await db.collection('courses').insertOne(targetCourse);
-        const targetModelSettings = await scopeModelSettings.materialize(
-            db,
-            { type: 'course', id: targetCourseId },
-            {
-                availableModelsByProvider: Array.isArray(validation.models)
-                    ? { [transferProvider]: validation.models }
-                    : {},
-                updatedBy: user.userId
-            }
-        );
+        const targetScope = { type: 'course', id: targetCourseId };
+        await scopeModelSettings.materialize(db, targetScope, { updatedBy: user.userId });
+        if (Array.isArray(validation.models)) {
+            await scopeModelSettings.applyCredentialRoster(
+                db,
+                targetScope,
+                transferProvider,
+                validation.models,
+                user.userId,
+                validation.defaultConfiguration
+            );
+        }
+        const targetModelSettings = await scopeModelSettings.getAll(db, targetScope);
 
         // Per-collection maintenance clients, created lazily for whichever
         // embedding profiles the source documents were actually indexed in.

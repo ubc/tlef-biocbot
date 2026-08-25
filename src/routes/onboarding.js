@@ -218,16 +218,19 @@ router.post('/', async (req, res) => {
             { courseId: result.courseId },
             { $set: { ...credentialSetFields(selectedProvider, llmApiKey), updatedAt: new Date() } }
         );
-        const scopedSettings = await scopeModelSettings.materialize(
-            db,
-            { type: 'course', id: result.courseId },
-            {
-                availableModelsByProvider: Array.isArray(validation.models)
-                    ? { [selectedProvider]: validation.models }
-                    : {},
-                updatedBy: user.userId
-            }
-        );
+        const courseScope = { type: 'course', id: result.courseId };
+        await scopeModelSettings.materialize(db, courseScope, { updatedBy: user.userId });
+        if (Array.isArray(validation.models)) {
+            await scopeModelSettings.applyCredentialRoster(
+                db,
+                courseScope,
+                selectedProvider,
+                validation.models,
+                user.userId,
+                validation.defaultConfiguration
+            );
+        }
+        const scopedSettings = await scopeModelSettings.getAll(db, courseScope);
 
         if (req.app.locals.llmRegistry) {
             req.app.locals.llmRegistry.evictCourse(result.courseId);
