@@ -399,40 +399,43 @@ describe('llmKeyStore.validateApiKey — OpenAI provider with a mocked fetch (no
         fetchMock.mockReset();
     });
 
-    test('valid key: probes embeddings then chat with the bearer key and returns valid', async () => {
+    test('valid key: discovers models, then probes embeddings and chat with the bearer key', async () => {
         fetchMock.mockResolvedValue(okResponse());
         const result = await validateApiKey(' sk-real ');
         expect(result).toEqual({ ok: true, status: 'valid' });
 
-        expect(fetchMock).toHaveBeenCalledTimes(2);
-        const [embedUrl, embedInit] = fetchMock.mock.calls[0];
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(fetchMock.mock.calls[0][0]).toBe('https://api.openai.com/v1/models');
+        const [embedUrl, embedInit] = fetchMock.mock.calls[1];
         expect(embedUrl).toBe('https://api.openai.com/v1/embeddings');
         expect(embedInit.headers.Authorization).toBe('Bearer sk-real');
-        const [chatUrl, chatInit] = fetchMock.mock.calls[1];
+        const [chatUrl, chatInit] = fetchMock.mock.calls[2];
         expect(chatUrl).toBe('https://api.openai.com/v1/chat/completions');
-        // Default (non gpt-5) model probes with a single-token completion.
-        expect(JSON.parse(chatInit.body)).toMatchObject({ model: 'gpt-4.1-mini', max_tokens: 1 });
+        // The default GPT-5.6 Luna probe uses its supported completion and reasoning fields.
+        expect(JSON.parse(chatInit.body)).toMatchObject({
+            model: 'gpt-5.6-luna', max_completion_tokens: 16, reasoning_effort: 'low'
+        });
     });
 
     test('gpt-5 models use max_completion_tokens with a model-specific reasoning effort', async () => {
         fetchMock.mockResolvedValue(okResponse());
         process.env.OPENAI_MODEL = 'gpt-5.4-nano';
         await validateApiKey('sk-real');
-        expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
+        expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({
             model: 'gpt-5.4-nano', max_completion_tokens: 16, reasoning_effort: 'low',
         });
 
         fetchMock.mockClear();
         process.env.OPENAI_MODEL = 'gpt-5.6-luna';
         await validateApiKey('sk-real');
-        expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
+        expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({
             model: 'gpt-5.6-luna', max_completion_tokens: 16, reasoning_effort: 'low',
         });
 
         fetchMock.mockClear();
         process.env.OPENAI_MODEL = 'gpt-5.2';
         await validateApiKey('sk-real');
-        expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
+        expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({
             model: 'gpt-5.2', reasoning_effort: 'minimal',
         });
     });

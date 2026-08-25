@@ -13,6 +13,7 @@ const { ensureIndexes: ensureChatSurveyResponseIndexes } = require('./models/Cha
 const { ensureIndexes: ensureFlashcardIndexes } = require('./models/FlashcardDeck');
 const { ensureIndexes: ensureProviderMigrationIndexes } = require('./services/providerMigrationService');
 const { resumePendingMigrations } = require('./services/providerMigrationRunner');
+const { backfillExistingScopes } = require('./services/scopeModelSettings');
 const coursesRoutes = require('./routes/courses');
 const flagsRoutes = require('./routes/flags');
 const lecturesRoutes = require('./routes/lectures');
@@ -788,6 +789,8 @@ async function startServer() {
         await ensureChatSurveyResponseIndexes(db);
         await ensureFlashcardIndexes(db);
         await ensureProviderMigrationIndexes(db);
+        const materializedModelScopes = await backfillExistingScopes(db);
+        console.log(`✅ Materialized per-scope model settings for ${materializedModelScopes} AI surface(s)`);
 
         // Persistent provider/embedding migrations survive restarts: resume any
         // job that was still queued or running when the server stopped.

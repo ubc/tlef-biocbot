@@ -25,6 +25,7 @@ jest.mock('../../../src/services/config', () => ({
 }));
 
 const adminModelSettings = require('../../../src/services/adminModelSettings');
+const scopeModelSettings = require('../../../src/services/scopeModelSettings');
 const migrations = require('../../../src/services/providerMigrationService');
 const { buildEmbeddingProfile } = require('../../../src/services/embeddingConfig');
 const { buildIndexRecord, contentHash, INDEX_STATUSES } = require('../../../src/services/embeddingIndexService');
@@ -40,6 +41,7 @@ const PROXY = 'ubc-llm-proxy';
 
 const admin = { userId: 'a1', role: 'instructor', email: 'admin@x.com', permissions: { systemAdmin: true } };
 const instructor = { userId: 'i1', role: 'instructor', email: 'i@x.com' };
+const COURSE_SCOPE = { scopeType: 'course', scopeId: 'C1' };
 
 const app = ({ db = memoryDb({ settings: [] }), user = admin, locals = {} } = {}) =>
     makeRouteApp(settingsRouter, { db, user, locals });
@@ -66,8 +68,8 @@ describe('GET /llm — grouped by platform', () => {
         const [gpt, sandbox, proxy] = res.body.platforms;
         expect(gpt).toMatchObject({
             label: providerLabel(OPENAI),
-            chatModel: 'gpt-4.1-mini',
-            backendChatModel: 'gpt-4.1-mini',
+            chatModel: 'gpt-5.6-luna',
+            backendChatModel: 'gpt-5.6-luna',
             backendInheritsFrontend: true,
             embeddingModel: 'text-embedding-3-small',
             collection: 'biocbot_documents',
@@ -157,6 +159,57 @@ describe('GET /llm — grouped by platform', () => {
     test('only system admins may read model settings', async () => {
         expect((await request(app({ user: instructor })).get('/llm')).status).toBe(403);
         expect((await request(app({ user: null })).get('/llm')).status).toBe(401);
+    });
+});
+
+describe('scope-owned model settings', () => {
+    test('a course-scoped chat change does not alter another course or the defaults', async () => {
+        const credential = { ciphertext: 'encrypted', status: 'valid' };
+        const db = memoryDb({
+            settings: [],
+            courses: [
+                { courseId: 'A', activeLlmProvider: OPENAI, llmCredentials: { [OPENAI]: credential } },
+                { courseId: 'B', activeLlmProvider: OPENAI, llmCredentials: { [OPENAI]: credential } }
+            ]
+        });
+        await scopeModelSettings.materialize(db, { type: 'course', id: 'A' });
+        await scopeModelSettings.materialize(db, { type: 'course', id: 'B' });
+
+        const res = await request(app({ db })).post('/llm').send({
+            scopeType: 'course',
+            scopeId: 'A',
+            provider: OPENAI,
+            chatModel: 'gpt-5.6-luna',
+            reasoningEffort: 'low',
+            backendInheritsFrontend: true
+        });
+
+        expect(res.status).toBe(200);
+        expect((await scopeModelSettings.getProviderSettings(db, { type: 'course', id: 'A' }, OPENAI)).chatModel)
+            .toBe('gpt-5.6-luna');
+        expect((await scopeModelSettings.getProviderSettings(db, { type: 'course', id: 'B' }, OPENAI)).chatModel)
+            .toBe('gpt-5.6-luna');
+        expect((await adminModelSettings.getProviderSettings(db, OPENAI, { force: true })).chatModel)
+            .toBe('gpt-5.6-luna');
+    });
+
+    test('the scoped catalog exposes only providers with a key on that scope', async () => {
+        const db = memoryDb({
+            settings: [],
+            courses: [{
+                courseId: 'A',
+                activeLlmProvider: OPENAI,
+                llmCredentials: { [OPENAI]: { ciphertext: 'encrypted', status: 'valid' } }
+            }]
+        });
+        await scopeModelSettings.materialize(db, { type: 'course', id: 'A' });
+
+        const res = await request(app({ db }))
+            .get('/llm?scopeType=course&scopeId=A');
+
+        expect(res.status).toBe(200);
+        expect(res.body.scope).toEqual({ type: 'course', id: 'A' });
+        expect(res.body.platforms.map(item => item.provider)).toEqual([OPENAI]);
     });
 });
 
@@ -309,7 +362,7 @@ describe('POST /llm/embedding/impact — preview before confirming', () => {
         });
 
         const res = await request(app({ db }))
-            .post('/llm/embedding/impact').send({ provider: OPENAI, embeddingModel: 'text-embedding-3-large' });
+            .post('/llm/embedding/impact').send({ ...COURSE_SCOPE, provider: OPENAI, embeddingModel: 'text-embedding-3-large' });
 
         expect(res.status).toBe(200);
         expect(res.body.profile).toMatchObject({
@@ -318,7 +371,7 @@ describe('POST /llm/embedding/impact — preview before confirming', () => {
         // Only the GPT course is affected; the Sandbox course is untouched.
         expect(res.body.impact.courses).toBe(1);
         expect(res.body.impact.itemsToReindex).toBe(1);
-        expect(res.body.impact.surfaces).toEqual([{ type: 'course', id: 'C1', name: 'C1' }]);
+        expect(res.body.impact.surfaces).toEqual([{ type: 'course', id: 'C1' }]);
     });
 
     test('nothing is written by a dry run', async () => {
@@ -353,14 +406,16 @@ describe('POST /llm/embedding — staged, never destructive', () => {
                 llmCredentials: { [PROXY]: buildKeySubdocument('prx-test-key', 'a', PROXY) },
             }],
         });
+        await scopeModelSettings.materialize(db, { type: 'course', id: 'C1' });
 
         const res = await request(app({ db })).post('/llm/embedding').send({
+            ...COURSE_SCOPE,
             provider: PROXY,
             embeddingModel: 'proxy-embed',
         });
 
         expect(res.status).toBe(202);
-        const { pendingEmbedding } = await adminModelSettings.getAllProviderSettings(db, { force: true });
+        const { pendingEmbedding } = await scopeModelSettings.getAll(db, { type: 'course', id: 'C1' });
         expect(pendingEmbedding[PROXY]).toMatchObject({
             embeddingModel: 'proxy-embed', vectorSize: 19,
         });
@@ -374,16 +429,17 @@ describe('POST /llm/embedding — staged, never destructive', () => {
             courses: [{ courseId: 'C1', activeLlmProvider: OPENAI, llmCredentials: { [OPENAI]: buildKeySubdocument('sk-a', 'a', OPENAI) } }],
             documents: [{ documentId: 'd1', courseId: 'C1', content: 'text' }],
         });
+        await scopeModelSettings.materialize(db, { type: 'course', id: 'C1' });
 
         const res = await request(app({ db }))
-            .post('/llm/embedding').send({ provider: OPENAI, embeddingModel: 'text-embedding-3-large' });
+            .post('/llm/embedding').send({ ...COURSE_SCOPE, provider: OPENAI, embeddingModel: 'text-embedding-3-large' });
 
         expect(res.status).toBe(202);
         expect(res.body.message).toMatch(/current embedding model stays active/);
         expect(startedMigrations).toHaveLength(1);
 
         // Active model unchanged; the new one is only staged.
-        const { providers, pendingEmbedding } = await adminModelSettings.getAllProviderSettings(db, { force: true });
+        const { providers, pendingEmbedding } = await scopeModelSettings.getAll(db, { type: 'course', id: 'C1' });
         expect(providers[OPENAI].embeddingModel).toBe('text-embedding-3-small');
         expect(pendingEmbedding[OPENAI].embeddingModel).toBe('text-embedding-3-large');
 
@@ -399,17 +455,18 @@ describe('POST /llm/embedding — staged, never destructive', () => {
             courses: [{ courseId: 'C1', activeLlmProvider: OPENAI, llmCredentials: { [OPENAI]: buildKeySubdocument('sk-a', 'a', OPENAI) } }],
             documents: [{ documentId: 'd1', courseId: 'C1', content: 'text' }],
         });
-        await request(app({ db })).post('/llm/embedding').send({ provider: OPENAI, embeddingModel: 'text-embedding-3-large' });
+        await scopeModelSettings.materialize(db, { type: 'course', id: 'C1' });
+        await request(app({ db })).post('/llm/embedding').send({ ...COURSE_SCOPE, provider: OPENAI, embeddingModel: 'text-embedding-3-large' });
 
         const res = await request(app({ db }))
-            .post('/llm/embedding').send({ provider: OPENAI, embeddingModel: 'text-embedding-ada-002' });
+            .post('/llm/embedding').send({ ...COURSE_SCOPE, provider: OPENAI, embeddingModel: 'text-embedding-ada-002' });
 
         // Two jobs would fight over the single staged setting, and whichever
         // finished first would activate the other's not-yet-indexed model.
         expect(res.status).toBe(409);
         expect(res.body.code).toBe('EMBEDDING_MIGRATION_ACTIVE');
         expect(startedMigrations).toHaveLength(1);
-        const { pendingEmbedding } = await adminModelSettings.getAllProviderSettings(db, { force: true });
+        const { pendingEmbedding } = await scopeModelSettings.getAll(db, { type: 'course', id: 'C1' });
         expect(pendingEmbedding[OPENAI].embeddingModel).toBe('text-embedding-3-large');
     });
 
@@ -466,8 +523,10 @@ describe('POST /llm/embedding — staged, never destructive', () => {
                 embeddingIndexes: { [profile.storageKey]: oldSharedRecord },
             }],
         });
+        await scopeModelSettings.materialize(db, { type: 'course', id: 'C1' });
 
         const res = await request(app({ db })).post('/llm/embedding').send({
+            ...COURSE_SCOPE,
             provider: PROXY,
             embeddingModel: 'text-embedding-3-small',
         });
@@ -487,13 +546,14 @@ describe('POST /llm/embedding — staged, never destructive', () => {
             courses: [{ courseId: 'C1', activeLlmProvider: OPENAI, llmCredentials: { [OPENAI]: buildKeySubdocument('sk-a', 'a', OPENAI) } }],
             documents: [{ documentId: 'd1', courseId: 'C1', content: 'text' }],
         });
-        await request(app({ db })).post('/llm/embedding').send({ provider: OPENAI, embeddingModel: 'text-embedding-3-large' });
+        await scopeModelSettings.materialize(db, { type: 'course', id: 'C1' });
+        await request(app({ db })).post('/llm/embedding').send({ ...COURSE_SCOPE, provider: OPENAI, embeddingModel: 'text-embedding-3-large' });
 
-        const res = await request(app({ db })).post('/llm/embedding/rollback').send({ provider: OPENAI });
+        const res = await request(app({ db })).post('/llm/embedding/rollback').send({ ...COURSE_SCOPE, provider: OPENAI });
 
         expect(res.status).toBe(200);
         expect(res.body.message).toMatch(/vectors were not touched/i);
-        const { providers, pendingEmbedding } = await adminModelSettings.getAllProviderSettings(db, { force: true });
+        const { providers, pendingEmbedding } = await scopeModelSettings.getAll(db, { type: 'course', id: 'C1' });
         expect(providers[OPENAI].embeddingModel).toBe('text-embedding-3-small');
         expect(pendingEmbedding[OPENAI]).toBeUndefined();
     });
@@ -504,10 +564,11 @@ describe('POST /llm/embedding — staged, never destructive', () => {
             courses: [{ courseId: 'C1', activeLlmProvider: OPENAI, llmCredentials: { [OPENAI]: buildKeySubdocument('sk-a', 'a', OPENAI) } }],
             documents: [{ documentId: 'd1', courseId: 'C1', content: 'text' }],
         });
-        await request(app({ db })).post('/llm/embedding').send({ provider: OPENAI, embeddingModel: 'text-embedding-3-large' });
+        await scopeModelSettings.materialize(db, { type: 'course', id: 'C1' });
+        await request(app({ db })).post('/llm/embedding').send({ ...COURSE_SCOPE, provider: OPENAI, embeddingModel: 'text-embedding-3-large' });
         const migrationId = startedMigrations[0];
 
-        const res = await request(app({ db })).post('/llm/embedding/rollback').send({ provider: OPENAI });
+        const res = await request(app({ db })).post('/llm/embedding/rollback').send({ ...COURSE_SCOPE, provider: OPENAI });
 
         // Cancelling the job stops it burning provider calls on a profile that
         // is never going to be activated, and drops its partial vectors.

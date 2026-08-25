@@ -15,6 +15,7 @@ const {
     supportsReasoning
 } = require('./llmModels');
 const adminModelSettings = require('./adminModelSettings');
+const scopeModelSettings = require('./scopeModelSettings');
 const { isSelectableProvider } = require('./llmProviders');
 const { DEFAULT_LANE, LANES, normalizeLane } = require('./llmLanes');
 const MODEL_SETTINGS_TTL_MS = 30 * 1000; // Re-read at most every 30 seconds
@@ -97,7 +98,9 @@ class LLMService {
                 // Force the read: this service already caches for
                 // MODEL_SETTINGS_TTL_MS, and a second cache underneath would
                 // make an admin's change take up to twice as long to apply.
-                const stored = await adminModelSettings.getProviderSettings(db, provider, { force: true });
+                const stored = this.scope
+                    ? await scopeModelSettings.getProviderSettings(db, this.scope, provider)
+                    : await adminModelSettings.getProviderSettings(db, provider, { force: true });
                 const laneSettings = adminModelSettings.chatSettingsForLane(stored, normalizedLane);
                 if (provider === 'ubc-llm-proxy' || catalog.allowedModels.includes(laneSettings.chatModel)) {
                     model = laneSettings.chatModel;

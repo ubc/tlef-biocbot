@@ -90,7 +90,7 @@ describe('LLM model settings without provider traffic', () => {
     test('rejects unsupported stored and environment model settings', async () => {
         const service = readyService({ provider: 'openai', defaultModel: 'not-allowed' });
         service.setDbAccessor(() => memoryDb({ settings: [{ _id: 'llm', model: 'bad', reasoningEffort: 'extreme' }] }));
-        await expect(service._getModelSettings()).resolves.toEqual({ model: 'gpt-4.1-mini', reasoningEffort: 'minimal' });
+        await expect(service._getModelSettings()).resolves.toEqual({ model: 'gpt-5.6-luna', reasoningEffort: 'low' });
     });
 
     test('applies GPT-5 token and reasoning options', async () => {
@@ -403,7 +403,7 @@ describe('model-settings edge branches', () => {
     test('falls back to defaults when the DB lookup throws', async () => {
         const service = readyService();
         service.setDbAccessor(() => ({ collection: () => ({ findOne: () => { throw new Error('db down'); } }) }));
-        await expect(service._getModelSettings()).resolves.toEqual({ model: 'gpt-4.1-mini', reasoningEffort: 'minimal' });
+        await expect(service._getModelSettings()).resolves.toEqual({ model: 'gpt-5.6-luna', reasoningEffort: 'low' });
     });
 
     test('_coerceReasoningEffort falls back to the first supported value', () => {

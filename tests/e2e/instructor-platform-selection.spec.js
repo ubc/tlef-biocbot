@@ -510,6 +510,69 @@ test.describe('Admin platform and model settings', () => {
         await setSystemAdmin(instructorId, true);
     });
 
+    test('notes and global Super Course model controls toggle as inline accordions', async ({ page }) => {
+        await page.route('**/api/settings/llm', async (route) => {
+            if (route.request().method() !== 'GET') return route.continue();
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    success: true,
+                    platforms: [{
+                        provider: 'openai', label: 'OpenAI Chat GPT',
+                        chatModel: 'gpt-5.6-luna', embeddingModel: 'text-embedding-3-small',
+                        reasoningEffort: 'low', supportsReasoning: true,
+                        backendChatModel: 'gpt-5.6-luna', backendReasoningEffort: 'low',
+                        backendSupportsReasoning: true, backendInheritsFrontend: true,
+                        allowedModels: ['gpt-5.6-luna'],
+                        allowedEmbeddingModels: ['text-embedding-3-small'],
+                        reasoningEffortsByModel: { 'gpt-5.6-luna': ['none', 'low'] },
+                        defaultReasoningEffortByModel: { 'gpt-5.6-luna': 'low' },
+                        collection: 'biocbot_documents', vectorSize: 1536, pendingEmbedding: null,
+                    }],
+                    settings: { model: 'gpt-5.6-luna', reasoningEffort: 'low', provider: 'openai' },
+                }),
+            });
+        });
+
+        await page.goto(`/instructor/settings?courseId=${COURSE_ID}`);
+        await expect(page.locator('h1')).toHaveText('Settings', { timeout: 15_000 });
+        await page.locator('.settings-tile[data-panel="admin-platform"]').click();
+
+        const notesButton = page.locator('#configure-notes-models');
+        await notesButton.click();
+        await expect(notesButton).toHaveText('Hide model settings');
+        await expect(notesButton).toHaveAttribute('aria-expanded', 'true');
+        await expect(page.locator('#notes-llm-key-section + .scoped-model-accordion')).toBeVisible();
+        await expect(page.locator('#instructor-superchat-llm-key-section')).toBeVisible();
+        await expect(page.locator('#notes-llm-key-section + .scoped-model-accordion #llm-model-section')).toBeVisible();
+        await notesButton.click();
+        await expect(notesButton).toHaveText('Configure models');
+        await expect(notesButton).toHaveAttribute('aria-expanded', 'false');
+        await expect(page.locator('#notes-llm-key-section + .scoped-model-accordion')).toHaveCount(0);
+        await expect(page.locator('#settings-panel-admin-platform > #llm-model-section')).toBeVisible();
+
+        const globalButton = page.locator('#configure-instructor-superchat-models');
+        await globalButton.click();
+        await expect(globalButton).toHaveText('Hide model settings');
+        await expect(page.locator('#settings-panel-admin-platform > .scoped-model-accordion')).toBeVisible();
+        await expect(page.locator('#notes-llm-key-section')).toBeVisible();
+        await globalButton.click();
+        await expect(globalButton).toHaveText('Configure models');
+        await expect(page.locator('#settings-panel-admin-platform > .scoped-model-accordion')).toHaveCount(0);
+
+        // Leaving a course-scoped editor returns the shared controls home. The
+        // defaults panel must not require a page refresh to show them again.
+        await page.locator('.settings-rail-link[data-panel="course-basics"]').click();
+        const courseButton = page.locator('#configure-course-models');
+        await courseButton.click();
+        await expect(page.locator('#course-llm-key-section > .scoped-model-accordion')).toBeVisible();
+        await page.locator('.settings-rail-link[data-panel="admin-platform"]').click();
+        await expect(page.locator('#settings-panel-admin-platform > #llm-model-section')).toBeVisible();
+        await expect(page.locator('#notes-llm-key-section')).toBeVisible();
+        await expect(page.locator('#instructor-superchat-llm-key-section')).toBeVisible();
+    });
+
     test('model controls are grouped by platform, each with its own collection', async ({ page }) => {
         /** @type {Array<Record<string, any>>} */
         const savedBodies = [];

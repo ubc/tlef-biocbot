@@ -89,6 +89,48 @@ describe('POST / — create course from onboarding', () => {
         expect(saved.llmApiKey.status).toBe('valid');
     });
 
+    test('applies validated Proxy defaults during onboarding before uploads begin', async () => {
+        const oldStub = process.env.BIOCBOT_TEST_LLM_STUB;
+        const oldVectorSize = process.env.BIOCBOT_TEST_PROXY_VECTOR_SIZE;
+        process.env.BIOCBOT_TEST_LLM_STUB = '1';
+        process.env.BIOCBOT_TEST_PROXY_VECTOR_SIZE = '1024';
+        llmKeyStore.validateProviderKey.mockResolvedValueOnce({
+            ok: true,
+            status: 'valid',
+            provider: 'ubc-llm-proxy',
+            models: ['gpt-oss-120b', 'qwen3.6-35b-a3b', 'qwen3-embedding-0.6b']
+        });
+        const db = memoryDb({});
+
+        try {
+            const res = await request(app({ db, user: instructor })).post('/').send({
+                ...body,
+                courseId: 'PROXY-C1',
+                llmProvider: 'ubc-llm-proxy',
+                apiKey: 'prx-test-key'
+            });
+            expect(res.status).toBe(200);
+            expect(res.body.data).toMatchObject({
+                llmProvider: 'ubc-llm-proxy',
+                llmConfigurationStatus: 'ready',
+                aiAvailable: true
+            });
+            const saved = await db.collection('courses').findOne({ courseId: 'PROXY-C1' });
+            expect(saved.llmModelSettings.providers['ubc-llm-proxy']).toMatchObject({
+                chatModel: 'qwen3.6-35b-a3b',
+                reasoningEffort: 'none',
+                embeddingModel: 'qwen3-embedding-0.6b',
+                vectorSize: 1024,
+                configurationStatus: 'ready'
+            });
+        } finally {
+            if (oldStub === undefined) delete process.env.BIOCBOT_TEST_LLM_STUB;
+            else process.env.BIOCBOT_TEST_LLM_STUB = oldStub;
+            if (oldVectorSize === undefined) delete process.env.BIOCBOT_TEST_PROXY_VECTOR_SIZE;
+            else process.env.BIOCBOT_TEST_PROXY_VECTOR_SIZE = oldVectorSize;
+        }
+    });
+
     test('applies empty defaults when creating a minimal course', async () => {
         const db = memoryDb({});
         const res = await request(app({ db, user: instructor })).post('/').send({ courseId: 'C2', courseName: 'Minimal', apiKey: 'sk-test' });

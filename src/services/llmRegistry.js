@@ -2,6 +2,7 @@ const LLMService = require('./llm');
 const QdrantService = require('./qdrantService');
 const config = require('./config');
 const adminModelSettings = require('./adminModelSettings');
+const scopeModelSettings = require('./scopeModelSettings');
 const { DEFAULT_PROFILE_REVISION, buildEmbeddingProfile } = require('./embeddingConfig');
 const { normalizeProvider } = require('./llmProviders');
 const { configuredDefaultModel, defaultEmbeddingModelForProvider } = require('./llmModels');
@@ -96,7 +97,7 @@ class LlmRegistry {
         if (!courseId) throw new LlmKeyError(KEY_STATUSES.MISSING, { type: 'course', id: courseId });
         const course = await db.collection('courses').findOne(
             { courseId },
-            { projection: { llmApiKey: 1, llmCredentials: 1, activeLlmProvider: 1, pendingLlmProvider: 1, providerMigrationId: 1, aiPreparationRequired: 1 } }
+            { projection: { llmApiKey: 1, llmCredentials: 1, activeLlmProvider: 1, pendingLlmProvider: 1, providerMigrationId: 1, aiPreparationRequired: 1, llmModelSettings: 1 } }
         );
         return this._resolve(db, { type: 'course', id: courseId }, course);
     }
@@ -105,7 +106,7 @@ class LlmRegistry {
         if (!superchatId) throw new LlmKeyError(KEY_STATUSES.MISSING, { type: 'superchat', id: superchatId });
         const superchat = await db.collection('superchats').findOne(
             { superchatId, isDeleted: { $ne: true } },
-            { projection: { llmApiKey: 1, llmCredentials: 1, activeLlmProvider: 1, pendingLlmProvider: 1, providerMigrationId: 1, aiPreparationRequired: 1 } }
+            { projection: { llmApiKey: 1, llmCredentials: 1, activeLlmProvider: 1, pendingLlmProvider: 1, providerMigrationId: 1, aiPreparationRequired: 1, llmModelSettings: 1 } }
         );
         return this._resolve(db, { type: 'superchat', id: superchatId }, superchat);
     }
@@ -113,7 +114,7 @@ class LlmRegistry {
     async forNotes(db) {
         const settings = await db.collection('settings').findOne(
             { _id: 'notesLlm' },
-            { projection: { llmApiKey: 1, llmCredentials: 1, activeLlmProvider: 1, pendingLlmProvider: 1, providerMigrationId: 1, aiPreparationRequired: 1 } }
+            { projection: { llmApiKey: 1, llmCredentials: 1, activeLlmProvider: 1, pendingLlmProvider: 1, providerMigrationId: 1, aiPreparationRequired: 1, llmModelSettings: 1 } }
         );
         return this._resolve(db, { type: 'notes', id: 'notesLlm' }, settings);
     }
@@ -127,7 +128,7 @@ class LlmRegistry {
     async forSuperCourseChat(db) {
         const settings = await db.collection('settings').findOne(
             { _id: 'superCourseChat' },
-            { projection: { llmApiKey: 1, llmCredentials: 1, activeLlmProvider: 1, pendingLlmProvider: 1, providerMigrationId: 1, aiPreparationRequired: 1 } }
+            { projection: { llmApiKey: 1, llmCredentials: 1, activeLlmProvider: 1, pendingLlmProvider: 1, providerMigrationId: 1, aiPreparationRequired: 1, llmModelSettings: 1 } }
         );
         return this._resolve(db, { type: 'superCourseChat', id: 'superCourseChat' }, settings);
     }
@@ -139,7 +140,7 @@ class LlmRegistry {
      */
     async embeddingProfileForScope(db, scope, doc) {
         const provider = this._providerFor(doc);
-        const settings = await this._modelSettingsFor(db, provider);
+        const settings = await this._modelSettingsFor(db, provider, scope);
         this._assertConfigured(provider, settings);
         return buildEmbeddingProfile({
             provider,
@@ -151,7 +152,8 @@ class LlmRegistry {
     }
 
     _assertConfigured(provider, settings) {
-        if (provider !== 'ubc-llm-proxy') return;
+        if (provider === 'ollama') return;
+        if (settings?.configured && settings?.configurationStatus !== scopeModelSettings.NEEDS_ADMIN) return;
         const missing = [];
         if (!settings?.chatModel) missing.push('front-end chat model');
         if (!settings?.lanes?.[LANES.BACKEND]?.chatModel) missing.push('back-end chat model');
@@ -159,9 +161,10 @@ class LlmRegistry {
         if (missing.length === 0) return;
 
         const error = new Error(
-            `UBC LLM Proxy is not configured yet. A system admin must select and save the ${missing.join(', ')}.`
+            `${provider} is not configured for this AI surface. A system admin must select and save ${missing.join(', ') || 'compatible models'}.`
         );
-        error.code = 'LLM_PROVIDER_UNCONFIGURED';
+        error.code = 'LLM_CONFIGURATION_REQUIRED';
+        error.httpStatus = 409;
         error.httpStatus = 409;
         throw error;
     }
@@ -206,7 +209,7 @@ class LlmRegistry {
      * Model settings for a provider. Ollama is a local dev runtime with no
      * admin-managed platform settings, so it reads its models from env.
      */
-    async _modelSettingsFor(db, provider) {
+    async _modelSettingsFor(db, provider, scope) {
         if (provider === 'ollama') {
             return {
                 chatModel: configuredDefaultModel('ollama'),
@@ -215,12 +218,20 @@ class LlmRegistry {
                 reasoningEffort: 'minimal'
             };
         }
-        return adminModelSettings.getProviderSettings(db, provider);
+        try {
+            return await scopeModelSettings.getProviderSettings(db, scope, provider);
+        } catch (error) {
+            if (!String(error.message || '').startsWith('AI scope not found:')) throw error;
+            // A caller may be resolving an owner document that has not yet been
+            // persisted (notably creation previews). Use the copy-on-create
+            // template for that transient resolution only.
+            return adminModelSettings.getProviderSettings(db, provider);
+        }
     }
 
     async _getOrCreate(db, scope, doc, credential, provider) {
         const normalizedProvider = provider === 'ollama' ? 'ollama' : normalizeProvider(provider);
-        const modelSettings = await this._modelSettingsFor(db, normalizedProvider);
+        const modelSettings = await this._modelSettingsFor(db, normalizedProvider, scope);
         this._assertConfigured(normalizedProvider, modelSettings);
         const keyUpdatedAt = credential && credential.updatedAt
             ? new Date(credential.updatedAt).getTime()

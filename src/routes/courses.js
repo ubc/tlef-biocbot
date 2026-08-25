@@ -24,6 +24,7 @@ const {
     validateApiKey
 } = require('../services/llmKeyStore');
 const providerKeys = require('../services/providerKeyService');
+const scopeModelSettings = require('../services/scopeModelSettings');
 const { normalizeProvider, providerCatalog, providerLabel } = require('../services/llmProviders');
 const { buildEmbeddingProfile } = require('../services/embeddingConfig');
 const {
@@ -896,6 +897,19 @@ router.post('/', async (req, res) => {
             { courseId },
             { $set: { ...credentialSetFields(selectedProvider, llmApiKey), updatedAt: new Date() } }
         );
+        const courseScope = { type: 'course', id: courseId };
+        await scopeModelSettings.materialize(db, courseScope, { updatedBy: user.userId });
+        if (Array.isArray(validation.models)) {
+            await scopeModelSettings.applyCredentialRoster(
+                db,
+                courseScope,
+                selectedProvider,
+                validation.models,
+                user.userId,
+                validation.defaultConfiguration
+            );
+        }
+        const scopedSettings = await scopeModelSettings.getAll(db, courseScope);
 
         if (req.app.locals.llmRegistry) {
             req.app.locals.llmRegistry.evictCourse(courseId);
@@ -914,7 +928,8 @@ router.post('/', async (req, res) => {
                 contentTypes: normalizedContentTypes,
                 instructorId: instructorId,
                 llmKey: publicKeySummary(llmApiKey),
-                aiAvailable: true,
+                llmConfigurationStatus: scopedSettings.providers[selectedProvider].configurationStatus,
+                aiAvailable: scopedSettings.providers[selectedProvider].configurationStatus === scopeModelSettings.READY,
                 createdAt: new Date().toISOString(),
                 status: 'active',
                 structure: generateCourseStructure(weeks, lecturesPerWeek, normalizedContentTypes),
@@ -2158,6 +2173,19 @@ router.post('/:courseId/transfer', async (req, res) => {
         }
 
         await db.collection('courses').insertOne(targetCourse);
+        const targetScope = { type: 'course', id: targetCourseId };
+        await scopeModelSettings.materialize(db, targetScope, { updatedBy: user.userId });
+        if (Array.isArray(validation.models)) {
+            await scopeModelSettings.applyCredentialRoster(
+                db,
+                targetScope,
+                transferProvider,
+                validation.models,
+                user.userId,
+                validation.defaultConfiguration
+            );
+        }
+        const targetModelSettings = await scopeModelSettings.getAll(db, targetScope);
 
         // Per-collection maintenance clients, created lazily for whichever
         // embedding profiles the source documents were actually indexed in.
@@ -2210,7 +2238,8 @@ router.post('/:courseId/transfer', async (req, res) => {
             providerLabel: providerLabel(transferProvider),
             migration: null
         };
-        let preparationAiAvailable = true;
+        let preparationAiAvailable = targetModelSettings.providers[transferProvider].configurationStatus
+            === scopeModelSettings.READY;
         try {
             const preparationResult = await providerKeys.prepareStoredProvider(db, {
                 scope: { type: 'course', id: targetCourseId },

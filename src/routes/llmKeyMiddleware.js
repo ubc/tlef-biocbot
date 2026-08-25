@@ -5,6 +5,14 @@ const {
 } = require('../services/llmKeyStore');
 
 function sendLlmKeyError(res, error) {
+    if (error?.code === 'LLM_CONFIGURATION_REQUIRED') {
+        res.status(error.httpStatus || 409).json({
+            success: false,
+            code: error.code,
+            message: error.message || 'AI needs model configuration from a system administrator.'
+        });
+        return true;
+    }
     if (error instanceof LlmPreparationError || error?.code === 'LLM_PROVIDER_PREPARING') {
         res.status(error.httpStatus || 409).json({
             success: false,

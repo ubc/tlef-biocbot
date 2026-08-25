@@ -778,6 +778,12 @@ async function handleCourseSetup(event) {
         const response = await createCourse(onboardingState.courseData);
         onboardingState.createdCourseId = response.courseId;
         await linkAcademicSectionsForOnboarding(response.courseId);
+        if (response.aiAvailable === false) {
+            showNotification(
+                'Course created. AI tools are waiting for a system administrator to select compatible models.',
+                'warning'
+            );
+        }
         
         // Move to next step (guided unit setup)
         nextStep();
@@ -949,7 +955,7 @@ async function getCourseDetails(courseId) {
 async function createCourse(courseData) {
     try {
         console.log('🚀 [ONBOARDING] Starting course creation process...');
-        console.log('📋 [ONBOARDING] Course data:', courseData);
+        console.log('📋 [ONBOARDING] Course setup collected');
         
         // Generate a course ID based on the course name
         let courseId = courseData.course.replace(/\s+/g, '-').toUpperCase();
@@ -1007,7 +1013,7 @@ async function createCourse(courseData) {
             llmProvider: courseData.llmProvider || 'openai'
         };
         
-        console.log('📋 [ONBOARDING] Prepared onboarding data:', onboardingData);
+        console.log('📋 [ONBOARDING] Prepared onboarding course structure');
         
         // Initialize unit structure with Unit 1 learning objectives
         for (let i = 1; i <= courseData.totalUnits; i++) {
@@ -1027,7 +1033,7 @@ async function createCourse(courseData) {
             }
         }
         
-        console.log('📋 [ONBOARDING] Final onboarding data with unit structure:', onboardingData);
+        console.log('📋 [ONBOARDING] Finalized onboarding unit structure');
         console.log(`📡 [MONGODB] Making API request to /api/onboarding (POST)`);
         console.log(`📡 [MONGODB] Request body size: ${JSON.stringify(onboardingData).length} characters`);
         
@@ -1062,7 +1068,9 @@ async function createCourse(courseData) {
             weeks: courseData.weeks,
             lecturesPerWeek: courseData.lecturesPerWeek,
             createdAt: new Date().toISOString(),
-            status: 'active'
+            status: 'active',
+            aiAvailable: result.data?.aiAvailable !== false,
+            llmConfigurationStatus: result.data?.llmConfigurationStatus || 'ready'
         };
         
     } catch (error) {

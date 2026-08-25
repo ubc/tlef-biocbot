@@ -1,4 +1,4 @@
-const OPENAI_DEFAULT_MODEL = 'gpt-4.1-mini';
+const OPENAI_DEFAULT_MODEL = 'gpt-5.6-luna';
 const SANDBOX_DEFAULT_MODEL = 'qwen3.6-35b-a3b';
 const PROXY_PROVIDER = 'ubc-llm-proxy';
 const PROXY_REASONING_EFFORTS = Object.freeze([
@@ -58,7 +58,9 @@ function allowedEmbeddingModelsForProvider(provider, discoveredModels = []) {
         return process.env.LLM_EMBEDDING_MODEL ? [process.env.LLM_EMBEDDING_MODEL] : ['nomic-embed-text'];
     }
     if (provider === PROXY_PROVIDER) return exactDiscoveredModels(discoveredModels);
-    return [...(PROVIDER_EMBEDDING_MODELS[provider] || PROVIDER_EMBEDDING_MODELS.openai)];
+    const supported = [...(PROVIDER_EMBEDDING_MODELS[provider] || PROVIDER_EMBEDDING_MODELS.openai)];
+    const discovered = exactDiscoveredModels(discoveredModels);
+    return discovered.length > 0 ? supported.filter(model => discovered.includes(model)) : supported;
 }
 
 /**
@@ -129,7 +131,8 @@ function allowedModelsForProvider(provider, defaultModel = configuredDefaultMode
     }
 
     const models = [...(PROVIDER_MODELS[provider] || PROVIDER_MODELS.openai)];
-    return models;
+    const discovered = exactDiscoveredModels(discoveredModels);
+    return discovered.length > 0 ? models.filter(model => discovered.includes(model)) : models;
 }
 
 function fallbackModelForProvider(provider, defaultModel = configuredDefaultModel(provider), discoveredModels = []) {

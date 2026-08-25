@@ -458,6 +458,11 @@ async function logout() {
             
             // Clear local user data
             currentUser = null;
+            // Course selection is user-specific. Leaving it in origin-wide
+            // localStorage can make the next account open instructor pages
+            // with a course it cannot access.
+            localStorage.removeItem('selectedCourseId');
+            localStorage.removeItem(PREVIEW_COURSE_BACKUP_KEY);
             
             // Redirect to login page
             // Use redirect URL from server if available (important for SAML logout)

@@ -929,11 +929,12 @@
                         <!-- Admin: platform & models -->
                         <div class="settings-panel" id="settings-panel-admin-platform" data-panel="admin-platform" hidden>
                             <h2 class="settings-panel-title" tabindex="-1">Platform &amp; models</h2>
+                            <p id="llm-model-scope-context" class="section-description">These model settings are the defaults copied into newly created AI configurations. Changing them does not affect existing courses or other existing AI surfaces.</p>
                             <!-- GPT platform. Instructors never see these controls; they
                                  choose the platform label only. -->
                             <section class="settings-section" id="llm-model-section" data-platform="openai" style="display: none;">
                                 <h3>OpenAI Chat GPT models</h3>
-                                <p class="section-description">Models used by every surface running on the OpenAI Chat GPT platform. Saving applies chat-model changes immediately; an embedding-model change is staged and re-indexed before it becomes active.</p>
+                                <p class="section-description">Models used only by the AI surface shown above. Chat changes are immediate; embedding changes are staged until this surface has been re-indexed.</p>
                                 <div class="settings-content">
                                     <div class="setting-item">
                                         <div class="setting-info">
@@ -1022,7 +1023,7 @@
                                  Sandbox/B300; OpenAI is never used for a Sandbox surface. -->
                             <section class="settings-section" id="sandbox-llm-model-section" data-platform="ubc-llm-sandbox" style="display: none;">
                                 <h3>UBC On-Premise LLM models</h3>
-                                <p class="section-description">Models used by every surface running on the UBC On-Premise LLM platform.</p>
+                                <p class="section-description">Models used only by the AI surface shown above.</p>
                                 <div class="settings-content">
                                     <div class="setting-item">
                                         <div class="setting-info">
@@ -1101,7 +1102,7 @@
                                  each entered key; no application defaults are supplied. -->
                             <section class="settings-section" id="proxy-llm-model-section" data-platform="ubc-llm-proxy" style="display: none;">
                                 <h3>UBC LLM Proxy models</h3>
-                                <p class="section-description">Models available through saved proxy keys. The proxy returns a flat list, so each selected model is validated with the operation it will perform.</p>
+                                <p class="section-description">Models available through this AI surface’s saved proxy key. Each selection is validated with the operation it will perform.</p>
                                 <p id="proxy-llm-discovery-status" class="section-description">Save a UBC LLM Proxy key to load models.</p>
                                 <div class="settings-content">
                                     <div class="setting-item">

@@ -28,6 +28,7 @@ const SuperchatModel = require('../models/Superchat');
 const { resolveSuperCourseChatSettings } = require('../services/superCourseService');
 const { hasSystemAdminAccess } = require('../services/authorization');
 const providerKeys = require('../services/providerKeyService');
+const scopeModelSettings = require('../services/scopeModelSettings');
 const { normalizeProvider, providerCatalog } = require('../services/llmProviders');
 const {
     buildKeySubdocument,
@@ -247,6 +248,16 @@ router.post('/', async (req, res) => {
             db,
             { ...body, ...credentialDocumentFields(bucketProvider, llmApiKey) },
             req.user.userId
+        );
+        await scopeModelSettings.materialize(
+            db,
+            { type: 'superchat', id: doc.superchatId },
+            {
+                availableModelsByProvider: Array.isArray(validation.models)
+                    ? { [bucketProvider]: validation.models }
+                    : {},
+                updatedBy: req.user.userId
+            }
         );
         res.status(201).json({ success: true, superchat: summarize(doc, 0) });
     } catch (error) {

@@ -28,6 +28,7 @@ jest.mock('../../../src/services/qdrantService', () => jest.fn().mockImplementat
 const LlmRegistry = require('../../../src/services/llmRegistry');
 const LLMService = require('../../../src/services/llm');
 const adminModelSettings = require('../../../src/services/adminModelSettings');
+const scopeModelSettings = require('../../../src/services/scopeModelSettings');
 const { buildKeySubdocument } = require('../../../src/services/llmKeyStore');
 const { memoryDb } = require('../helpers/memory-db');
 
@@ -71,7 +72,7 @@ describe('a scope resolves its own platform', () => {
         expect(services.embeddingProfile.collection).toBe('biocbot_documents');
         expect(services.embeddingProfile.vectorSize).toBe(1536);
         expect(LLMService.create.mock.calls[0][0].llmConfig).toMatchObject({
-            provider: OPENAI, apiKey: 'sk-gpt-key-1111', defaultModel: 'gpt-4.1-mini',
+            provider: OPENAI, apiKey: 'sk-gpt-key-1111', defaultModel: 'gpt-5.6-luna',
         });
     });
 
@@ -244,7 +245,7 @@ describe('cache identity', () => {
         expect(LLMService.create).toHaveBeenCalledTimes(2);
     });
 
-    test('changing the admin model settings rebuilds the services', async () => {
+    test('changing new-scope defaults does not rebuild a materialized course', async () => {
         const registry = new LlmRegistry();
         const db = memoryDb({ courses: [{ courseId: 'C1', ...keyedSurface(OPENAI) }], settings: [] });
 
@@ -259,10 +260,10 @@ describe('cache identity', () => {
         adminModelSettings.invalidateCache();
 
         await registry.forCourse(db, 'C1');
-        expect(LLMService.create).toHaveBeenCalledTimes(2);
+        expect(LLMService.create).toHaveBeenCalledTimes(1);
     });
 
-    test('changing only the back-end lane rebuilds the services', async () => {
+    test('changing the default back-end lane does not alter a materialized course', async () => {
         const registry = new LlmRegistry();
         const db = memoryDb({ courses: [{ courseId: 'C1', ...keyedSurface(OPENAI) }], settings: [] });
 
@@ -280,10 +281,10 @@ describe('cache identity', () => {
         adminModelSettings.invalidateCache();
 
         await registry.forCourse(db, 'C1');
-        expect(LLMService.create).toHaveBeenCalledTimes(2);
+        expect(LLMService.create).toHaveBeenCalledTimes(1);
     });
 
-    test('clear() also drops the admin model settings cache', async () => {
+    test('clear() preserves the course snapshot after defaults change', async () => {
         const registry = new LlmRegistry();
         const db = memoryDb({ courses: [{ courseId: 'C1', ...keyedSurface(OPENAI) }], settings: [] });
 
@@ -296,7 +297,19 @@ describe('cache identity', () => {
         registry.clear();
 
         const services = await registry.forCourse(db, 'C1');
-        expect(services.modelSettings.chatModel).toBe('gpt-5.4-nano');
+        expect(services.modelSettings.chatModel).toBe('gpt-5.6-luna');
+    });
+
+    test('changing the course model snapshot rebuilds only that scope', async () => {
+        const registry = new LlmRegistry();
+        const db = memoryDb({ courses: [{ courseId: 'C1', ...keyedSurface(OPENAI) }], settings: [] });
+        await registry.forCourse(db, 'C1');
+        await scopeModelSettings.saveChatSettings(db, { type: 'course', id: 'C1' }, OPENAI, {
+            chatModel: 'gpt-5-nano', reasoningEffort: 'high', backendInheritsFrontend: true
+        });
+
+        await registry.forCourse(db, 'C1');
+        expect(LLMService.create).toHaveBeenCalledTimes(2);
     });
 });
 

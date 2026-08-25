@@ -14,6 +14,7 @@ const {
     validateApiKey
 } = require('../services/llmKeyStore');
 const providerKeys = require('../services/providerKeyService');
+const scopeModelSettings = require('../services/scopeModelSettings');
 const { normalizeProvider, providerCatalog, providerLabel } = require('../services/llmProviders');
 
 const ONBOARDING_UPDATE_FIELDS = new Set([
@@ -217,6 +218,19 @@ router.post('/', async (req, res) => {
             { courseId: result.courseId },
             { $set: { ...credentialSetFields(selectedProvider, llmApiKey), updatedAt: new Date() } }
         );
+        const courseScope = { type: 'course', id: result.courseId };
+        await scopeModelSettings.materialize(db, courseScope, { updatedBy: user.userId });
+        if (Array.isArray(validation.models)) {
+            await scopeModelSettings.applyCredentialRoster(
+                db,
+                courseScope,
+                selectedProvider,
+                validation.models,
+                user.userId,
+                validation.defaultConfiguration
+            );
+        }
+        const scopedSettings = await scopeModelSettings.getAll(db, courseScope);
 
         if (req.app.locals.llmRegistry) {
             req.app.locals.llmRegistry.evictCourse(result.courseId);
@@ -234,6 +248,8 @@ router.post('/', async (req, res) => {
                 totalUnits: result.totalUnits,
                 llmKey: publicKeySummary(llmApiKey),
                 llmProvider: selectedProvider,
+                llmConfigurationStatus: scopedSettings.providers[selectedProvider].configurationStatus,
+                aiAvailable: scopedSettings.providers[selectedProvider].configurationStatus === scopeModelSettings.READY,
                 timestamp: new Date().toISOString()
             }
         });

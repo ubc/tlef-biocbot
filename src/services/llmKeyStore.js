@@ -471,8 +471,19 @@ async function openaiPost(url, apiKey, body) {
     return response.json();
 }
 
+async function openaiModelRoster(baseUrl, apiKey) {
+    const response = await fetch(joinUrl(baseUrl, 'models'), {
+        headers: { Authorization: `Bearer ${apiKey}` }
+    });
+    if (!response.ok) throw await parseOpenAIResponseError(response);
+    const body = await response.json();
+    return Array.isArray(body?.data)
+        ? body.data.map(item => item && item.id).filter(id => typeof id === 'string' && id.length > 0)
+        : [];
+}
+
 function chatValidationBody(model) {
-    const usedModel = model || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+    const usedModel = model || process.env.OPENAI_MODEL || 'gpt-5.6-luna';
     const body = {
         model: usedModel,
         messages: [{ role: 'user', content: 'ping' }]
@@ -623,6 +634,16 @@ async function validateProviderKey({ provider, apiKey, chatModel, embeddingModel
         }
 
         try {
+            const models = await openaiModelRoster(base, trimmed);
+            if ((chatModel && !models.includes(chatModel)) || (embeddingModel && !models.includes(embeddingModel))) {
+                return {
+                    ok: true,
+                    status: KEY_STATUSES.VALID,
+                    provider: normalizedProvider,
+                    models,
+                    configurationCompatible: false
+                };
+            }
             await openaiPost(joinUrl(base, 'embeddings'), trimmed, {
                 model: embeddingModel || 'qwen3-embedding-0.6b',
                 input: 'biocbot validation'
@@ -632,7 +653,7 @@ async function validateProviderKey({ provider, apiKey, chatModel, embeddingModel
                 messages: [{ role: 'user', content: 'ping' }],
                 max_tokens: 1
             });
-            return { ok: true, status: KEY_STATUSES.VALID, provider: normalizedProvider };
+            return { ok: true, status: KEY_STATUSES.VALID, provider: normalizedProvider, models, configurationCompatible: true };
         } catch (error) {
             const status = mapProviderErrorToStatus(error) || KEY_STATUSES.INVALID;
             return validationFailure(status, error, normalizedProvider);
@@ -640,12 +661,22 @@ async function validateProviderKey({ provider, apiKey, chatModel, embeddingModel
     }
 
     try {
+        const models = await openaiModelRoster('https://api.openai.com/v1', trimmed);
+        if ((chatModel && !models.includes(chatModel)) || (embeddingModel && !models.includes(embeddingModel))) {
+            return {
+                ok: true,
+                status: KEY_STATUSES.VALID,
+                provider: normalizedProvider,
+                models,
+                configurationCompatible: false
+            };
+        }
         await openaiPost(OPENAI_EMBEDDINGS_URL, trimmed, {
             model: embeddingModel || process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
             input: 'biocbot validation'
         });
         await openaiPost(OPENAI_CHAT_URL, trimmed, chatValidationBody(chatModel));
-        return { ok: true, status: KEY_STATUSES.VALID, provider: normalizedProvider };
+        return { ok: true, status: KEY_STATUSES.VALID, provider: normalizedProvider, models, configurationCompatible: true };
     } catch (error) {
         const status = mapOpenAIErrorToStatus(error) || KEY_STATUSES.INVALID;
         return validationFailure(status, error, normalizedProvider);
