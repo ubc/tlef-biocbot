@@ -549,7 +549,7 @@ test.describe('Admin platform and model settings', () => {
         await expect(page.locator('#notes-llm-key-section > .scoped-model-accordion')).toBeVisible();
         await expect(page.locator('#instructor-superchat-llm-key-section')).toBeVisible();
         await expect(page.locator('#notes-llm-key-section #llm-model-section')).toBeVisible();
-        expect(llmQueries.at(-1)).toContain('scopeType=notes');
+        await expect.poll(() => llmQueries.some(query => query.includes('scopeType=notes'))).toBe(true);
 
         await notesButton.click();
         await expect(notesButton).toHaveText('Configure models');
@@ -562,11 +562,22 @@ test.describe('Admin platform and model settings', () => {
         await expect(globalButton).toHaveText('Hide model settings');
         await expect(page.locator('#instructor-superchat-llm-key-section > .scoped-model-accordion')).toBeVisible();
         await expect(page.locator('#notes-llm-key-section')).toBeVisible();
-        expect(llmQueries.at(-1)).toContain('scopeType=superCourseChat');
+        await expect.poll(() => llmQueries.some(query => query.includes('scopeType=superCourseChat'))).toBe(true);
 
         await globalButton.click();
         await expect(globalButton).toHaveText('Configure models');
         await expect(page.locator('#instructor-superchat-llm-key-section > .scoped-model-accordion')).toHaveCount(0);
+
+        // Leaving a course-scoped editor returns the shared controls home. The
+        // defaults panel must not require a page refresh to show them again.
+        await page.locator('.settings-rail-link[data-panel="course-basics"]').click();
+        const courseButton = page.locator('#configure-course-models');
+        await courseButton.click();
+        await expect(page.locator('#course-llm-key-section > .scoped-model-accordion')).toBeVisible();
+        await page.locator('.settings-rail-link[data-panel="admin-platform"]').click();
+        await expect(page.locator('#settings-panel-admin-platform > #llm-model-section')).toBeVisible();
+        await expect(page.locator('#notes-llm-key-section')).toBeVisible();
+        await expect(page.locator('#instructor-superchat-llm-key-section')).toBeVisible();
     });
 
     test('model controls are grouped by platform, each with its own collection', async ({ page }) => {

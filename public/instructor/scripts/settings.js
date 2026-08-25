@@ -70,6 +70,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Latest per-platform settings from /api/settings/llm, keyed by provider.
     let llmPlatformSettings = {};
     let llmModelScope = null;
+    let llmSettingsRequestId = 0;
     let activeModelAccordion = null;
     const modelEditorContext = document.getElementById('llm-model-scope-context');
     const modelEditorHome = modelEditorContext?.parentElement || null;
@@ -223,6 +224,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!settingsHub || !settingsPanels) return;
 
         const active = currentPanelName();
+        const accordionPanel = activeModelAccordion?.body.closest('.settings-panel')?.dataset.panel;
+        if (activeModelAccordion && accordionPanel !== active) {
+            // The model controls are a single shared editor. Always return it
+            // to the defaults panel when leaving a scoped accordion so the
+            // Platform & models page can never appear empty until refresh.
+            void closeScopedModelEditor();
+        }
         settingsHub.hidden = !!active;
         settingsPanels.hidden = !active;
 
@@ -1064,6 +1072,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     async function loadLLMSettings(scope = undefined) {
+        const requestId = ++llmSettingsRequestId;
         try {
             if (scope !== undefined) llmModelScope = scope;
             if (scope === undefined && !llmModelScope) {
@@ -1075,6 +1084,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 : '';
             const response = await fetch(`/api/settings/llm${query}`, { credentials: 'include' });
             const result = await response.json();
+            if (requestId !== llmSettingsRequestId) return;
             if (!result.success) return;
 
             const platforms = Array.isArray(result.platforms) ? result.platforms : [];
