@@ -16,6 +16,7 @@ const { randomUUID } = require('crypto');
 
 const QdrantService = require('./qdrantService');
 const NotesQdrantService = require('./notesQdrantService');
+const scopeModelSettings = require('./scopeModelSettings');
 const adminModelSettings = require('./adminModelSettings');
 const config = require('./config');
 const { buildEmbeddingProfile } = require('./embeddingConfig');
@@ -556,10 +557,17 @@ async function runMigration(db, migrationId, options = {}) {
     if (job.kind === 'embedding-model') {
         // Only promote the model THIS job indexed — a newer staged change has
         // its own migration and its own vectors to wait for.
-        await adminModelSettings.activatePendingEmbedding(db, job.targetProfile.provider, {
+        const expected = {
             embeddingModel: job.targetProfile.embeddingModel,
             embeddingRevision: job.targetProfile.revision
-        });
+        };
+        if (job.scope?.type === 'adminEmbedding') {
+            // Finish jobs created by the previous global-settings release so a
+            // deploy never strands an in-flight migration.
+            await adminModelSettings.activatePendingEmbedding(db, job.targetProfile.provider, expected);
+        } else {
+            await scopeModelSettings.activatePendingEmbedding(db, job.scope, job.targetProfile.provider, expected);
+        }
     }
 
     await migrations.finishMigration(db, migrationId, MIGRATION_STATUSES.COMPLETED);

@@ -24,6 +24,7 @@ const {
     validateApiKey
 } = require('../services/llmKeyStore');
 const providerKeys = require('../services/providerKeyService');
+const scopeModelSettings = require('../services/scopeModelSettings');
 const { normalizeProvider, providerCatalog, providerLabel } = require('../services/llmProviders');
 const { buildEmbeddingProfile } = require('../services/embeddingConfig');
 const {
@@ -896,6 +897,16 @@ router.post('/', async (req, res) => {
             { courseId },
             { $set: { ...credentialSetFields(selectedProvider, llmApiKey), updatedAt: new Date() } }
         );
+        const scopedSettings = await scopeModelSettings.materialize(
+            db,
+            { type: 'course', id: courseId },
+            {
+                availableModelsByProvider: Array.isArray(validation.models)
+                    ? { [selectedProvider]: validation.models }
+                    : {},
+                updatedBy: user.userId
+            }
+        );
 
         if (req.app.locals.llmRegistry) {
             req.app.locals.llmRegistry.evictCourse(courseId);
@@ -914,7 +925,8 @@ router.post('/', async (req, res) => {
                 contentTypes: normalizedContentTypes,
                 instructorId: instructorId,
                 llmKey: publicKeySummary(llmApiKey),
-                aiAvailable: true,
+                llmConfigurationStatus: scopedSettings.providers[selectedProvider].configurationStatus,
+                aiAvailable: scopedSettings.providers[selectedProvider].configurationStatus === scopeModelSettings.READY,
                 createdAt: new Date().toISOString(),
                 status: 'active',
                 structure: generateCourseStructure(weeks, lecturesPerWeek, normalizedContentTypes),
@@ -2158,6 +2170,16 @@ router.post('/:courseId/transfer', async (req, res) => {
         }
 
         await db.collection('courses').insertOne(targetCourse);
+        const targetModelSettings = await scopeModelSettings.materialize(
+            db,
+            { type: 'course', id: targetCourseId },
+            {
+                availableModelsByProvider: Array.isArray(validation.models)
+                    ? { [transferProvider]: validation.models }
+                    : {},
+                updatedBy: user.userId
+            }
+        );
 
         // Per-collection maintenance clients, created lazily for whichever
         // embedding profiles the source documents were actually indexed in.
@@ -2210,7 +2232,8 @@ router.post('/:courseId/transfer', async (req, res) => {
             providerLabel: providerLabel(transferProvider),
             migration: null
         };
-        let preparationAiAvailable = true;
+        let preparationAiAvailable = targetModelSettings.providers[transferProvider].configurationStatus
+            === scopeModelSettings.READY;
         try {
             const preparationResult = await providerKeys.prepareStoredProvider(db, {
                 scope: { type: 'course', id: targetCourseId },

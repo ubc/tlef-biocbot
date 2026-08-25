@@ -93,7 +93,7 @@ describe('validating against the right platform', () => {
         }));
     });
 
-    test('a proxy key discovers exact ids and leaves model settings unconfigured', async () => {
+    test('a proxy key returns exact ids without polluting the default template', async () => {
         const models = ['openai/gpt-5.6-luna:2026', 'vendor/embed.model'];
         mockValidateProviderKey.mockResolvedValue({
             ok: true, status: 'valid', provider: PROXY, models,
@@ -111,7 +111,7 @@ describe('validating against the right platform', () => {
             embeddingModel: null,
             endpoint: 'https://proxy.example/v1',
         }));
-        expect(settings.availableModels).toEqual(models);
+        expect(settings.availableModels).toEqual([]);
         expect(settings.configured).toBe(false);
     });
 

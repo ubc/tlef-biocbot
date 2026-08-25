@@ -15,6 +15,7 @@
  */
 
 const adminModelSettings = require('./adminModelSettings');
+const scopeModelSettings = require('./scopeModelSettings');
 const { LLMModule } = require('ubc-genai-toolkit-llm');
 const config = require('./config');
 const migrations = require('./providerMigrationService');
@@ -22,7 +23,12 @@ const migrationRunner = require('./providerMigrationRunner');
 const superCourse = require('./superCourseService');
 const { buildEmbeddingProfile, vectorSizeForEmbeddingModel } = require('./embeddingConfig');
 const { PROVIDERS, normalizeProvider, providerLabel } = require('./llmProviders');
-const { PROXY_REASONING_EFFORTS } = require('./llmModels');
+const {
+    PROXY_REASONING_EFFORTS,
+    allowedEmbeddingModelsForProvider,
+    allowedModelsForProvider,
+    configuredDefaultModel
+} = require('./llmModels');
 const {
     KEY_STATUSES,
     buildKeySubdocument,
@@ -44,9 +50,12 @@ function errorCodeForStatus(status) {
 /**
  * Validate a key against the models the admin configured for that platform.
  */
-async function validateForProvider(db, provider, apiKey) {
+async function validateForProvider(db, provider, apiKey, options = {}) {
     const normalizedProvider = normalizeProvider(provider);
-    const settings = await adminModelSettings.getProviderSettings(db, normalizedProvider);
+    const settings = options.settings
+        || (options.scope
+            ? await scopeModelSettings.getProviderSettings(db, options.scope, normalizedProvider)
+            : await adminModelSettings.getProviderSettings(db, normalizedProvider));
     let endpoint = null;
     try {
         endpoint = config.getProviderInfra(normalizedProvider).endpoint;
@@ -62,11 +71,24 @@ async function validateForProvider(db, provider, apiKey) {
         endpoint
     });
 
-    if (!validation.ok || normalizedProvider !== PROVIDERS.PROXY) {
+    if (!validation.ok) {
         return validation;
     }
 
-    const current = await adminModelSettings.getProviderSettings(db, normalizedProvider, { force: true });
+    // Test stubs pre-date roster discovery. Give non-Proxy tests the same
+    // supported roster a real /models response would be filtered against.
+    if ((!Array.isArray(validation.models) || validation.models.length === 0)
+        && normalizedProvider !== PROVIDERS.PROXY
+        && process.env.BIOCBOT_TEST_LLM_STUB === '1') {
+        validation.models = [
+            ...allowedModelsForProvider(normalizedProvider, configuredDefaultModel(normalizedProvider)),
+            ...allowedEmbeddingModelsForProvider(normalizedProvider)
+        ];
+    }
+
+    if (normalizedProvider !== PROVIDERS.PROXY) return validation;
+
+    const current = settings;
     if (current.chatModel || current.embeddingModel) {
         try {
             const listed = validation.models || [];
@@ -76,10 +98,7 @@ async function validateForProvider(db, provider, apiKey) {
                 current.embeddingModel
             ].filter(Boolean)) {
                 if (!listed.includes(selected)) {
-                    throw incompatibleModelError(
-                        selected,
-                        `The selected model is not available to this ${providerLabel(normalizedProvider)} key.`
-                    );
+                    return { ...validation, configurationCompatible: false };
                 }
             }
             await validateProxyOperations({
@@ -89,17 +108,10 @@ async function validateForProvider(db, provider, apiKey) {
                 embeddingModel: current.embeddingModel
             });
         } catch (error) {
-            return {
-                ok: false,
-                status: KEY_STATUSES.INVALID,
-                provider: normalizedProvider,
-                message: error.message,
-                detail: error.cause?.message || error.message
-            };
+            return { ...validation, configurationCompatible: false, detail: error.cause?.message || error.message };
         }
     }
 
-    await adminModelSettings.recordDiscoveredModels(db, normalizedProvider, validation.models);
     return validation;
 }
 
@@ -183,8 +195,18 @@ async function validateProxyOperations({ apiKey, endpoint, chatSelections = [], 
     return { vectorSize };
 }
 
-async function proxyValidationCredential(db) {
+async function proxyValidationCredential(db, scope = null) {
     const provider = PROVIDERS.PROXY;
+    if (scope) {
+        const { doc } = await loadSurface(db, scope);
+        const credential = doc && credentialForProvider(doc, provider);
+        if (!credential?.ciphertext || credential.status !== KEY_STATUSES.VALID) {
+            const error = new Error('Save and validate a UBC LLM Proxy key for this AI surface before selecting proxy models.');
+            error.code = 'PROXY_KEY_REQUIRED';
+            throw error;
+        }
+        return decryptApiKey(credential.ciphertext);
+    }
     const candidates = [
         await db.collection('settings').findOne({ _id: 'notesLlm', [`llmCredentials.${provider}.status`]: KEY_STATUSES.VALID }),
         await db.collection('settings').findOne({ _id: 'superCourseChat', [`llmCredentials.${provider}.status`]: KEY_STATUSES.VALID }),
@@ -206,8 +228,8 @@ async function proxyValidationCredential(db) {
     return decryptApiKey(credential.ciphertext);
 }
 
-async function validateProxyChatSettings(db, selections) {
-    const apiKey = await proxyValidationCredential(db);
+async function validateProxyChatSettings(db, selections, scope = null) {
+    const apiKey = await proxyValidationCredential(db, scope);
     const endpoint = config.getProviderInfra(PROVIDERS.PROXY).endpoint;
     if (!endpoint) {
         const error = new Error('UBC_LLM_PROXY_ENDPOINT is not configured.');
@@ -225,7 +247,7 @@ async function validateProxyChatSettings(db, selections) {
  * are never inspected. A small request is made for each toolkit-supported
  * effort and only successful values are returned to the admin UI.
  */
-async function discoverProxyReasoningEfforts(db, model) {
+async function discoverProxyReasoningEfforts(db, model, scope = null) {
     if (!model || typeof model !== 'string') {
         const error = new Error('Select a proxy model before checking reasoning support.');
         error.code = 'PROXY_MODEL_REQUIRED';
@@ -239,7 +261,7 @@ async function discoverProxyReasoningEfforts(db, model) {
             : [...PROXY_REASONING_EFFORTS];
     }
 
-    const apiKey = await proxyValidationCredential(db);
+    const apiKey = await proxyValidationCredential(db, scope);
     const endpoint = config.getProviderInfra(PROVIDERS.PROXY).endpoint;
     if (!endpoint) {
         const error = new Error('UBC_LLM_PROXY_ENDPOINT is not configured.');
@@ -277,8 +299,8 @@ async function discoverProxyReasoningEfforts(db, model) {
     return supported;
 }
 
-async function validateProxyEmbeddingModel(db, embeddingModel) {
-    const apiKey = await proxyValidationCredential(db);
+async function validateProxyEmbeddingModel(db, embeddingModel, scope = null) {
+    const apiKey = await proxyValidationCredential(db, scope);
     const endpoint = config.getProviderInfra(PROVIDERS.PROXY).endpoint;
     if (!endpoint) {
         const error = new Error('UBC_LLM_PROXY_ENDPOINT is not configured.');
@@ -292,14 +314,23 @@ async function validateProxyEmbeddingModel(db, embeddingModel) {
  * The embedding profile a provider would use for this surface, including the
  * decrypted key when one is supplied.
  */
-async function embeddingProfileFor(db, provider, apiKey = null) {
+async function embeddingProfileFor(db, scope, provider, apiKey = null) {
+    // Backward-compatible service call: embeddingProfileFor(db, provider, key)
+    // reads the new-scope template. Runtime paths always pass an explicit scope.
+    if (typeof scope === 'string') {
+        apiKey = provider || null;
+        provider = scope;
+        scope = null;
+    }
     const normalizedProvider = normalizeProvider(provider);
-    const settings = await adminModelSettings.getProviderSettings(db, normalizedProvider);
-    if (!settings.embeddingModel || (normalizedProvider === PROVIDERS.PROXY && !settings.configured)) {
+    const settings = scope
+        ? await scopeModelSettings.getProviderSettings(db, scope, normalizedProvider)
+        : await adminModelSettings.getProviderSettings(db, normalizedProvider);
+    if (!settings.embeddingModel || !settings.configured) {
         const error = new Error(
             `${providerLabel(normalizedProvider)} is not fully configured. A system admin must select and save its chat and embedding models first.`
         );
-        error.code = 'LLM_PROVIDER_UNCONFIGURED';
+        error.code = 'LLM_CONFIGURATION_REQUIRED';
         throw error;
     }
     let endpoint = null;
@@ -392,7 +423,10 @@ async function saveSurfaceKey(db, {
     const currentProvider = state.activeProvider;
     const hasExistingCredential = !!(state.credentials[currentProvider] && state.credentials[currentProvider].ciphertext);
 
-    const validation = await validateForProvider(db, requestedProvider, apiKey);
+    const validationSettings = doc
+        ? await scopeModelSettings.getProviderSettings(db, scope, requestedProvider)
+        : await adminModelSettings.getProviderSettings(db, requestedProvider);
+    const validation = await validateForProvider(db, requestedProvider, apiKey, { settings: validationSettings });
     if (!validation.ok) {
         return {
             ok: false,
@@ -419,6 +453,11 @@ async function saveSurfaceKey(db, {
         },
         { upsert: target.collection === 'settings' }
     );
+    const scopedSettings = Array.isArray(validation.models)
+        ? await scopeModelSettings.applyCredentialRoster(
+            db, scope, requestedProvider, validation.models, updatedBy
+        )
+        : await scopeModelSettings.getProviderSettings(db, scope, requestedProvider);
     evictScope(registry, scope);
 
     const updated = await db.collection(target.collection).findOne(target.filter);
@@ -429,6 +468,8 @@ async function saveSurfaceKey(db, {
             success: true,
             message: `${providerLabel(requestedProvider)} API key saved`,
             ...publicProviderKeyState(updated),
+            llmConfigurationStatus: scopedSettings.configurationStatus,
+            aiAvailable: scopedSettings.configurationStatus === scopeModelSettings.READY,
             migration: null
         }
     };
@@ -490,9 +531,9 @@ async function prepareStoredProvider(db, {
 
     let profile;
     try {
-        profile = await embeddingProfileFor(db, requestedProvider);
+        profile = await embeddingProfileFor(db, scope, requestedProvider);
     } catch (error) {
-        if (error.code !== 'LLM_PROVIDER_UNCONFIGURED') throw error;
+        if (error.code !== 'LLM_CONFIGURATION_REQUIRED') throw error;
         return {
             ok: false,
             httpStatus: 409,
@@ -584,7 +625,12 @@ async function testSurfaceKey(db, { scope, provider = null, registry = null }) {
         };
     }
 
-    const validation = await validateForProvider(db, targetProvider, decryptApiKey(credential.ciphertext));
+    const validation = await validateForProvider(
+        db,
+        targetProvider,
+        decryptApiKey(credential.ciphertext),
+        { scope }
+    );
     const now = new Date();
     const status = validation.ok ? KEY_STATUSES.VALID : validation.status;
 
@@ -601,6 +647,19 @@ async function testSurfaceKey(db, { scope, provider = null, registry = null }) {
     }
 
     await db.collection(target.collection).updateOne(target.filter, { $set: set });
+    let scopedSettings = null;
+    if (validation.ok && Array.isArray(validation.models)) {
+        scopedSettings = await scopeModelSettings.applyCredentialRoster(
+            db,
+            scope,
+            targetProvider,
+            validation.models,
+            credential.updatedBy || null
+        );
+    }
+    if (validation.ok && !scopedSettings) {
+        scopedSettings = await scopeModelSettings.getProviderSettings(db, scope, targetProvider);
+    }
     evictScope(registry, scope);
 
     return {
@@ -619,7 +678,8 @@ async function testSurfaceKey(db, { scope, provider = null, registry = null }) {
                 validatedAt: validation.ok ? now : credential.validatedAt,
                 updatedAt: now
             },
-            aiAvailable: validation.ok
+            llmConfigurationStatus: scopedSettings?.configurationStatus || null,
+            aiAvailable: validation.ok && scopedSettings?.configurationStatus === scopeModelSettings.READY
         }
     };
 }
@@ -662,9 +722,9 @@ async function switchToStoredProvider(db, { scope, provider, requestedBy = null,
 
     let profile;
     try {
-        profile = await embeddingProfileFor(db, requestedProvider);
+        profile = await embeddingProfileFor(db, scope, requestedProvider);
     } catch (error) {
-        if (error.code !== 'LLM_PROVIDER_UNCONFIGURED') throw error;
+        if (error.code !== 'LLM_CONFIGURATION_REQUIRED') throw error;
         return {
             ok: false,
             httpStatus: 409,
@@ -712,12 +772,18 @@ async function switchToStoredProvider(db, { scope, provider, requestedBy = null,
 async function surfaceKeyState(db, scope) {
     const { doc } = await loadSurface(db, scope);
     const state = publicProviderKeyState(doc);
+    const settings = doc
+        ? await scopeModelSettings.getProviderSettings(db, scope, state.llmProvider)
+        : { configurationStatus: scopeModelSettings.NEEDS_ADMIN };
     const job = state.providerMigrationId
         ? await migrations.getMigration(db, state.providerMigrationId)
         : await migrations.findActiveMigration(db, scope);
 
     return {
         ...state,
+        llmConfigurationStatus: settings.configurationStatus,
+        aiAvailable: state.llmKey?.status === KEY_STATUSES.VALID
+            && settings.configurationStatus === scopeModelSettings.READY,
         migration: migrations.publicMigrationView(job)
     };
 }

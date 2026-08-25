@@ -273,20 +273,24 @@ describe('provider-aware validation', () => {
     });
 
     test('OpenAI probes api.openai.com with the configured chat and embedding models', async () => {
+        const models = ['gpt-4.1-mini', 'text-embedding-3-small'];
+        fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: models.map(id => ({ id })) }) });
         fetchMock.mockResolvedValue(okResponse());
         const result = await validateProviderKey({
             provider: OPENAI, apiKey: 'sk-real', chatModel: 'gpt-4.1-mini', embeddingModel: 'text-embedding-3-small',
         });
 
-        expect(result).toEqual({ ok: true, status: 'valid', provider: OPENAI });
-        expect(fetchMock).toHaveBeenCalledTimes(2);
-        expect(fetchMock.mock.calls[0][0]).toBe('https://api.openai.com/v1/embeddings');
-        expect(JSON.parse(fetchMock.mock.calls[0][1].body).model).toBe('text-embedding-3-small');
-        expect(fetchMock.mock.calls[1][0]).toBe('https://api.openai.com/v1/chat/completions');
-        expect(JSON.parse(fetchMock.mock.calls[1][1].body).model).toBe('gpt-4.1-mini');
+        expect(result).toEqual({ ok: true, status: 'valid', provider: OPENAI, models, configurationCompatible: true });
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(fetchMock.mock.calls[1][0]).toBe('https://api.openai.com/v1/embeddings');
+        expect(JSON.parse(fetchMock.mock.calls[1][1].body).model).toBe('text-embedding-3-small');
+        expect(fetchMock.mock.calls[2][0]).toBe('https://api.openai.com/v1/chat/completions');
+        expect(JSON.parse(fetchMock.mock.calls[2][1].body).model).toBe('gpt-4.1-mini');
     });
 
     test('Sandbox probes the configured Sandbox endpoint with Qwen — never OpenAI', async () => {
+        const models = ['qwen3.6-35b-a3b', 'qwen3-embedding-0.6b'];
+        fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: models.map(id => ({ id })) }) });
         fetchMock.mockResolvedValue(okResponse());
         const result = await validateProviderKey({
             provider: SANDBOX,
@@ -296,22 +300,23 @@ describe('provider-aware validation', () => {
             endpoint: 'https://sandbox.example/v1',
         });
 
-        expect(result).toEqual({ ok: true, status: 'valid', provider: SANDBOX });
+        expect(result).toEqual({ ok: true, status: 'valid', provider: SANDBOX, models, configurationCompatible: true });
         const urls = fetchMock.mock.calls.map(call => call[0]);
         expect(urls).toEqual([
+            'https://sandbox.example/v1/models',
             'https://sandbox.example/v1/embeddings',
             'https://sandbox.example/v1/chat/completions',
         ]);
         expect(urls.some(url => url.includes('api.openai.com'))).toBe(false);
-        expect(JSON.parse(fetchMock.mock.calls[0][1].body).model).toBe('qwen3-embedding-0.6b');
-        expect(JSON.parse(fetchMock.mock.calls[1][1].body).model).toBe('qwen3.6-35b-a3b');
-        expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer sbx-real');
+        expect(JSON.parse(fetchMock.mock.calls[1][1].body).model).toBe('qwen3-embedding-0.6b');
+        expect(JSON.parse(fetchMock.mock.calls[2][1].body).model).toBe('qwen3.6-35b-a3b');
+        expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe('Bearer sbx-real');
     });
 
     test('a trailing slash on the Sandbox endpoint does not double up', async () => {
         fetchMock.mockResolvedValue(okResponse());
         await validateProviderKey({ provider: SANDBOX, apiKey: 'k', endpoint: 'https://sandbox.example/v1/' });
-        expect(fetchMock.mock.calls[0][0]).toBe('https://sandbox.example/v1/embeddings');
+        expect(fetchMock.mock.calls[0][0]).toBe('https://sandbox.example/v1/models');
     });
 
     test('a non-OpenAI key is NOT assumed valid — a bad Sandbox key is rejected', async () => {

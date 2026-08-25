@@ -69,6 +69,95 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     // Latest per-platform settings from /api/settings/llm, keyed by provider.
     let llmPlatformSettings = {};
+    let llmModelScope = null;
+
+    function llmScopePayload() {
+        return llmModelScope
+            ? { scopeType: llmModelScope.type, scopeId: llmModelScope.id }
+            : {};
+    }
+
+    function modelSections() {
+        return ['llm-model-section', 'sandbox-llm-model-section', 'proxy-llm-model-section']
+            .map(id => document.getElementById(id))
+            .filter(Boolean);
+    }
+
+    async function openScopedModelEditor(scope, container, label) {
+        if (!container) return;
+        let context = document.getElementById('llm-model-scope-context');
+        if (!context) {
+            context = document.createElement('p');
+            context.id = 'llm-model-scope-context';
+            context.className = 'section-description';
+        }
+        context.textContent = scope
+            ? `System-admin model configuration for ${label}. Changes affect only this AI surface.`
+            : 'Default templates for newly created AI configurations. Existing surfaces are not changed.';
+        container.append(context, ...modelSections());
+        await loadLLMSettings(scope);
+        context.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function setupScopedModelButtons() {
+        const definitions = [
+            {
+                id: 'configure-course-models',
+                controls: document.querySelector('#course-llm-key-section .llm-key-controls'),
+                resolve: async () => {
+                    const id = await getCurrentCourseId();
+                    return id ? { scope: { type: 'course', id }, label: 'this course' } : null;
+                }
+            },
+            {
+                id: 'configure-superchat-models',
+                controls: document.querySelector('#super-course-chat-section .llm-key-controls'),
+                resolve: async () => selectedSuperchatId
+                    ? { scope: { type: 'superchat', id: selectedSuperchatId }, label: 'this Super Course bucket' }
+                    : null
+            },
+            {
+                id: 'configure-notes-models',
+                controls: document.querySelector('#notes-llm-key-section .llm-key-controls'),
+                resolve: async () => ({ scope: { type: 'notes', id: 'notesLlm' }, label: 'instructor notes' })
+            },
+            {
+                id: 'configure-instructor-superchat-models',
+                controls: document.querySelector('#instructor-superchat-llm-key-section .llm-key-controls'),
+                resolve: async () => ({ scope: { type: 'superCourseChat', id: 'superCourseChat' }, label: 'global instructor Super Course chat' })
+            }
+        ];
+        for (const definition of definitions) {
+            if (!definition.controls || document.getElementById(definition.id)) continue;
+            const button = document.createElement('button');
+            button.id = definition.id;
+            button.type = 'button';
+            button.className = 'secondary-button';
+            button.textContent = 'Configure models';
+            button.addEventListener('click', async () => {
+                const resolved = await definition.resolve();
+                if (!resolved) {
+                    showNotification('Select an AI surface first.', 'error');
+                    return;
+                }
+                const section = definition.controls.closest('.settings-section');
+                await openScopedModelEditor(resolved.scope, section, resolved.label);
+            });
+            definition.controls.append(button);
+        }
+
+        const adminPanel = document.getElementById('settings-panel-admin-platform');
+        const title = adminPanel?.querySelector('.settings-panel-title');
+        if (title && !document.getElementById('configure-new-scope-defaults')) {
+            const button = document.createElement('button');
+            button.id = 'configure-new-scope-defaults';
+            button.type = 'button';
+            button.className = 'secondary-button';
+            button.textContent = 'Edit new-scope defaults';
+            button.addEventListener('click', () => openScopedModelEditor(null, adminPanel, 'new AI configurations'));
+            title.insertAdjacentElement('afterend', button);
+        }
+    }
     // Proxy `/models` responses do not include reasoning capabilities. Cache
     // operation-probed results for this settings-page session by exact model id.
     const proxyReasoningEffortCache = new Map();
@@ -271,7 +360,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // and question generation prompts
             if (canManageDB) {
                 await loadAdminSettings();
-                await loadLLMSettings();
+                await loadLLMSettings(null);
                 await loadNotesLlmKey();
                 await loadInstructorSuperchatLlmKey();
                 await loadQuestionPrompts();
@@ -338,13 +427,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         reasoningSelect.replaceChildren(new Option('Checking supported efforts…', '', true, true));
 
         try {
-            let discovery = proxyReasoningEffortCache.get(model);
+            const discoveryKey = `${llmModelScope?.type || 'defaults'}:${llmModelScope?.id || 'new'}:${model}`;
+            let discovery = proxyReasoningEffortCache.get(discoveryKey);
             if (!discovery) {
                 discovery = fetch('/api/settings/llm/reasoning-efforts', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'include',
-                    body: JSON.stringify({ provider: platform.provider, model })
+                    body: JSON.stringify({ provider: platform.provider, model, ...llmScopePayload() })
                 }).then(async response => {
                     const result = await parseJsonResponse(response);
                     if (!response.ok || !result.success) {
@@ -352,7 +442,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                     return result.reasoningEfforts || [];
                 });
-                proxyReasoningEffortCache.set(model, discovery);
+                proxyReasoningEffortCache.set(discoveryKey, discovery);
             }
 
             const efforts = await discovery;
@@ -596,6 +686,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         window.LlmPlatform.refreshSelector(prefix, state);
         window.LlmPlatform.renderKeyStatus(prefix, state);
+        if (state.llmConfigurationStatus === 'needs_admin_configuration') {
+            const status = document.getElementById(`${prefix}-llm-key-status`);
+            if (status) {
+                status.className = 'llm-key-status invalid';
+                status.textContent += ' AI is waiting for a system administrator to select compatible models.';
+            }
+        }
 
         if (state.migration) {
             const running = window.LlmPlatform.renderMigration(prefix, state.migration);
@@ -940,14 +1037,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (rollback) rollback.hidden = !platform.pendingEmbedding;
     }
 
-    async function loadLLMSettings() {
+    async function loadLLMSettings(scope = undefined) {
         try {
-            const response = await fetch('/api/settings/llm', { credentials: 'include' });
+            if (scope !== undefined) llmModelScope = scope;
+            if (scope === undefined && !llmModelScope) {
+                const courseId = await getCurrentCourseId();
+                if (courseId) llmModelScope = { type: 'course', id: courseId };
+            }
+            const query = llmModelScope
+                ? `?scopeType=${encodeURIComponent(llmModelScope.type)}&scopeId=${encodeURIComponent(llmModelScope.id)}`
+                : '';
+            const response = await fetch(`/api/settings/llm${query}`, { credentials: 'include' });
             const result = await response.json();
             if (!result.success) return;
 
             const platforms = Array.isArray(result.platforms) ? result.platforms : [];
             llmPlatformSettings = {};
+            const visibleProviders = new Set(platforms.map(platform => platform.provider));
+            for (const [provider, ui] of Object.entries(LLM_PLATFORM_UI)) {
+                const section = document.getElementById(`${ui.idPrefix}-model-section`);
+                if (section) section.style.display = visibleProviders.has(provider) ? '' : 'none';
+            }
             for (const platform of platforms) {
                 llmPlatformSettings[platform.provider] = platform;
                 renderPlatformModelControls(platform);
@@ -997,6 +1107,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             credentials: 'include',
             body: JSON.stringify({
                 provider,
+                ...llmScopePayload(),
                 chatModel,
                 model: chatModel,
                 reasoningEffort,
@@ -1038,7 +1149,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ provider, embeddingModel })
+            body: JSON.stringify({ provider, embeddingModel, ...llmScopePayload() })
         });
         const impact = await impactResponse.json();
         if (!impactResponse.ok || !impact.success) {
@@ -1066,7 +1177,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ provider, embeddingModel })
+            body: JSON.stringify({ provider, embeddingModel, ...llmScopePayload() })
         });
         const result = await response.json();
         if (!response.ok || !result.success) {
@@ -1082,7 +1193,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ provider })
+            body: JSON.stringify({ provider, ...llmScopePayload() })
         });
         const result = await response.json();
         if (!response.ok || !result.success) {
@@ -3074,6 +3185,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const adminRailGroup = document.getElementById('admin-rail-group');
             if (adminTileGroup) adminTileGroup.hidden = !isAdmin;
             if (adminRailGroup) adminRailGroup.hidden = !isAdmin;
+            if (isAdmin) setupScopedModelButtons();
             renderSettingsView();
         }
 

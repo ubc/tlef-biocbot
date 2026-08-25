@@ -23,12 +23,14 @@ const {
 const {
     activeProviderOf,
     buildKeySubdocument,
+    credentialForProvider,
     decryptApiKey,
     publicKeySummary,
     publicProviderKeyState,
     validateApiKey
 } = require('../services/llmKeyStore');
 const adminModelSettings = require('../services/adminModelSettings');
+const scopeModelSettings = require('../services/scopeModelSettings');
 const providerKeys = require('../services/providerKeyService');
 const migrations = require('../services/providerMigrationService');
 const migrationRunner = require('../services/providerMigrationRunner');
@@ -62,6 +64,37 @@ function requireSystemAdmin(req, res) {
     }
 
     return true;
+}
+
+function requestedLlmScope(req) {
+    const source = req.method === 'GET' ? req.query : (req.body || {});
+    const type = source.scopeType;
+    const id = source.scopeId;
+    if (!type && !id) return null;
+    if (!['course', 'superchat', 'notes', 'superCourseChat'].includes(type) || !id) {
+        const error = new Error('A valid model-settings scopeType and scopeId are required.');
+        error.code = 'INVALID_LLM_SCOPE';
+        throw error;
+    }
+    return { type, id };
+}
+
+async function allModelSettings(db, scope) {
+    return scope
+        ? scopeModelSettings.getAll(db, scope)
+        : adminModelSettings.getAllProviderSettings(db, { force: true, throwOnError: true });
+}
+
+async function oneModelSettings(db, scope, provider) {
+    return scope
+        ? scopeModelSettings.getProviderSettings(db, scope, provider)
+        : adminModelSettings.getProviderSettings(db, provider, { force: true });
+}
+
+function scopedModelRoster(settings = {}) {
+    return settings.modelsDiscovered === true && (!settings.availableModels || settings.availableModels.length === 0)
+        ? ['__no_models_available__']
+        : (settings.availableModels || []);
 }
 
 const SUPER_COURSE_SETTINGS_ID = 'superCourseChat';
@@ -1027,13 +1060,17 @@ router.get('/llm', async (req, res) => {
             return;
         }
 
-        const { providers, pendingEmbedding } = await adminModelSettings.getAllProviderSettings(
-            db,
-            { force: true, throwOnError: true }
-        );
-        const platforms = SELECTABLE_PROVIDERS.map((provider) => {
+        const scope = requestedLlmScope(req);
+        const { providers, pendingEmbedding } = await allModelSettings(db, scope);
+        let visibleProviders = SELECTABLE_PROVIDERS;
+        if (scope) {
+            const target = scopeModelSettings.targetFor(scope);
+            const owner = await db.collection(target.collection).findOne(target.filter);
+            visibleProviders = SELECTABLE_PROVIDERS.filter(provider => credentialForProvider(owner, provider)?.ciphertext);
+        }
+        const platforms = visibleProviders.map((provider) => {
             const current = providers[provider];
-            const catalog = adminCatalogForProvider(provider, current.availableModels);
+            const catalog = adminCatalogForProvider(provider, scopedModelRoster(current));
             const backend = adminModelSettings.chatSettingsForLane(current, 'backend');
             const profile = current.embeddingModel
                 ? buildEmbeddingProfile({
@@ -1055,7 +1092,8 @@ router.get('/llm', async (req, res) => {
                 backendReasoningEffort: backend.reasoningEffort,
                 backendInheritsFrontend: current.backendInheritsFrontend,
                 configured: current.configured,
-                modelsDiscovered: current.availableModels.length > 0,
+                configurationStatus: current.configurationStatus || (current.configured ? 'ready' : 'needs_admin_configuration'),
+                modelsDiscovered: current.modelsDiscovered === true || current.availableModels.length > 0,
                 supportsReasoning: supportsReasoning(provider, current.chatModel),
                 backendSupportsReasoning: supportsReasoning(provider, backend.chatModel),
                 allowedModels: catalog.allowedModels,
@@ -1077,6 +1115,8 @@ router.get('/llm', async (req, res) => {
 
         res.json({
             success: true,
+            scope,
+            isDefaultTemplate: !scope,
             platforms,
             // Legacy single-platform shape, kept so older clients keep working.
             settings: {
@@ -1112,11 +1152,12 @@ router.post('/llm/reasoning-efforts', async (req, res) => {
 
         const provider = normalizeProvider(req.body?.provider);
         const model = req.body?.model;
+        const scope = requestedLlmScope(req);
         if (provider !== PROVIDERS.PROXY) {
             return res.status(400).json({ success: false, error: 'Reasoning discovery is only available for UBC LLM Proxy models.' });
         }
 
-        const current = await adminModelSettings.getProviderSettings(db, provider, { force: true });
+        const current = await oneModelSettings(db, scope, provider);
         if (!current.availableModels.includes(model)) {
             return res.status(400).json({
                 success: false,
@@ -1124,7 +1165,7 @@ router.post('/llm/reasoning-efforts', async (req, res) => {
             });
         }
 
-        const reasoningEfforts = await providerKeys.discoverProxyReasoningEfforts(db, model);
+        const reasoningEfforts = await providerKeys.discoverProxyReasoningEfforts(db, model, scope);
         return res.json({ success: true, provider, model, reasoningEfforts });
     } catch (error) {
         console.error('Error discovering proxy reasoning efforts:', error);
@@ -1149,11 +1190,12 @@ router.post('/llm', async (req, res) => {
         }
 
         const body = req.body || {};
+        const scope = requestedLlmScope(req);
         const provider = normalizeProvider(body.provider, configuredProvider());
         const chatModel = body.chatModel || body.model;
 
         if (provider === PROVIDERS.PROXY) {
-            const current = await adminModelSettings.getProviderSettings(db, provider, { force: true });
+            const current = await oneModelSettings(db, scope, provider);
             const backendInheritsFrontend = typeof body.backendInheritsFrontend === 'boolean'
                 ? body.backendInheritsFrontend
                 : true;
@@ -1172,7 +1214,7 @@ router.post('/llm', async (req, res) => {
                 });
             }
             try {
-                await providerKeys.validateProxyChatSettings(db, selections);
+                await providerKeys.validateProxyChatSettings(db, selections, scope);
             } catch (error) {
                 return res.status(400).json({ success: false, error: error.message, code: error.code });
             }
@@ -1180,7 +1222,23 @@ router.post('/llm', async (req, res) => {
 
         let saved;
         try {
-            saved = await adminModelSettings.saveChatSettings(
+            saved = scope
+                ? await scopeModelSettings.saveChatSettings(
+                    db,
+                    scope,
+                    provider,
+                    {
+                        chatModel,
+                        reasoningEffort: body.reasoningEffort,
+                        backendChatModel: body.backendChatModel,
+                        backendReasoningEffort: body.backendReasoningEffort,
+                        backendInheritsFrontend: typeof body.backendInheritsFrontend === 'boolean'
+                            ? body.backendInheritsFrontend
+                            : undefined
+                    },
+                    normalizeEmail(req.user.email)
+                )
+                : await adminModelSettings.saveChatSettings(
                 db,
                 provider,
                 {
@@ -1207,6 +1265,7 @@ router.post('/llm', async (req, res) => {
             success: true,
             message: `${providerLabel(provider)} chat model updated`,
             provider,
+            scope,
             settings: {
                 model: saved.chatModel,
                 chatModel: saved.chatModel,
@@ -1234,10 +1293,11 @@ router.post('/llm/embedding/impact', async (req, res) => {
         if (!requireSystemAdmin(req, res)) return;
 
         const body = req.body || {};
+        const scope = requestedLlmScope(req);
         const provider = normalizeProvider(body.provider, configuredProvider());
         const embeddingModel = body.embeddingModel;
-        const current = await adminModelSettings.getProviderSettings(db, provider, { force: true });
-        if (!isAllowedEmbeddingModel(provider, embeddingModel, current.availableModels)) {
+        const current = await oneModelSettings(db, scope, provider);
+        if (!isAllowedEmbeddingModel(provider, embeddingModel, scopedModelRoster(current))) {
             return res.status(400).json({
                 success: false,
                 error: `Invalid embedding model for ${providerLabel(provider)}`
@@ -1247,7 +1307,7 @@ router.post('/llm/embedding/impact', async (req, res) => {
         let vectorSize = current.vectorSize || undefined;
         if (provider === PROVIDERS.PROXY) {
             try {
-                ({ vectorSize } = await providerKeys.validateProxyEmbeddingModel(db, embeddingModel));
+                ({ vectorSize } = await providerKeys.validateProxyEmbeddingModel(db, embeddingModel, scope));
             } catch (error) {
                 return res.status(400).json({ success: false, error: error.message, code: error.code });
             }
@@ -1259,7 +1319,9 @@ router.post('/llm/embedding/impact', async (req, res) => {
             revision: body.embeddingRevision || undefined,
             vectorSize
         });
-        const surfaces = await affectedSurfacesForProvider(db, provider);
+        const surfaces = scope
+            ? { ...(await providerKeys.migrationScopeContent(db, scope)), surfaces: [scope] }
+            : { courseIds: [], includeNotes: false, surfaces: [] };
         const work = await migrations.calculateWork({
             db,
             profile,
@@ -1270,6 +1332,7 @@ router.post('/llm/embedding/impact', async (req, res) => {
         res.json({
             success: true,
             provider,
+            scope,
             profile: {
                 key: profile.key,
                 collection: profile.collection,
@@ -1305,12 +1368,13 @@ router.post('/llm/embedding', async (req, res) => {
         if (!requireSystemAdmin(req, res)) return;
 
         const body = req.body || {};
+        const scope = requestedLlmScope(req);
         const provider = normalizeProvider(body.provider, configuredProvider());
         const embeddingModel = body.embeddingModel;
         const embeddingRevision = body.embeddingRevision || undefined;
-        const current = await adminModelSettings.getProviderSettings(db, provider, { force: true });
+        const current = await oneModelSettings(db, scope, provider);
 
-        if (!isAllowedEmbeddingModel(provider, embeddingModel, current.availableModels)) {
+        if (!isAllowedEmbeddingModel(provider, embeddingModel, scopedModelRoster(current))) {
             return res.status(400).json({
                 success: false,
                 error: `Invalid embedding model for ${providerLabel(provider)}`
@@ -1320,7 +1384,7 @@ router.post('/llm/embedding', async (req, res) => {
         let vectorSize = current.vectorSize || undefined;
         if (provider === PROVIDERS.PROXY) {
             try {
-                ({ vectorSize } = await providerKeys.validateProxyEmbeddingModel(db, embeddingModel));
+                ({ vectorSize } = await providerKeys.validateProxyEmbeddingModel(db, embeddingModel, scope));
             } catch (error) {
                 return res.status(400).json({ success: false, error: error.message, code: error.code });
             }
@@ -1334,13 +1398,37 @@ router.post('/llm/embedding', async (req, res) => {
         const sameConfiguredProfile = current.embeddingModel === embeddingModel
             && current.embeddingRevision === profile.revision;
 
+        // The unscoped document is only a template for future AI surfaces. It
+        // has no retrieval pool and therefore changes immediately without a
+        // re-indexing job.
+        if (!scope) {
+            await adminModelSettings.stagePendingEmbedding(db, provider, {
+                embeddingModel,
+                embeddingRevision: profile.revision,
+                vectorSize: profile.vectorSize,
+                migrationId: null
+            });
+            await adminModelSettings.activatePendingEmbedding(db, provider, {
+                embeddingModel,
+                embeddingRevision: profile.revision
+            });
+            invalidateModelCaches(req);
+            return res.json({
+                success: true,
+                message: `${providerLabel(provider)} default embedding model updated for future AI configurations.`,
+                provider,
+                scope: null,
+                migration: null
+            });
+        }
+
         // A collection-routing or chunking change can make records stale even
         // when the configured model id/revision did not change. Calculate work
         // before declaring a no-op so an installation that previously mixed
         // OpenAI and Proxy vectors can rebuild Proxy into its isolated collection.
         let surfaces = null;
         if (sameConfiguredProfile) {
-            surfaces = await affectedSurfacesForProvider(db, provider);
+            surfaces = await providerKeys.migrationScopeContent(db, scope);
             const work = await migrations.calculateWork({
                 db,
                 profile,
@@ -1356,9 +1444,7 @@ router.post('/llm/embedding', async (req, res) => {
             }
         }
 
-        const scope = { type: 'adminEmbedding', id: provider };
-
-        // One embedding change at a time per platform. Two overlapping jobs
+        // One embedding change at a time per scope/platform. Two overlapping jobs
         // would fight over the single staged setting, and the first to finish
         // would activate a model the other is still indexing.
         const active = await migrations.findActiveMigration(db, scope);
@@ -1372,7 +1458,7 @@ router.post('/llm/embedding', async (req, res) => {
             });
         }
 
-        surfaces ||= await affectedSurfacesForProvider(db, provider);
+        surfaces ||= await providerKeys.migrationScopeContent(db, scope);
         const { job } = await migrations.createMigration(db, {
             scope,
             kind: 'embedding-model',
@@ -1384,7 +1470,7 @@ router.post('/llm/embedding', async (req, res) => {
             requestedBy: normalizeEmail(req.user.email)
         });
 
-        await adminModelSettings.stagePendingEmbedding(db, provider, {
+        await scopeModelSettings.stagePendingEmbedding(db, scope, provider, {
             embeddingModel,
             embeddingRevision: profile.revision,
             vectorSize: profile.vectorSize,
@@ -1398,6 +1484,7 @@ router.post('/llm/embedding', async (req, res) => {
             message: `Re-indexing for the new ${providerLabel(provider)} embedding model. `
                 + 'The current embedding model stays active until it finishes.',
             provider,
+            scope,
             migration: migrations.publicMigrationView(job)
         });
     } catch (error) {
@@ -1423,12 +1510,13 @@ router.post('/llm/embedding/rollback', async (req, res) => {
         }
         if (!requireSystemAdmin(req, res)) return;
 
+        const scope = requestedLlmScope(req);
         const provider = normalizeProvider((req.body || {}).provider, configuredProvider());
 
         // Read the staged change before clearing it — it holds the id of the
         // background job that would otherwise keep re-embedding into a profile
         // nobody is going to use.
-        const { pendingEmbedding } = await adminModelSettings.getAllProviderSettings(db, { force: true });
+        const { pendingEmbedding } = await allModelSettings(db, scope);
         const pending = pendingEmbedding[provider];
         let cleanup = null;
 
@@ -1444,7 +1532,8 @@ router.post('/llm/embedding/rollback', async (req, res) => {
             }
         }
 
-        await adminModelSettings.clearPendingEmbedding(db, provider);
+        if (scope) await scopeModelSettings.clearPendingEmbedding(db, scope, provider);
+        else await adminModelSettings.clearPendingEmbedding(db, provider);
         invalidateModelCaches(req);
 
         res.json({
