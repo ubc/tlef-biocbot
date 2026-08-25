@@ -1226,13 +1226,17 @@ test.describe('Instructor settings UI', () => {
 
         await expect.poll(async () => Boolean(await findCourseByName(copyName)), { timeout: 15_000 }).toBe(true);
         const copiedCourse = await findCourseByName(copyName);
-        const sourceCourse = await readCourse();
         const unit1 = copiedCourse.lectures.find((lecture) => lecture.name === 'Unit 1');
         const unit2 = copiedCourse.lectures.find((lecture) => lecture.name === 'Unit 2');
 
         await expect(page).toHaveURL(new RegExp(`/instructor/settings\\?courseId=${copiedCourse.courseId}`), {
             timeout: 15_000,
         });
+
+        // The copy document appears part-way through the request; deactivating
+        // the source is one of the last things the handler does. Read the source
+        // only once the redirect proves the whole transfer returned.
+        const sourceCourse = await readCourse();
         expect(sourceCourse.status).toBe('inactive');
         expect(copiedCourse.status).toBe('active');
         expect(copiedCourse.instructorId).toBe(instructorId);
