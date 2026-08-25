@@ -1,6 +1,14 @@
 const models = require('../../../src/services/llmModels');
 
 describe('provider-aware LLM model catalog', () => {
+    test('reuses exact built-in reasoning capabilities through the Proxy', () => {
+        expect(models.knownReasoningEffortsForModel('qwen3.6-35b-a3b'))
+            .toEqual(['none', 'low', 'medium', 'high']);
+        expect(models.knownDefaultReasoningEffortForModel('qwen3.6-35b-a3b')).toBe('none');
+        expect(models.knownReasoningEffortsForModel('unlisted-proxy-model')).toBeNull();
+        expect(models.knownDefaultReasoningEffortForModel('unlisted-proxy-model')).toBeNull();
+    });
+
     test('exposes the OpenAI catalog and preserves existing reasoning rules', () => {
         const catalog = models.catalogForProvider('openai', 'gpt-5-nano');
         expect(catalog.defaultModel).toBe('gpt-5-nano');

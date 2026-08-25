@@ -165,6 +165,20 @@ function reasoningEffortsForModel(provider, model) {
     return [...modelProfile(provider, model).reasoningEfforts];
 }
 
+/**
+ * Return an exact built-in model's reasoning profile without applying provider
+ * policy. The same model keeps its capabilities when reached through the
+ * uncurated Proxy. Unknown ids return null and require live discovery.
+ */
+function knownReasoningEffortsForModel(model) {
+    const profile = MODEL_PROFILES[model];
+    return profile ? [...profile.reasoningEfforts] : null;
+}
+
+function knownDefaultReasoningEffortForModel(model) {
+    return MODEL_PROFILES[model]?.defaultReasoningEffort || null;
+}
+
 function supportsReasoning(provider, model) {
     return reasoningEffortsForModel(provider, model).length > 0;
 }
@@ -239,6 +253,8 @@ module.exports = {
     exactDiscoveredModels,
     fallbackModelForProvider,
     isAllowedEmbeddingModel,
+    knownDefaultReasoningEffortForModel,
+    knownReasoningEffortsForModel,
     maxOutputTokensForModel,
     normalizeReasoningEffort,
     reasoningEffortsForModel,

@@ -21,13 +21,18 @@ const config = require('./config');
 const migrations = require('./providerMigrationService');
 const migrationRunner = require('./providerMigrationRunner');
 const superCourse = require('./superCourseService');
-const { buildEmbeddingProfile, vectorSizeForEmbeddingModel } = require('./embeddingConfig');
+const {
+    buildEmbeddingProfile,
+    knownVectorSizeForEmbeddingModel,
+    vectorSizeForEmbeddingModel
+} = require('./embeddingConfig');
 const { PROVIDERS, normalizeProvider, providerLabel } = require('./llmProviders');
 const {
     PROXY_REASONING_EFFORTS,
     allowedEmbeddingModelsForProvider,
     allowedModelsForProvider,
-    configuredDefaultModel
+    configuredDefaultModel,
+    knownReasoningEffortsForModel
 } = require('./llmModels');
 const {
     KEY_STATUSES,
@@ -53,6 +58,7 @@ const PROXY_DEFAULT_CONFIGURATIONS = Object.freeze([
         embeddingModel: 'qwen3-embedding-0.6b'
     }
 ]);
+const PROXY_VALIDATION_TIMEOUT_MS = 10_000;
 
 function proxyDefaultConfiguration(models) {
     const roster = Array.isArray(models) ? models : [];
@@ -89,7 +95,8 @@ async function validateForProvider(db, provider, apiKey, options = {}) {
         apiKey,
         chatModel: settings.chatModel,
         embeddingModel: settings.embeddingModel,
-        endpoint
+        endpoint,
+        timeoutMs: options.timeoutMs
     });
 
     if (!validation.ok) {
@@ -107,7 +114,7 @@ async function validateForProvider(db, provider, apiKey, options = {}) {
         ];
     }
 
-    if (normalizedProvider !== PROVIDERS.PROXY) return validation;
+    if (normalizedProvider !== PROVIDERS.PROXY || options.validateConfiguration === false) return validation;
 
     const current = settings;
     const discoveredDefault = proxyDefaultConfiguration(validation.models);
@@ -201,13 +208,18 @@ async function validateProxyOperations({ apiKey, endpoint, chatSelections = [], 
         ...(embeddingModel ? { embeddingModel } : {})
     });
 
-    for (const selection of chatSelections) {
+    let vectorSize = null;
+    const operations = chatSelections.map(async selection => {
         try {
-            await llm.sendMessage('BiocBot model validation', {
-                model: selection.model,
-                reasoningEffort: selection.reasoningEffort,
-                maxTokens: 16
-            });
+            await withTimeout(
+                llm.sendMessage('BiocBot model validation', {
+                    model: selection.model,
+                    reasoningEffort: selection.reasoningEffort,
+                    maxTokens: 16
+                }),
+                PROXY_VALIDATION_TIMEOUT_MS,
+                `${selection.model} did not answer the chat validation within ${PROXY_VALIDATION_TIMEOUT_MS} ms.`
+            );
         } catch (cause) {
             const error = incompatibleModelError(
                 selection.model,
@@ -217,28 +229,34 @@ async function validateProxyOperations({ apiKey, endpoint, chatSelections = [], 
             error.cause = cause;
             throw error;
         }
-    }
+    });
 
-    let vectorSize = null;
     if (embeddingModel) {
-        try {
-            const response = await llm.embed(['BiocBot embedding validation'], { model: embeddingModel });
-            const vector = response?.embeddings?.[0];
-            if (!Array.isArray(vector) || vector.length === 0) {
-                throw new Error('The proxy returned an empty or invalid embedding vector.');
+        operations.push((async () => {
+            try {
+                const response = await withTimeout(
+                    llm.embed(['BiocBot embedding validation'], { model: embeddingModel }),
+                    PROXY_VALIDATION_TIMEOUT_MS,
+                    `${embeddingModel} did not answer the embedding validation within ${PROXY_VALIDATION_TIMEOUT_MS} ms.`
+                );
+                const vector = response?.embeddings?.[0];
+                if (!Array.isArray(vector) || vector.length === 0) {
+                    throw new Error('The proxy returned an empty or invalid embedding vector.');
+                }
+                vectorSize = vector.length;
+            } catch (cause) {
+                const error = incompatibleModelError(
+                    embeddingModel,
+                    cause.message || 'The proxy rejected the embedding request.',
+                    'embeddings'
+                );
+                error.cause = cause;
+                throw error;
             }
-            vectorSize = vector.length;
-        } catch (cause) {
-            const error = incompatibleModelError(
-                embeddingModel,
-                cause.message || 'The proxy rejected the embedding request.',
-                'embeddings'
-            );
-            error.cause = cause;
-            throw error;
-        }
+        })());
     }
 
+    await Promise.all(operations);
     return { vectorSize };
 }
 
@@ -283,16 +301,87 @@ async function validateProxyChatSettings(db, selections, scope = null) {
         error.code = 'PROXY_ENDPOINT_MISSING';
         throw error;
     }
-    return validateProxyOperations({ apiKey, endpoint, chatSelections: selections });
+    const unknownSelections = [];
+    for (const selection of selections) {
+        const knownEfforts = knownReasoningEffortsForModel(selection.model);
+        if (!knownEfforts) {
+            unknownSelections.push(selection);
+            continue;
+        }
+        if (knownEfforts.length > 0 && !knownEfforts.includes(selection.reasoningEffort)) {
+            throw incompatibleModelError(
+                selection.model,
+                `Reasoning effort "${selection.reasoningEffort}" is not supported.`,
+                'chat'
+            );
+        }
+    }
+    if (unknownSelections.length === 0) return { vectorSize: null };
+    return validateProxyOperations({ apiKey, endpoint, chatSelections: unknownSelections });
+}
+
+function withTimeout(promise, timeoutMs, message) {
+    let timeout;
+    const deadline = new Promise((_, reject) => {
+        timeout = setTimeout(() => {
+            const error = new Error(message);
+            error.code = 'PROXY_OPERATION_TIMEOUT';
+            reject(error);
+        }, timeoutMs);
+    });
+
+    return Promise.race([promise, deadline]).finally(() => clearTimeout(timeout));
+}
+
+/**
+ * Probe every effort concurrently so discovery has one bounded wall-clock
+ * cost. Running these calls serially can exceed an upstream HTTP timeout even
+ * when each individual completion succeeds.
+ */
+async function probeProxyReasoningEfforts(llm, model, options = {}) {
+    const reasoningEfforts = options.reasoningEfforts || PROXY_REASONING_EFFORTS;
+    const timeoutMs = options.timeoutMs || PROXY_VALIDATION_TIMEOUT_MS;
+    const results = await Promise.all(reasoningEfforts.map(async reasoningEffort => {
+        try {
+            await withTimeout(
+                llm.sendMessage('Reply with OK.', {
+                    model,
+                    reasoningEffort,
+                    maxTokens: 32
+                }),
+                timeoutMs,
+                `${model} did not answer the ${reasoningEffort} reasoning probe within ${timeoutMs} ms.`
+            );
+            return { reasoningEffort, supported: true };
+        } catch (error) {
+            return { reasoningEffort, supported: false, error };
+        }
+    }));
+
+    const supported = results
+        .filter(result => result.supported)
+        .map(result => result.reasoningEffort);
+
+    if (supported.length === 0) {
+        const firstFailure = results.find(result => result.error)?.error;
+        const error = incompatibleModelError(
+            model,
+            firstFailure?.message || 'No supported reasoning efforts were detected.',
+            'reasoning discovery'
+        );
+        error.cause = firstFailure;
+        throw error;
+    }
+
+    return supported;
 }
 
 /**
  * Discover the normalized reasoning efforts accepted by one proxy model.
  *
- * `/models` deliberately returns no capability metadata, so this uses the
- * provider operation as the source of truth. Model ids and naming conventions
- * are never inspected. A small request is made for each toolkit-supported
- * effort and only successful values are returned to the admin UI.
+ * `/models` deliberately returns no capability metadata. Exact models already
+ * in BiocBot reuse their tested local profile; unknown ids use bounded provider
+ * operations and return only the values those operations accept.
  */
 async function discoverProxyReasoningEfforts(db, model, scope = null) {
     if (!model || typeof model !== 'string') {
@@ -316,34 +405,15 @@ async function discoverProxyReasoningEfforts(db, model, scope = null) {
         throw error;
     }
 
+    // Exact models already supported directly by BiocBot have a tested local
+    // capability profile. Avoid a slow/cold generation merely to rediscover
+    // those values through the Proxy. Saving still validates the selected
+    // model/effort with a real chat operation.
+    const knownEfforts = knownReasoningEffortsForModel(model);
+    if (knownEfforts) return knownEfforts;
+
     const llm = new LLMModule({ provider: PROVIDERS.PROXY, apiKey, endpoint });
-    const supported = [];
-    let firstFailure = null;
-
-    for (const reasoningEffort of PROXY_REASONING_EFFORTS) {
-        try {
-            await llm.sendMessage('Reply with OK.', {
-                model,
-                reasoningEffort,
-                maxTokens: 32
-            });
-            supported.push(reasoningEffort);
-        } catch (error) {
-            firstFailure ||= error;
-        }
-    }
-
-    if (supported.length === 0) {
-        const error = incompatibleModelError(
-            model,
-            firstFailure?.message || 'No supported reasoning efforts were detected.',
-            'reasoning discovery'
-        );
-        error.cause = firstFailure;
-        throw error;
-    }
-
-    return supported;
+    return probeProxyReasoningEfforts(llm, model);
 }
 
 async function validateProxyEmbeddingModel(db, embeddingModel, scope = null) {
@@ -354,6 +424,8 @@ async function validateProxyEmbeddingModel(db, embeddingModel, scope = null) {
         error.code = 'PROXY_ENDPOINT_MISSING';
         throw error;
     }
+    const knownVectorSize = knownVectorSizeForEmbeddingModel(embeddingModel);
+    if (knownVectorSize) return { vectorSize: knownVectorSize };
     return validateProxyOperations({ apiKey, endpoint, embeddingModel });
 }
 
@@ -676,7 +748,7 @@ async function testSurfaceKey(db, { scope, provider = null, registry = null }) {
         db,
         targetProvider,
         decryptApiKey(credential.ciphertext),
-        { scope }
+        { scope, validateConfiguration: false }
     );
     const now = new Date();
     const status = validation.ok ? KEY_STATUSES.VALID : validation.status;
@@ -849,5 +921,6 @@ module.exports = {
     validateForProvider,
     validateProxyChatSettings,
     validateProxyEmbeddingModel,
-    discoverProxyReasoningEfforts
+    discoverProxyReasoningEfforts,
+    probeProxyReasoningEfforts
 };

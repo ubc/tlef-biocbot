@@ -235,6 +235,7 @@ describe('POST /llm — chat model changes are immediate', () => {
             expect(res.status).toBe(200);
             expect(res.body.reasoningEfforts).toEqual(['none', 'low', 'medium', 'high', 'xhigh', 'max']);
             expect(res.body.reasoningEfforts).not.toContain('minimal');
+            expect(res.body.defaultReasoningEffort).toBe('low');
         } finally {
             if (oldStub === undefined) delete process.env.BIOCBOT_TEST_LLM_STUB;
             else process.env.BIOCBOT_TEST_LLM_STUB = oldStub;

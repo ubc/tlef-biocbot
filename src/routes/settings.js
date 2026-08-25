@@ -17,6 +17,7 @@ const {
     configuredDefaultModel,
     configuredProvider,
     isAllowedEmbeddingModel,
+    knownDefaultReasoningEffortForModel,
     normalizeReasoningEffort,
     supportsReasoning
 } = require('../services/llmModels');
@@ -1138,9 +1139,9 @@ router.get('/llm', async (req, res) => {
 
 /**
  * POST /api/settings/llm/reasoning-efforts
- * Probe one discovered proxy model and return only reasoning efforts accepted
- * by a real chat operation. The proxy roster does not expose capabilities, so
- * this intentionally does not infer support from the model id.
+ * Return reasoning efforts for one discovered Proxy model. Exact models with a
+ * built-in BiocBot profile use it immediately; unknown ids are checked through
+ * bounded chat operations because the Proxy roster exposes no capabilities.
  */
 router.post('/llm/reasoning-efforts', async (req, res) => {
     try {
@@ -1166,7 +1167,13 @@ router.post('/llm/reasoning-efforts', async (req, res) => {
         }
 
         const reasoningEfforts = await providerKeys.discoverProxyReasoningEfforts(db, model, scope);
-        return res.json({ success: true, provider, model, reasoningEfforts });
+        return res.json({
+            success: true,
+            provider,
+            model,
+            reasoningEfforts,
+            defaultReasoningEffort: knownDefaultReasoningEffortForModel(model)
+        });
     } catch (error) {
         console.error('Error discovering proxy reasoning efforts:', error);
         return res.status(400).json({ success: false, error: error.message, code: error.code });

@@ -469,9 +469,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         reasoningItem.style.display = '';
         reasoningSelect.disabled = true;
         reasoningSelect.replaceChildren(new Option('Checking supported efforts…', '', true, true));
+        const discoveryKey = `${llmModelScope?.type || 'defaults'}:${llmModelScope?.id || 'new'}:${model}`;
 
         try {
-            const discoveryKey = `${llmModelScope?.type || 'defaults'}:${llmModelScope?.id || 'new'}:${model}`;
             let discovery = proxyReasoningEffortCache.get(discoveryKey);
             if (!discovery) {
                 discovery = fetch('/api/settings/llm/reasoning-efforts', {
@@ -484,18 +484,27 @@ document.addEventListener('DOMContentLoaded', async () => {
                     if (!response.ok || !result.success) {
                         throw new Error(result.error || 'Unable to detect supported reasoning efforts');
                     }
-                    return result.reasoningEfforts || [];
+                    return {
+                        efforts: result.reasoningEfforts || [],
+                        defaultReasoningEffort: result.defaultReasoningEffort || null
+                    };
                 });
                 proxyReasoningEffortCache.set(discoveryKey, discovery);
             }
 
-            const efforts = await discovery;
+            const { efforts, defaultReasoningEffort } = await discovery;
             platform.reasoningEffortsByModel ||= {};
             platform.defaultReasoningEffortByModel ||= {};
             platform.reasoningEffortsByModel[model] = efforts;
-            platform.defaultReasoningEffortByModel[model] = efforts.includes(previouslySelected)
-                ? previouslySelected
-                : efforts.includes('low') ? 'low' : efforts[0];
+            const savedModel = lane === 'backend' ? platform.backendChatModel : platform.chatModel;
+            const savedEffort = lane === 'backend' ? platform.backendReasoningEffort : platform.reasoningEffort;
+            platform.defaultReasoningEffortByModel[model] = savedModel === model && efforts.includes(savedEffort)
+                ? savedEffort
+                : efforts.includes(defaultReasoningEffort)
+                    ? defaultReasoningEffort
+                    : efforts.includes(previouslySelected)
+                        ? previouslySelected
+                        : efforts.includes('low') ? 'low' : efforts[0];
 
             reasoningSelect.replaceChildren();
             updateReasoningVisibility(
@@ -506,7 +515,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             );
             discoverySucceeded = true;
         } catch (error) {
-            proxyReasoningEffortCache.delete(model);
+            proxyReasoningEffortCache.delete(discoveryKey);
             reasoningSelect.replaceChildren(new Option('Reasoning check failed', '', true, true));
             reasoningItem.style.display = '';
             showNotification(error.message, 'error');
@@ -1137,6 +1146,21 @@ document.addEventListener('DOMContentLoaded', async () => {
      * confirmation, the change is staged — one Save button, no second control
      * that silently owns half the section.
      */
+    async function fetchModelSettings(url, options) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15_000);
+        try {
+            return await fetch(url, { ...options, signal: controller.signal });
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                throw new Error('The model-settings request timed out. Please try again.');
+            }
+            throw error;
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
     async function savePlatformModelSettings(provider) {
         const { idPrefix, label } = LLM_PLATFORM_UI[provider];
         const chatModel = document.getElementById(`${idPrefix}-model-select`)?.value;
@@ -1147,7 +1171,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!chatModel) throw new Error('Select a model first');
         if (!backendInheritsFrontend && !backendChatModel) throw new Error('Select a back-end model first');
 
-        const response = await fetch('/api/settings/llm', {
+        const response = await fetchModelSettings('/api/settings/llm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
@@ -1191,7 +1215,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return false;
         }
 
-        const impactResponse = await fetch('/api/settings/llm/embedding/impact', {
+        const impactResponse = await fetchModelSettings('/api/settings/llm/embedding/impact', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
@@ -1219,7 +1243,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         );
         if (!confirmed) return false;
 
-        const response = await fetch('/api/settings/llm/embedding', {
+        const response = await fetchModelSettings('/api/settings/llm/embedding', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',

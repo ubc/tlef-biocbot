@@ -27,6 +27,19 @@ const CONTACT_EMAIL = SUPPORT_EMAIL;
 const CIPHER_VERSION = 'v1';
 const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings';
+const PROVIDER_VALIDATION_TIMEOUT_MS = 10_000;
+
+function withValidationTimeout(promise, timeoutMs, message) {
+    let timeout;
+    const deadline = new Promise((_, reject) => {
+        timeout = setTimeout(() => {
+            const error = new Error(message);
+            error.code = 'LLM_VALIDATION_TIMEOUT';
+            reject(error);
+        }, timeoutMs);
+    });
+    return Promise.race([promise, deadline]).finally(() => clearTimeout(timeout));
+}
 
 // Field names for the per-surface provider state. Each keyed surface (course,
 // bucket, notes, instructor Super Course chat) carries its own copy — keys are
@@ -570,7 +583,14 @@ function validationFailure(status, error, provider) {
  * @param {string} [options.endpoint] - Required for the sandbox provider
  * @returns {Promise<{ok: boolean, status: string, provider: string, models?: string[], message?: string, detail?: string}>}
  */
-async function validateProviderKey({ provider, apiKey, chatModel, embeddingModel, endpoint } = {}) {
+async function validateProviderKey({
+    provider,
+    apiKey,
+    chatModel,
+    embeddingModel,
+    endpoint,
+    timeoutMs = PROVIDER_VALIDATION_TIMEOUT_MS
+} = {}) {
     const normalizedProvider = normalizeProvider(provider);
     const trimmed = normalizeApiKey(apiKey);
     if (!trimmed) {
@@ -604,7 +624,11 @@ async function validateProviderKey({ provider, apiKey, chatModel, embeddingModel
                 apiKey: trimmed,
                 endpoint: base
             });
-            const models = await llm.getAvailableModels();
+            const models = await withValidationTimeout(
+                llm.getAvailableModels(),
+                timeoutMs,
+                `The UBC LLM Proxy did not return its model list within ${timeoutMs} ms.`
+            );
             if (!Array.isArray(models) || models.length === 0) {
                 throw new Error('The proxy returned no models for this API key');
             }

@@ -62,6 +62,10 @@ function vectorSizeForEmbeddingModel(model, override = process.env.QDRANT_VECTOR
     return EMBEDDING_VECTOR_SIZES[model] || positiveInteger(override, 768);
 }
 
+function knownVectorSizeForEmbeddingModel(model) {
+    return EMBEDDING_VECTOR_SIZES[model] || null;
+}
+
 function slugify(value) {
     return String(value || '')
         .toLowerCase()
@@ -235,6 +239,7 @@ module.exports = {
     chunkingSignature,
     collectionNameForEmbedding,
     embeddingProfileKey,
+    knownVectorSizeForEmbeddingModel,
     modelCollectionSuffix,
     parseEmbeddingProfileKey,
     positiveInteger,

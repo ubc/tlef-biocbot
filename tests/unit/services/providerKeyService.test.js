@@ -26,6 +26,7 @@ jest.mock('../../../src/services/llmKeyStore', () => {
 });
 
 const providerKeys = require('../../../src/services/providerKeyService');
+const { LLMModule } = require('ubc-genai-toolkit-llm');
 const migrations = require('../../../src/services/providerMigrationService');
 const adminModelSettings = require('../../../src/services/adminModelSettings');
 const { buildKeySubdocument } = require('../../../src/services/llmKeyStore');
@@ -132,6 +133,120 @@ describe('validating against the right platform', () => {
             if (oldEfforts === undefined) delete process.env.BIOCBOT_TEST_PROXY_REASONING_EFFORTS;
             else process.env.BIOCBOT_TEST_PROXY_REASONING_EFFORTS = oldEfforts;
         }
+    });
+
+    test('known Qwen reasoning efforts do not wait for a live discovery completion', async () => {
+        const oldStub = process.env.BIOCBOT_TEST_LLM_STUB;
+        delete process.env.BIOCBOT_TEST_LLM_STUB;
+        const db = memoryDb({
+            courses: [{
+                courseId: 'C1',
+                llmCredentials: { [PROXY]: buildKeySubdocument('prx-qwen-key', 'i1', PROXY) }
+            }]
+        });
+        const sendMessage = jest.spyOn(LLMModule.prototype, 'sendMessage');
+
+        try {
+            await expect(providerKeys.discoverProxyReasoningEfforts(
+                db,
+                'qwen3.6-35b-a3b',
+                COURSE_SCOPE
+            )).resolves.toEqual(['none', 'low', 'medium', 'high']);
+            expect(sendMessage).not.toHaveBeenCalled();
+        } finally {
+            sendMessage.mockRestore();
+            if (oldStub === undefined) delete process.env.BIOCBOT_TEST_LLM_STUB;
+            else process.env.BIOCBOT_TEST_LLM_STUB = oldStub;
+        }
+    });
+
+    test('known Qwen chat and embedding settings save without live validation calls', async () => {
+        const oldStub = process.env.BIOCBOT_TEST_LLM_STUB;
+        delete process.env.BIOCBOT_TEST_LLM_STUB;
+        const db = memoryDb({
+            courses: [{
+                courseId: 'C1',
+                llmCredentials: { [PROXY]: buildKeySubdocument('prx-qwen-key', 'i1', PROXY) }
+            }]
+        });
+        const sendMessage = jest.spyOn(LLMModule.prototype, 'sendMessage');
+        const embed = jest.spyOn(LLMModule.prototype, 'embed');
+
+        try {
+            await expect(providerKeys.validateProxyChatSettings(db, [{
+                model: 'qwen3.6-35b-a3b', reasoningEffort: 'low'
+            }], COURSE_SCOPE)).resolves.toEqual({ vectorSize: null });
+            await expect(providerKeys.validateProxyEmbeddingModel(
+                db,
+                'qwen3-embedding-0.6b',
+                COURSE_SCOPE
+            )).resolves.toEqual({ vectorSize: 1024 });
+            expect(sendMessage).not.toHaveBeenCalled();
+            expect(embed).not.toHaveBeenCalled();
+        } finally {
+            sendMessage.mockRestore();
+            embed.mockRestore();
+            if (oldStub === undefined) delete process.env.BIOCBOT_TEST_LLM_STUB;
+            else process.env.BIOCBOT_TEST_LLM_STUB = oldStub;
+        }
+    });
+
+    test('known Qwen settings reject unsupported effort values without a provider call', async () => {
+        const oldStub = process.env.BIOCBOT_TEST_LLM_STUB;
+        delete process.env.BIOCBOT_TEST_LLM_STUB;
+        const db = memoryDb({
+            courses: [{
+                courseId: 'C1',
+                llmCredentials: { [PROXY]: buildKeySubdocument('prx-qwen-key', 'i1', PROXY) }
+            }]
+        });
+        const sendMessage = jest.spyOn(LLMModule.prototype, 'sendMessage');
+
+        try {
+            await expect(providerKeys.validateProxyChatSettings(db, [{
+                model: 'qwen3.6-35b-a3b', reasoningEffort: 'max'
+            }], COURSE_SCOPE)).rejects.toMatchObject({ code: 'MODEL_OPERATION_INCOMPATIBLE' });
+            expect(sendMessage).not.toHaveBeenCalled();
+        } finally {
+            sendMessage.mockRestore();
+            if (oldStub === undefined) delete process.env.BIOCBOT_TEST_LLM_STUB;
+            else process.env.BIOCBOT_TEST_LLM_STUB = oldStub;
+        }
+    });
+
+    test('proxy reasoning probes run concurrently and preserve effort order', async () => {
+        const pending = new Map();
+        const llm = {
+            sendMessage: jest.fn((_, options) => new Promise((resolve, reject) => {
+                pending.set(options.reasoningEffort, { resolve, reject });
+            }))
+        };
+        const efforts = ['none', 'low', 'high'];
+
+        const discovery = providerKeys.probeProxyReasoningEfforts(llm, 'proxy-chat', {
+            reasoningEfforts: efforts,
+            timeoutMs: 1000
+        });
+        await Promise.resolve();
+
+        expect(llm.sendMessage).toHaveBeenCalledTimes(3);
+        pending.get('high').resolve({ content: 'OK' });
+        pending.get('none').resolve({ content: 'OK' });
+        pending.get('low').reject(new Error('unsupported'));
+
+        await expect(discovery).resolves.toEqual(['none', 'high']);
+    });
+
+    test('proxy reasoning discovery has a bounded deadline', async () => {
+        const llm = { sendMessage: jest.fn(() => new Promise(() => {})) };
+
+        await expect(providerKeys.probeProxyReasoningEfforts(llm, 'slow-model', {
+            reasoningEfforts: ['none'],
+            timeoutMs: 5
+        })).rejects.toMatchObject({
+            code: 'MODEL_OPERATION_INCOMPATIBLE',
+            cause: expect.objectContaining({ code: 'PROXY_OPERATION_TIMEOUT' })
+        });
     });
 });
 
@@ -504,6 +619,50 @@ describe('testing a stored key', () => {
         const course = await db.collection('courses').findOne({ courseId: 'C1' });
         expect(course.llmCredentials[OPENAI].status).toBe('invalid');
         expect(course.llmCredentials[OPENAI].ciphertext).toBeTruthy();
+    });
+
+    test('testing a Proxy key checks the roster without rerunning model operations', async () => {
+        const db = memoryDb({
+            courses: [{
+                courseId: 'C1',
+                activeLlmProvider: PROXY,
+                llmCredentials: { [PROXY]: buildKeySubdocument('prx-key', 'i1', PROXY) },
+                llmModelSettings: {
+                    providers: {
+                        [PROXY]: {
+                            chatModel: 'qwen3.6-35b-a3b',
+                            reasoningEffort: 'none',
+                            embeddingModel: 'qwen3-embedding-0.6b',
+                            vectorSize: 1024,
+                            configurationStatus: 'ready'
+                        }
+                    }
+                }
+            }]
+        });
+        mockValidateProviderKey.mockResolvedValue({
+            ok: true,
+            status: 'valid',
+            provider: PROXY,
+            models: ['qwen3.6-35b-a3b', 'qwen3-embedding-0.6b']
+        });
+        const sendMessage = jest.spyOn(LLMModule.prototype, 'sendMessage');
+        const embed = jest.spyOn(LLMModule.prototype, 'embed');
+
+        try {
+            const result = await providerKeys.testSurfaceKey(db, { scope: COURSE_SCOPE, provider: PROXY });
+
+            expect(result.httpStatus).toBe(200);
+            expect(mockValidateProviderKey).toHaveBeenCalledWith(expect.objectContaining({
+                provider: PROXY,
+                apiKey: 'prx-key'
+            }));
+            expect(sendMessage).not.toHaveBeenCalled();
+            expect(embed).not.toHaveBeenCalled();
+        } finally {
+            sendMessage.mockRestore();
+            embed.mockRestore();
+        }
     });
 
     test('testing a platform with no stored key reports LLM_KEY_MISSING', async () => {
