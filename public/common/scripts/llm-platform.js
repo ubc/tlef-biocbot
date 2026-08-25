@@ -124,7 +124,9 @@
 
         panel.innerHTML = [
             `<p class="llm-migration-status" id="${prefix}-llm-migration-status"></p>`,
+            `<p class="llm-migration-detail" id="${prefix}-llm-migration-detail" hidden></p>`,
             `<progress class="llm-migration-progress" id="${prefix}-llm-migration-progress" max="100" value="0"></progress>`,
+            `<p class="llm-migration-failures-label" id="${prefix}-llm-migration-failures-label" hidden></p>`,
             `<ul class="llm-migration-failures" id="${prefix}-llm-migration-failures"></ul>`,
             `<div class="llm-migration-actions">`,
             `<button type="button" class="secondary-button llm-migration-retry" id="${prefix}-llm-migration-retry" hidden>Retry failed items</button>`,
@@ -264,8 +266,10 @@
             return `${target} is ready and active. ${done} of ${total} item(s) prepared.`;
         }
         if (migration.status === 'failed') {
-            return `Preparing material for ${target} stopped with ${failed} failure(s). `
-                + 'The previous platform is still active.';
+            // The server names the cause in a person's words; the raw provider
+            // error is logged to the console instead of shown here.
+            return (migration.failureSummary && migration.failureSummary.headline)
+                || `${target} could not prepare ${failed} item(s).`;
         }
         if (migration.status === 'cancelled') {
             return `Preparation for ${target} was cancelled. The previous platform is still active.`;
@@ -305,14 +309,53 @@
             progress.value = total === 0 ? 100 : Math.round(((migration.completed || 0) / total) * 100);
         }
 
+        const summary = migration.failureSummary || null;
+
+        const detail = document.getElementById(`${prefix}-llm-migration-detail`);
+        if (detail) {
+            detail.hidden = !summary;
+            detail.textContent = summary ? summary.detail : '';
+        }
+
+        const failureList = migration.failures || [];
+        const label = document.getElementById(`${prefix}-llm-migration-failures-label`);
+        if (label) {
+            label.hidden = failureList.length === 0;
+            label.textContent = failureList.length === 1
+                ? 'This item was affected:'
+                : `These ${failureList.length} items were affected:`;
+        }
+
         const failures = document.getElementById(`${prefix}-llm-migration-failures`);
         if (failures) {
             failures.innerHTML = '';
-            for (const failure of migration.failures || []) {
+            const affected = (summary && summary.affected) || [];
+            failureList.forEach((failure, index) => {
                 const item = document.createElement('li');
-                item.textContent = `${failure.title || failure.itemId}: ${failure.error}`;
+                const title = failure.title || failure.itemId;
+                // A cause per file only when the job failed more than one way;
+                // otherwise the shared cause is already stated above the list.
+                const cause = affected[index] && affected[index].cause;
+                item.textContent = cause ? `${title} — ${cause}` : title;
                 failures.appendChild(item);
-            }
+            });
+        }
+
+        // Everything a developer needs, kept out of the panel: the console. The
+        // panel repaints on every poll tick and page load, so log once per job.
+        const logKey = `${migration.migrationId}:${migration.status}:${failureList.length}`;
+        if (failureList.length > 0 && panel.dataset.loggedFailures !== logKey) {
+            panel.dataset.loggedFailures = logKey;
+            console.warn(
+                `Migration ${migration.migrationId} failed (${summary ? summary.reason : 'unclassified'}):`,
+                failureList.map(failure => ({
+                    item: failure.title || failure.itemId,
+                    type: failure.itemType,
+                    reason: failure.failureReason,
+                    attempts: failure.attempts,
+                    error: failure.error
+                }))
+            );
         }
 
         const retry = document.getElementById(`${prefix}-llm-migration-retry`);

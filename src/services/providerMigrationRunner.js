@@ -25,6 +25,7 @@ const { activeProviderOf, credentialForProvider, decryptApiKey } = require('./ll
 const { getCourseSuperchatIds } = require('../models/Course');
 const { resolveSuperCourseChatSettings } = require('./superCourseService');
 const migrations = require('./providerMigrationService');
+const failureReasons = require('./migrationFailureReasons');
 
 const { ITEM_STATUSES, MIGRATION_STATUSES, MAX_ATTEMPTS } = migrations;
 
@@ -504,7 +505,10 @@ async function runMigration(db, migrationId, options = {}) {
                 await migrations.recordItemResult(db, migrationId, item.itemId, item.itemType, {
                     status: attempts >= MAX_ATTEMPTS ? ITEM_STATUSES.FAILED : ITEM_STATUSES.PENDING,
                     attempts,
-                    error: String(error.message || error).slice(0, 500)
+                    error: String(error.message || error).slice(0, 500),
+                    // Classified here, where the Error object still carries its
+                    // code and HTTP status, rather than re-guessed from a string.
+                    failureReason: failureReasons.classifyFailure(error)
                 });
                 console.error(`❌ Migration ${migrationId}: ${item.itemType} ${item.itemId} failed (attempt ${attempts}):`, error.message);
 
@@ -535,14 +539,14 @@ async function runMigration(db, migrationId, options = {}) {
     const failed = (job.items || []).filter(item => item.status === ITEM_STATUSES.FAILED);
 
     if (failed.length > 0) {
-        // When every item failed the same way — a missing credential, an
-        // unreachable endpoint — report that cause rather than a bare count.
-        const distinctErrors = [...new Set(failed.map(item => item.error).filter(Boolean))];
-        const summary = distinctErrors.length === 1
-            ? distinctErrors[0]
+        // The stored job error is shown to a person, so it gets the readable
+        // cause. Each item keeps the provider's own words for the console.
+        const summary = failureReasons.summarizeFailures(job);
+        const message = summary
+            ? `${summary.headline} ${summary.detail}`
             : `${failed.length} item(s) could not be indexed`;
 
-        await migrations.finishMigration(db, migrationId, MIGRATION_STATUSES.FAILED, new Error(summary));
+        await migrations.finishMigration(db, migrationId, MIGRATION_STATUSES.FAILED, new Error(message));
         // The previous provider stays active; its vectors and credential are
         // untouched, so the surface keeps working. The migration id stays on the
         // surface so the failure and its retry control survive a page reload.

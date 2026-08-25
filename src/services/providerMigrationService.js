@@ -38,6 +38,7 @@ const {
     needsIndexing
 } = require('./embeddingIndexService');
 const { publicProfileSummary } = require('./embeddingConfig');
+const failureReasons = require('./migrationFailureReasons');
 const {
     activateProviderSetFields,
     credentialForProvider
@@ -106,7 +107,11 @@ function publicMigrationView(job) {
             itemType: item.itemType,
             itemId: item.itemId,
             title: item.title || null,
+            // `error` is the provider's own words, kept for the browser console;
+            // `failureReason` is what the panel turns into a readable sentence.
+            // (`item.reason` is taken: it says why the item needed indexing.)
             error: item.error || 'Unknown error',
+            failureReason: item.failureReason || failureReasons.classifyFailure(item.error),
             attempts: item.attempts || 0
         }));
 
@@ -123,6 +128,7 @@ function publicMigrationView(job) {
         failed: job.totals ? job.totals.failed : failures.length,
         currentItem: job.currentItem || null,
         failures,
+        failureSummary: failureReasons.summarizeFailures(job),
         error: job.error || null,
         startedAt: job.startedAt || null,
         finishedAt: job.finishedAt || null,

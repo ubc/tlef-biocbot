@@ -595,7 +595,21 @@
 .llm-migration-status {
     margin: 0 0 6px;
     font-size: 13px;
-    font-weight: 500;
+    font-weight: 600;
+}
+
+/* What the failure means and what to do about it, in normal prose. */
+.llm-migration-detail {
+    margin: 0 0 8px;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text-secondary, #555);
+}
+
+.llm-migration-failures-label {
+    margin: 8px 0 4px;
+    font-size: 12px;
+    color: var(--text-secondary, #555);
 }
 
 .llm-migration-progress {
@@ -604,10 +618,10 @@
 }
 
 .llm-migration-failures {
-    margin: 8px 0 0;
+    margin: 0;
     padding-left: 18px;
     font-size: 13px;
-    color: var(--danger-color);
+    color: var(--text-secondary, #555);
 }
 
 .llm-migration-failures:empty {
@@ -616,6 +630,10 @@
 
 .llm-migration[data-status="failed"] {
     border-color: var(--danger-color);
+}
+
+.llm-migration[data-status="failed"] .llm-migration-status {
+    color: var(--danger-color);
 }
 
 .llm-migration[data-status="completed"] .llm-migration-status {
