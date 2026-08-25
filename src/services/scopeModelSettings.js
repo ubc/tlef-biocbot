@@ -163,28 +163,45 @@ async function getProviderSettings(db, scope, provider, options = {}) {
     return all.providers[normalizeProvider(provider)];
 }
 
-async function applyCredentialRoster(db, scope, provider, models, updatedBy = null) {
+async function applyCredentialRoster(db, scope, provider, models, updatedBy = null, defaultConfiguration = null) {
     const normalizedProvider = normalizeProvider(provider);
     await materialize(db, scope);
     const target = targetFor(scope);
     const doc = await db.collection(target.collection).findOne(target.filter);
     const current = doc?.[FIELD]?.providers?.[normalizedProvider] || {};
     const roster = [...new Set((Array.isArray(models) ? models : []).filter(Boolean))];
+    const selected = defaultConfiguration && typeof defaultConfiguration === 'object'
+        ? {
+            ...current,
+            chatModel: defaultConfiguration.chatModel,
+            reasoningEffort: defaultConfiguration.reasoningEffort,
+            embeddingModel: defaultConfiguration.embeddingModel,
+            vectorSize: defaultConfiguration.vectorSize || null,
+            backend: null
+        }
+        : current;
     const configurationStatus = compatibleSelection(normalizedProvider, {
-        ...current,
+        ...selected,
         availableModels: roster,
         modelsDiscovered: true
     }) ? READY : NEEDS_ADMIN;
-    await db.collection(target.collection).updateOne(target.filter, {
-        $set: {
+    const set = {
             [`${FIELD}.providers.${normalizedProvider}.availableModels`]: roster,
             [`${FIELD}.providers.${normalizedProvider}.modelsDiscovered`]: true,
             [`${FIELD}.providers.${normalizedProvider}.configurationStatus`]: configurationStatus,
             [`${FIELD}.updatedAt`]: new Date(),
             [`${FIELD}.updatedBy`]: updatedBy,
             updatedAt: new Date()
-        }
-    });
+    };
+    if (defaultConfiguration) {
+        set[`${FIELD}.providers.${normalizedProvider}.chatModel`] = selected.chatModel;
+        set[`${FIELD}.providers.${normalizedProvider}.reasoningEffort`] = selected.reasoningEffort;
+        set[`${FIELD}.providers.${normalizedProvider}.embeddingModel`] = selected.embeddingModel;
+        set[`${FIELD}.providers.${normalizedProvider}.vectorSize`] = selected.vectorSize;
+    }
+    const update = { $set: set };
+    if (defaultConfiguration) update.$unset = { [`${FIELD}.providers.${normalizedProvider}.backend`]: '' };
+    await db.collection(target.collection).updateOne(target.filter, update);
     return getProviderSettings(db, scope, normalizedProvider);
 }
 

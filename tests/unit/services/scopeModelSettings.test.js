@@ -4,6 +4,7 @@ const { memoryDb } = require('../helpers/memory-db');
 
 const OPENAI = 'openai';
 const SANDBOX = 'ubc-llm-sandbox';
+const PROXY = 'ubc-llm-proxy';
 
 beforeEach(() => adminModelSettings.invalidateCache());
 
@@ -70,6 +71,34 @@ test('a compatible key roster makes the copied defaults ready immediately', asyn
     expect(settings.providers[OPENAI].configured).toBe(true);
 });
 
+test('validated proxy defaults make a newly keyed course ready immediately', async () => {
+    const db = dbWithCourses();
+    await scopeModelSettings.materialize(db, { type: 'course', id: 'A' });
+    const settings = await scopeModelSettings.applyCredentialRoster(
+        db,
+        { type: 'course', id: 'A' },
+        PROXY,
+        ['gpt-5.6-luna', 'text-embedding-3-small'],
+        'admin@x',
+        {
+            chatModel: 'gpt-5.6-luna',
+            reasoningEffort: 'low',
+            embeddingModel: 'text-embedding-3-small',
+            vectorSize: 1536
+        }
+    );
+
+    expect(settings).toMatchObject({
+        chatModel: 'gpt-5.6-luna',
+        reasoningEffort: 'low',
+        embeddingModel: 'text-embedding-3-small',
+        vectorSize: 1536,
+        backendInheritsFrontend: true,
+        configurationStatus: scopeModelSettings.READY,
+        configured: true
+    });
+});
+
 test('changing the default template later does not change a materialized course', async () => {
     const db = dbWithCourses();
     await scopeModelSettings.materialize(db, { type: 'course', id: 'A' });
@@ -97,4 +126,3 @@ test('pending embedding settings and activation belong to one scope', async () =
     expect(a.embeddingModel).toBe('text-embedding-3-large');
     expect(b.embeddingModel).toBe('text-embedding-3-small');
 });
-

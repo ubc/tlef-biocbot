@@ -136,6 +136,78 @@ describe('validating against the right platform', () => {
 });
 
 describe('saving a key', () => {
+    test('a proxy key with the standard roster receives validated defaults immediately', async () => {
+        const oldStub = process.env.BIOCBOT_TEST_LLM_STUB;
+        const oldVectorSize = process.env.BIOCBOT_TEST_PROXY_VECTOR_SIZE;
+        process.env.BIOCBOT_TEST_LLM_STUB = '1';
+        process.env.BIOCBOT_TEST_PROXY_VECTOR_SIZE = '1536';
+        mockValidateProviderKey.mockResolvedValue({
+            ok: true,
+            status: 'valid',
+            provider: PROXY,
+            models: ['gpt-5.6-luna', 'text-embedding-3-small']
+        });
+        const db = memoryDb({ courses: [{ courseId: 'C1' }] });
+
+        try {
+            const result = await providerKeys.saveSurfaceKey(db, {
+                scope: COURSE_SCOPE, provider: PROXY, apiKey: 'prx-first-key', updatedBy: 'i1'
+            });
+            const course = await db.collection('courses').findOne({ courseId: 'C1' });
+            expect(result.body).toMatchObject({
+                llmConfigurationStatus: 'ready', aiAvailable: true
+            });
+            expect(course.llmModelSettings.providers[PROXY]).toMatchObject({
+                chatModel: 'gpt-5.6-luna',
+                reasoningEffort: 'low',
+                embeddingModel: 'text-embedding-3-small',
+                vectorSize: 1536,
+                configurationStatus: 'ready'
+            });
+        } finally {
+            if (oldStub === undefined) delete process.env.BIOCBOT_TEST_LLM_STUB;
+            else process.env.BIOCBOT_TEST_LLM_STUB = oldStub;
+            if (oldVectorSize === undefined) delete process.env.BIOCBOT_TEST_PROXY_VECTOR_SIZE;
+            else process.env.BIOCBOT_TEST_PROXY_VECTOR_SIZE = oldVectorSize;
+        }
+    });
+
+    test('a proxy key with the Qwen roster receives validated Qwen defaults immediately', async () => {
+        const oldStub = process.env.BIOCBOT_TEST_LLM_STUB;
+        const oldVectorSize = process.env.BIOCBOT_TEST_PROXY_VECTOR_SIZE;
+        process.env.BIOCBOT_TEST_LLM_STUB = '1';
+        process.env.BIOCBOT_TEST_PROXY_VECTOR_SIZE = '1024';
+        mockValidateProviderKey.mockResolvedValue({
+            ok: true,
+            status: 'valid',
+            provider: PROXY,
+            models: ['gpt-oss-120b', 'qwen3.6-35b-a3b', 'qwen3-embedding-0.6b']
+        });
+        const db = memoryDb({ courses: [{ courseId: 'C1' }] });
+
+        try {
+            const result = await providerKeys.saveSurfaceKey(db, {
+                scope: COURSE_SCOPE, provider: PROXY, apiKey: 'prx-qwen-key', updatedBy: 'i1'
+            });
+            const course = await db.collection('courses').findOne({ courseId: 'C1' });
+            expect(result.body).toMatchObject({
+                llmConfigurationStatus: 'ready', aiAvailable: true
+            });
+            expect(course.llmModelSettings.providers[PROXY]).toMatchObject({
+                chatModel: 'qwen3.6-35b-a3b',
+                reasoningEffort: 'none',
+                embeddingModel: 'qwen3-embedding-0.6b',
+                vectorSize: 1024,
+                configurationStatus: 'ready'
+            });
+        } finally {
+            if (oldStub === undefined) delete process.env.BIOCBOT_TEST_LLM_STUB;
+            else process.env.BIOCBOT_TEST_LLM_STUB = oldStub;
+            if (oldVectorSize === undefined) delete process.env.BIOCBOT_TEST_PROXY_VECTOR_SIZE;
+            else process.env.BIOCBOT_TEST_PROXY_VECTOR_SIZE = oldVectorSize;
+        }
+    });
+
     test('the first key for a surface activates immediately — no migration', async () => {
         const db = memoryDb({ courses: [{ courseId: 'C1' }] });
         const reg = registry();

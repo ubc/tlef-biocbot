@@ -41,6 +41,27 @@ const {
     validateProviderKey
 } = require('./llmKeyStore');
 
+const PROXY_DEFAULT_CONFIGURATIONS = Object.freeze([
+    {
+        chatModel: 'gpt-5.6-luna',
+        reasoningEffort: 'low',
+        embeddingModel: 'text-embedding-3-small'
+    },
+    {
+        chatModel: 'qwen3.6-35b-a3b',
+        reasoningEffort: 'none',
+        embeddingModel: 'qwen3-embedding-0.6b'
+    }
+]);
+
+function proxyDefaultConfiguration(models) {
+    const roster = Array.isArray(models) ? models : [];
+    return PROXY_DEFAULT_CONFIGURATIONS.find(configuration => (
+        roster.includes(configuration.chatModel)
+        && roster.includes(configuration.embeddingModel)
+    )) || null;
+}
+
 function errorCodeForStatus(status) {
     if (status === KEY_STATUSES.QUOTA_EXHAUSTED) return 'LLM_KEY_QUOTA';
     if (status === KEY_STATUSES.MISSING) return 'LLM_KEY_MISSING';
@@ -89,6 +110,7 @@ async function validateForProvider(db, provider, apiKey, options = {}) {
     if (normalizedProvider !== PROVIDERS.PROXY) return validation;
 
     const current = settings;
+    const discoveredDefault = proxyDefaultConfiguration(validation.models);
     if (current.chatModel || current.embeddingModel) {
         try {
             const listed = validation.models || [];
@@ -108,7 +130,32 @@ async function validateForProvider(db, provider, apiKey, options = {}) {
                 embeddingModel: current.embeddingModel
             });
         } catch (error) {
-            return { ...validation, configurationCompatible: false, detail: error.cause?.message || error.message };
+            validation.configurationCompatible = false;
+            if (!discoveredDefault) {
+                return { ...validation, configurationCompatible: false, detail: error.cause?.message || error.message };
+            }
+        }
+    }
+
+    if (discoveredDefault && (!current.configured || validation.configurationCompatible === false)) {
+        try {
+            const operation = await validateProxyOperations({
+                apiKey,
+                endpoint,
+                chatSelections: [{
+                    model: discoveredDefault.chatModel,
+                    reasoningEffort: discoveredDefault.reasoningEffort
+                }],
+                embeddingModel: discoveredDefault.embeddingModel
+            });
+            validation.defaultConfiguration = {
+                ...discoveredDefault,
+                vectorSize: operation.vectorSize
+            };
+            validation.configurationCompatible = true;
+        } catch (error) {
+            validation.configurationCompatible = false;
+            validation.detail = error.cause?.message || error.message;
         }
     }
 
@@ -455,7 +502,7 @@ async function saveSurfaceKey(db, {
     );
     const scopedSettings = Array.isArray(validation.models)
         ? await scopeModelSettings.applyCredentialRoster(
-            db, scope, requestedProvider, validation.models, updatedBy
+            db, scope, requestedProvider, validation.models, updatedBy, validation.defaultConfiguration
         )
         : await scopeModelSettings.getProviderSettings(db, scope, requestedProvider);
     evictScope(registry, scope);
@@ -654,7 +701,8 @@ async function testSurfaceKey(db, { scope, provider = null, registry = null }) {
             scope,
             targetProvider,
             validation.models,
-            credential.updatedBy || null
+            credential.updatedBy || null,
+            validation.defaultConfiguration
         );
     }
     if (validation.ok && !scopedSettings) {
