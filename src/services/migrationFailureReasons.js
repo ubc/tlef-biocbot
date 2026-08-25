@@ -66,7 +66,8 @@ function classifyFailure(error) {
     if (code === 'EMBEDDING_TIMEOUT' || /timed out|timeout|etimedout|aborted/.test(text)) {
         return REASONS.PROVIDER_TIMEOUT;
     }
-    if (code === 'LLM_KEY_MISSING' || /no stored credential|no .* key|missing encrypted api key/.test(text)) {
+    if (code === 'LLM_KEY_MISSING'
+        || /no stored .*credential|no .*credential (for|is)|no .* key|missing encrypted api key/.test(text)) {
         return REASONS.KEY_MISSING;
     }
     if (status === 429 || /rate limit|too many requests|quota/.test(text)) {

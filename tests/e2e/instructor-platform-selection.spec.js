@@ -399,7 +399,18 @@ test.describe('Instructor platform selection', () => {
             completed: 3,
             failed: 1,
             currentItem: null,
-            failures: [{ itemType: 'document', itemId: 'd4', title: 'Lecture 4.pdf', error: 'provider rejected', attempts: 3 }],
+            failures: [{
+                itemType: 'document', itemId: 'd4', title: 'Lecture 4.pdf',
+                error: 'Embedding request for qwen3-embedding-0.6b timed out after 30s',
+                failureReason: 'provider_timeout', attempts: 3,
+            }],
+            failureSummary: {
+                reason: 'provider_timeout',
+                headline: 'UBC On-Premise LLM did not respond in time.',
+                detail: 'No course material was changed, and OpenAI Chat GPT is still answering questions. '
+                    + 'The platform may be temporarily unavailable or under maintenance — wait a few minutes and try again.',
+                affected: [{ title: 'Lecture 4.pdf', cause: null }],
+            },
             targetProfile: { provider: 'ubc-llm-sandbox' },
         };
 
@@ -433,13 +444,22 @@ test.describe('Instructor platform selection', () => {
         // Progress is polled, not pushed: the panel updates without a reload.
         await expect.poll(() => migrationPolls.length, { timeout: 15_000 }).toBeGreaterThan(0);
 
-        // After the poll, the failure and retry control appear.
+        // After the poll the failure appears — as prose, not as an error dump.
         await expect(page.locator('#course-llm-migration-status'))
-            .toContainText('stopped with 1 failure', { timeout: 15_000 });
-        await expect(page.locator('#course-llm-migration-status'))
-            .toContainText('The previous platform is still active');
-        await expect(page.locator('#course-llm-migration-failures'))
-            .toContainText('Lecture 4.pdf: provider rejected');
+            .toHaveText('UBC On-Premise LLM did not respond in time.', { timeout: 15_000 });
+        await expect(page.locator('#course-llm-migration-detail'))
+            .toContainText('OpenAI Chat GPT is still answering questions');
+        await expect(page.locator('#course-llm-migration-detail')).toContainText('try again');
+
+        // The affected file is named; the provider's error text is not shown.
+        await expect(page.locator('#course-llm-migration-failures-label')).toContainText('This item was affected');
+        await expect(page.locator('#course-llm-migration-failures')).toHaveText('Lecture 4.pdf');
+
+        const panelText = await page.locator('#course-llm-migration').innerText();
+        for (const jargon of ['Embedding request', 'timed out after', 'qwen3', 'chunk']) {
+            expect(panelText).not.toContain(jargon);
+        }
+
         await expect(page.locator('#course-llm-migration-retry')).toBeVisible();
     });
 

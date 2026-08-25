@@ -367,8 +367,18 @@ describe('progress and retry', () => {
 
         expect(view).toMatchObject({ total: 2, completed: 1, failed: 1, toProvider: 'ubc-llm-sandbox' });
         expect(view.failures).toEqual([
-            { itemType: 'document', itemId: 'd2', title: 'Two.pdf', error: 'quota', attempts: 3 },
+            {
+                itemType: 'document', itemId: 'd2', title: 'Two.pdf',
+                error: 'quota', attempts: 3, failureReason: 'rate_limited',
+            },
         ]);
+        // A person reads the summary; the raw 'quota' string stays for the console.
+        expect(view.failureSummary).toMatchObject({
+            reason: 'rate_limited',
+            headline: expect.stringContaining('refusing further requests'),
+            affected: [{ title: 'Two.pdf', cause: null }],
+        });
+        expect(view.failureSummary.headline).not.toContain('quota');
         expect(view.targetProfile.collection).toBe('biocbot_documents_qwen3_embedding_0_6b');
         expect(JSON.stringify(view)).not.toContain('ciphertext');
         expect(publicMigrationView(null)).toBeNull();

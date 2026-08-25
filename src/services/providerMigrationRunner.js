@@ -539,14 +539,16 @@ async function runMigration(db, migrationId, options = {}) {
     const failed = (job.items || []).filter(item => item.status === ITEM_STATUSES.FAILED);
 
     if (failed.length > 0) {
-        // The stored job error is shown to a person, so it gets the readable
-        // cause. Each item keeps the provider's own words for the console.
-        const summary = failureReasons.summarizeFailures(job);
-        const message = summary
-            ? `${summary.headline} ${summary.detail}`
+        // `job.error` stays technical on purpose: it names the provider's own
+        // words and, for a credential failure, the surface that is missing a
+        // key — detail no readable sentence can carry. What a person sees is
+        // built separately in publicMigrationView's `failureSummary`.
+        const distinctErrors = [...new Set(failed.map(item => item.error).filter(Boolean))];
+        const summary = distinctErrors.length === 1
+            ? distinctErrors[0]
             : `${failed.length} item(s) could not be indexed`;
 
-        await migrations.finishMigration(db, migrationId, MIGRATION_STATUSES.FAILED, new Error(message));
+        await migrations.finishMigration(db, migrationId, MIGRATION_STATUSES.FAILED, new Error(summary));
         // The previous provider stays active; its vectors and credential are
         // untouched, so the surface keeps working. The migration id stays on the
         // surface so the failure and its retry control survive a page reload.
