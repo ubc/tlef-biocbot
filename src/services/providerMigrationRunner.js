@@ -171,7 +171,13 @@ async function resolveTargetProfile(db, job, scope = job.scope) {
  * base service so the embeddings client is created once per key.
  */
 async function createVectorServices(profile, { needNotes, shouldCancel = null }) {
-    const qdrant = new QdrantService({ embeddingProfile: profile, shouldCancel });
+    const qdrant = new QdrantService({
+        embeddingProfile: profile,
+        shouldCancel,
+        // The job's own items are the real test of the provider; a warm-up
+        // embedding here only adds a call that can hang before item 1.
+        skipEmbeddingProbe: true
+    });
     await qdrant.initialize();
 
     let notesQdrant = null;
@@ -554,9 +560,11 @@ async function runMigration(db, migrationId, options = {}) {
         }
     }
 
-    if (job.kind === 'embedding-model') {
-        // Only promote the model THIS job indexed — a newer staged change has
-        // its own migration and its own vectors to wait for.
+    // Only promote the model THIS job indexed — a newer staged change has its
+    // own migration and its own vectors to wait for. A prepare/switch job
+    // qualifies too: it is what applies an embedding choice saved in the model
+    // settings panel, which never starts a job of its own.
+    if (job.kind === 'embedding-model' || job.kind === 'provider' || job.kind === 'prepare') {
         const expected = {
             embeddingModel: job.targetProfile.embeddingModel,
             embeddingRevision: job.targetProfile.revision

@@ -68,6 +68,7 @@ const {
 } = require('../../../src/services/embeddingIndexService');
 const migrations = require('../../../src/services/providerMigrationService');
 const runner = require('../../../src/services/providerMigrationRunner');
+const scopeModelSettings = require('../../../src/services/scopeModelSettings');
 const { memoryDb } = require('../helpers/memory-db');
 
 const GPT = buildEmbeddingProfile({ provider: 'openai', embeddingModel: 'text-embedding-3-small' });
@@ -653,6 +654,34 @@ describe('explicit preparation and cancellation', () => {
         expect(course.activeLlmProvider).toBe('ubc-llm-sandbox');
         expect(course.pendingLlmProvider).toBeNull();
         expect(course.providerMigrationId).toBeNull();
+    });
+
+    test('preparation also promotes the embedding choice it indexed', async () => {
+        const db = memoryDb({
+            courses: [dualKeyCourse('openai', { pendingLlmProvider: 'ubc-llm-sandbox' })],
+            documents: [{ documentId: 'A', courseId: 'C1', content: 'text' }],
+        });
+        await scopeModelSettings.materialize(db, COURSE_SCOPE);
+        // The model settings panel only records the choice; this job is what
+        // indexes it, so this job is what promotes it.
+        await scopeModelSettings.stagePendingEmbedding(db, COURSE_SCOPE, 'ubc-llm-sandbox', {
+            embeddingModel: SANDBOX.embeddingModel,
+        });
+        const { job } = await migrations.createMigration(db, {
+            scope: COURSE_SCOPE,
+            kind: 'prepare',
+            fromProvider: 'openai',
+            toProvider: 'ubc-llm-sandbox',
+            profile: SANDBOX,
+            courseIds: ['C1'],
+        });
+
+        const finished = await runner.runMigration(db, job.migrationId);
+
+        expect(finished.status).toBe('completed');
+        const settings = await scopeModelSettings.getAll(db, COURSE_SCOPE);
+        expect(settings.providers['ubc-llm-sandbox'].embeddingModel).toBe(SANDBOX.embeddingModel);
+        expect(settings.pendingEmbedding['ubc-llm-sandbox']).toBeUndefined();
     });
 
     test('cancel deletes only the target profile data and clears the pending marker', async () => {

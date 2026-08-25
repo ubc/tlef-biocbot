@@ -432,6 +432,12 @@ async function validateProxyEmbeddingModel(db, embeddingModel, scope = null) {
 /**
  * The embedding profile a provider would use for this surface, including the
  * decrypted key when one is supplied.
+ *
+ * A saved-but-unapplied embedding choice wins over the active one. The model
+ * settings panel only records the choice; preparing or switching a surface is
+ * what indexes it and — once every item is written — promotes it. Retrieval
+ * keeps resolving the ACTIVE profile (scopeModelSettings.getEmbeddingProfile)
+ * meanwhile, so answers never query a half-built collection.
  */
 async function embeddingProfileFor(db, scope, provider, apiKey = null) {
     // Backward-compatible service call: embeddingProfileFor(db, provider, key)
@@ -442,10 +448,16 @@ async function embeddingProfileFor(db, scope, provider, apiKey = null) {
         scope = null;
     }
     const normalizedProvider = normalizeProvider(provider);
-    const settings = scope
-        ? await scopeModelSettings.getProviderSettings(db, scope, normalizedProvider)
+    const scoped = scope ? await scopeModelSettings.getAll(db, scope) : null;
+    const settings = scoped
+        ? scoped.providers[normalizedProvider]
         : await adminModelSettings.getProviderSettings(db, normalizedProvider);
-    if (!settings.embeddingModel || !settings.configured) {
+    const pending = scoped ? scoped.pendingEmbedding[normalizedProvider] : null;
+    const embeddingModel = pending?.embeddingModel || settings.embeddingModel;
+    // A pending choice supplies the embedding half of the configuration, so the
+    // chat half is all that can still be missing.
+    const configured = pending ? Boolean(settings.chatModel) : settings.configured;
+    if (!embeddingModel || !configured) {
         const error = new Error(
             `${providerLabel(normalizedProvider)} is not fully configured. A system admin must select and save its chat and embedding models first.`
         );
@@ -460,9 +472,9 @@ async function embeddingProfileFor(db, scope, provider, apiKey = null) {
     }
     return buildEmbeddingProfile({
         provider: normalizedProvider,
-        embeddingModel: settings.embeddingModel,
-        revision: settings.embeddingRevision,
-        vectorSize: settings.vectorSize || undefined,
+        embeddingModel,
+        revision: pending?.embeddingRevision || settings.embeddingRevision,
+        vectorSize: (pending?.vectorSize || settings.vectorSize) || undefined,
         endpoint,
         apiKey
     });
@@ -604,7 +616,8 @@ async function prepareStoredProvider(db, {
     scope,
     provider,
     requestedBy = null,
-    disableUntilReady = false
+    disableUntilReady = false,
+    registry = null
 }) {
     const requestedProvider = normalizeProvider(provider);
     const { target, doc } = await loadSurface(db, scope);
@@ -675,11 +688,16 @@ async function prepareStoredProvider(db, {
     // reused current target-profile vectors never flashes a preparing state.
     if ((job.totals?.total || 0) === 0) {
         await migrations.activateProvider(db, scope, requestedProvider);
+        await scopeModelSettings.activatePendingEmbedding(db, scope, requestedProvider, {
+            embeddingModel: profile.embeddingModel,
+            embeddingRevision: profile.revision
+        });
         await migrations.finishMigration(
             db,
             job.migrationId,
             migrations.MIGRATION_STATUSES.COMPLETED
         );
+        evictScope(registry, scope);
         const completedJob = await migrations.getMigration(db, job.migrationId);
         const updated = await db.collection(target.collection).findOne(target.filter);
         return {
@@ -805,8 +823,9 @@ async function testSurfaceKey(db, { scope, provider = null, registry = null }) {
 }
 
 /**
- * Activate a stored provider only when all currently-visible content is already
- * prepared for it. Preparation is an explicit action, separate from switching.
+ * Move a surface to a stored provider in one action: reuse whatever is already
+ * indexed for the target embedding profile, index only what is missing, and
+ * activate the provider (and any saved embedding choice) once it is complete.
  */
 async function switchToStoredProvider(db, { scope, provider, requestedBy = null, registry = null }) {
     const requestedProvider = normalizeProvider(provider);
@@ -853,23 +872,28 @@ async function switchToStoredProvider(db, { scope, provider, requestedBy = null,
     }
     const { courseIds, includeNotes } = await migrationScopeContent(db, scope);
     const { items } = await migrations.calculateWork({ db, profile, courseIds, includeNotes });
+
+    // Switching is one action. When material is missing for the target profile
+    // — a fresh platform, or an embedding model saved in the model-settings
+    // panel and not yet applied — the switch starts the indexing job itself and
+    // the runner activates the provider once every item is written. The current
+    // provider keeps answering until then.
     if (items.length > 0) {
-        return {
-            ok: false,
-            httpStatus: 409,
-            body: {
-                success: false,
-                code: 'LLM_PROVIDER_NOT_PREPARED',
-                message: `${items.length} item(s) still need to be prepared for ${providerLabel(requestedProvider)}. `
-                    + `Choose “Prepare material for ${providerLabel(requestedProvider)}” first.`,
-                llmProvider: state.activeProvider,
-                needsPreparation: true,
-                unpreparedCount: items.length
-            }
-        };
+        return prepareStoredProvider(db, {
+            scope,
+            provider: requestedProvider,
+            requestedBy,
+            registry
+        });
     }
 
     await migrations.activateProvider(db, scope, requestedProvider);
+    // Nothing to index means the saved embedding choice is already fully
+    // represented in its collection, so promote it with the platform.
+    await scopeModelSettings.activatePendingEmbedding(db, scope, requestedProvider, {
+        embeddingModel: profile.embeddingModel,
+        embeddingRevision: profile.revision
+    });
     await migrations.abandonPendingProvider(db, scope);
     evictScope(registry, scope);
 

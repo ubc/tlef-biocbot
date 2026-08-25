@@ -1454,7 +1454,8 @@ router.post('/llm/embedding/stage', async (req, res) => {
         invalidateModelCaches(req);
         return res.json({
             success: true,
-            message: `${providerLabel(provider)} embedding selection saved. Click Re-index now to apply it.`,
+            message: `${providerLabel(provider)} embedding selection saved. `
+                + 'It is applied the next time an AI surface switches to (or refreshes) this platform.',
             pendingEmbedding: staged
         });
     } catch (error) {
@@ -2317,7 +2318,8 @@ router.post('/notes-llm-key/provider/prepare', async (req, res) => {
         const result = await providerKeys.prepareStoredProvider(db, {
             scope: NOTES_SCOPE,
             provider: normalizeProvider(req.body && req.body.llmProvider),
-            requestedBy: req.user.userId
+            requestedBy: req.user.userId,
+            registry: req.app.locals.llmRegistry
         });
         res.status(result.httpStatus).json(result.body);
     } catch (error) {
@@ -2449,7 +2451,8 @@ router.post('/instructor-superchat-llm-key/provider/prepare', async (req, res) =
         const result = await providerKeys.prepareStoredProvider(db, {
             scope: SUPER_COURSE_CHAT_SCOPE,
             provider: normalizeProvider(req.body && req.body.llmProvider),
-            requestedBy: req.user.userId
+            requestedBy: req.user.userId,
+            registry: req.app.locals.llmRegistry
         });
         res.status(result.httpStatus).json(result.body);
     } catch (error) {

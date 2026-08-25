@@ -299,29 +299,16 @@ test.describe('Instructor platform selection', () => {
 
     test('switching prepares missing material without re-entering the key', async ({ page }) => {
         let switchRequest = null;
-        let prepareRequest = null;
         await mockCourseKeyState(page, baseState({
             llmKeysByProvider: {
                 openai: { status: 'valid', last4: '1111', validatedAt: null, updatedAt: null },
                 'ubc-llm-sandbox': { status: 'valid', last4: '2222', validatedAt: null, updatedAt: null },
             },
         }));
+        // One round trip: the switch itself starts the indexing job and the
+        // platform activates when that job finishes.
         await page.route('**/api/courses/*/llm-provider', async (route) => {
             switchRequest = JSON.parse(route.request().postData() || '{}');
-            await route.fulfill({
-                status: 409,
-                contentType: 'application/json',
-                body: JSON.stringify({
-                    success: false,
-                    code: 'LLM_PROVIDER_NOT_PREPARED',
-                    message: '2 items still need preparation.',
-                    unpreparedCount: 2,
-                    needsPreparation: true,
-                }),
-            });
-        });
-        await page.route('**/api/courses/*/llm-provider/prepare', async (route) => {
-            prepareRequest = JSON.parse(route.request().postData() || '{}');
             await route.fulfill({
                 status: 202,
                 contentType: 'application/json',
@@ -351,7 +338,7 @@ test.describe('Instructor platform selection', () => {
 
         // The key is already stored, so saving is only ever a replacement...
         await expect(page.locator('#save-course-llm-key')).toHaveText('Replace UBC On-Premise LLM key');
-        // ...and the switch is attempted before any preparation job.
+        // ...and one switch click covers both preparing and activating.
         await expect(page.locator('#course-llm-prepare')).toBeEnabled();
         await expect(page.locator('#course-llm-prepare')).toHaveText('Switch to UBC On-Premise LLM');
 
@@ -363,10 +350,9 @@ test.describe('Instructor platform selection', () => {
         await page.locator('#course-llm-prepare').click();
 
         await expect.poll(() => switchRequest).toEqual({ llmProvider: 'ubc-llm-sandbox' });
-        await expect.poll(() => prepareRequest).toEqual({ llmProvider: 'ubc-llm-sandbox' });
         expect(dialogs).toEqual([
-            'Switch this AI surface to UBC On-Premise LLM? Existing embeddings will be reused.',
-            '2 items need preparation for UBC On-Premise LLM. Prepare them now?',
+            'Switch this AI surface to UBC On-Premise LLM? Existing embeddings are reused, '
+                + 'and only missing or changed items are indexed before the switch completes.',
         ]);
         // Progress replaces the button state; no key was ever re-entered.
         await expect(page.locator('#course-llm-migration')).toBeVisible();
@@ -760,10 +746,48 @@ test.describe('Admin platform and model settings', () => {
         await expect(page.locator('#llm-embedding-pending')).toContainText('Re-indexing: text-embedding-3-large');
         await expect(page.locator('#llm-embedding-pending'))
             .toContainText('text-embedding-3-small stays active until re-indexing finishes');
-        await expect(page.locator('#reindex-llm-embedding')).toBeVisible();
-        await expect(page.locator('#reindex-llm-embedding')).toBeDisabled();
-        await expect(page.locator('#reindex-llm-embedding')).toHaveText('Re-indexing…');
+        await expect(page.locator('#reindex-llm-embedding')).toHaveCount(0);
         await expect(page.locator('#rollback-llm-embedding')).toBeVisible();
         await expect(page.locator('#rollback-llm-embedding')).toHaveText('Cancel re-indexing');
+    });
+
+    test('a saved embedding choice waits for a platform switch, not a button here', async ({ page }) => {
+        await page.route('**/api/settings/llm', async (route) => {
+            if (route.request().method() !== 'GET') return route.continue();
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    success: true,
+                    platforms: [{
+                        provider: 'openai', label: 'OpenAI Chat GPT',
+                        chatModel: 'gpt-4.1-mini', embeddingModel: 'text-embedding-3-small',
+                        reasoningEffort: 'minimal', supportsReasoning: false,
+                        allowedModels: ['gpt-4.1-mini'],
+                        allowedEmbeddingModels: ['text-embedding-3-small', 'text-embedding-3-large'],
+                        reasoningEffortsByModel: {}, defaultReasoningEffortByModel: {},
+                        collection: 'biocbot_documents', vectorSize: 1536,
+                        // Saved, with no job of its own.
+                        pendingEmbedding: { embeddingModel: 'text-embedding-3-large', migrationId: null },
+                    }],
+                    settings: { model: 'gpt-4.1-mini', provider: 'openai' },
+                }),
+            });
+        });
+
+        await page.goto(`/instructor/settings?courseId=${COURSE_ID}`);
+        await expect(page.locator('h1')).toHaveText('Settings', { timeout: 15_000 });
+        await page.locator('.settings-tile[data-panel="admin-platform"]').click();
+
+        await expect(page.locator('#llm-embedding-pending')).toBeVisible();
+        await expect(page.locator('#llm-embedding-pending'))
+            .toContainText('Saved: text-embedding-3-large');
+        await expect(page.locator('#llm-embedding-pending'))
+            .toContainText('It is applied when this surface switches to OpenAI Chat GPT');
+        // The panel records the choice and nothing else — no re-index control,
+        // and the selector stays editable because no job is running.
+        await expect(page.locator('#reindex-llm-embedding')).toHaveCount(0);
+        await expect(page.locator('#llm-embedding-select')).toBeEnabled();
+        await expect(page.locator('#rollback-llm-embedding')).toHaveText('Discard embedding change');
     });
 });

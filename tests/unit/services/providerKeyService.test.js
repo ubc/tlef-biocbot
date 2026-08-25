@@ -29,6 +29,7 @@ const providerKeys = require('../../../src/services/providerKeyService');
 const { LLMModule } = require('ubc-genai-toolkit-llm');
 const migrations = require('../../../src/services/providerMigrationService');
 const adminModelSettings = require('../../../src/services/adminModelSettings');
+const scopeModelSettings = require('../../../src/services/scopeModelSettings');
 const { buildKeySubdocument } = require('../../../src/services/llmKeyStore');
 const { providerLabel } = require('../../../src/services/llmProviders');
 const { buildEmbeddingProfile } = require('../../../src/services/embeddingConfig');
@@ -424,7 +425,7 @@ describe('switching back to a stored platform', () => {
         };
     }
 
-    test('an unprepared provider is refused with a clear next action', async () => {
+    test('an unprepared provider is prepared by the switch itself', async () => {
         const db = memoryDb({
             courses: [dualKeyCourse()],
             documents: [{ documentId: 'd1', courseId: 'C1', content: 'text' }],
@@ -434,14 +435,14 @@ describe('switching back to a stored platform', () => {
             scope: COURSE_SCOPE, provider: OPENAI, requestedBy: 'i1', registry: registry(),
         });
 
-        expect(result.httpStatus).toBe(409);
-        expect(result.body).toMatchObject({ code: 'LLM_PROVIDER_NOT_PREPARED', unpreparedCount: 1 });
-        expect(startedMigrations).toHaveLength(0);
+        expect(result.httpStatus).toBe(202);
+        expect(result.body.migration).toMatchObject({ kind: 'prepare', toProvider: OPENAI, total: 1 });
+        expect(startedMigrations).toHaveLength(1);
         expect(mockValidateProviderKey).not.toHaveBeenCalled();
 
         const course = await db.collection('courses').findOne({ courseId: 'C1' });
         expect(course.activeLlmProvider).toBe(SANDBOX);   // unchanged until migration completes
-        expect(course.pendingLlmProvider).toBeUndefined();
+        expect(course.pendingLlmProvider).toBe(OPENAI);
     });
 
     test('explicit preparation starts a background job without changing the active provider', async () => {
@@ -548,6 +549,65 @@ describe('switching back to a stored platform', () => {
         expect((await db.collection('courses').findOne({ courseId: 'C1' })).activeLlmProvider).toBe(OPENAI);
         expect(startedMigrations).toEqual([]);
         expect(mockValidateProviderKey).not.toHaveBeenCalled();
+    });
+
+    test('a saved embedding choice is what the switch indexes', async () => {
+        const db = memoryDb({
+            courses: [dualKeyCourse()],
+            documents: [{ documentId: 'd1', courseId: 'C1', content: 'text' }],
+        });
+        await scopeModelSettings.materialize(db, COURSE_SCOPE);
+        await scopeModelSettings.stagePendingEmbedding(db, COURSE_SCOPE, OPENAI, {
+            embeddingModel: 'text-embedding-3-large',
+        });
+
+        const result = await providerKeys.switchToStoredProvider(db, {
+            scope: COURSE_SCOPE, provider: OPENAI, requestedBy: 'i1', registry: registry(),
+        });
+
+        expect(result.httpStatus).toBe(202);
+        expect(result.body.migration.targetProfile).toMatchObject({
+            provider: OPENAI,
+            embeddingModel: 'text-embedding-3-large',
+        });
+        // Retrieval keeps using the active model while the new one is built.
+        const settings = await scopeModelSettings.getAll(db, COURSE_SCOPE);
+        expect(settings.providers[OPENAI].embeddingModel).toBe('text-embedding-3-small');
+    });
+
+    test('a saved embedding choice that is already indexed is activated with the platform', async () => {
+        const text = 'text';
+        const largeProfile = buildEmbeddingProfile({
+            provider: OPENAI, embeddingModel: 'text-embedding-3-large',
+        });
+        const db = memoryDb({
+            courses: [dualKeyCourse()],
+            documents: [{
+                documentId: 'd1', courseId: 'C1', content: text,
+                embeddingIndexes: {
+                    [largeProfile.storageKey]: buildIndexRecord({
+                        profile: largeProfile,
+                        hash: contentHash(text),
+                        status: INDEX_STATUSES.READY,
+                        indexedAt: new Date(),
+                    }),
+                },
+            }],
+        });
+        await scopeModelSettings.materialize(db, COURSE_SCOPE);
+        await scopeModelSettings.stagePendingEmbedding(db, COURSE_SCOPE, OPENAI, {
+            embeddingModel: 'text-embedding-3-large',
+        });
+
+        const result = await providerKeys.switchToStoredProvider(db, {
+            scope: COURSE_SCOPE, provider: OPENAI, requestedBy: 'i1', registry: registry(),
+        });
+
+        expect(result.httpStatus).toBe(200);
+        expect(startedMigrations).toEqual([]);
+        const settings = await scopeModelSettings.getAll(db, COURSE_SCOPE);
+        expect(settings.providers[OPENAI].embeddingModel).toBe('text-embedding-3-large');
+        expect(settings.pendingEmbedding[OPENAI]).toBeUndefined();
     });
 
     test('switching to a platform with no stored key asks for one', async () => {

@@ -385,7 +385,8 @@ router.post('/:id/llm-provider/prepare', async (req, res) => {
         const result = await providerKeys.prepareStoredProvider(db, {
             scope: { type: 'superchat', id: req.params.id },
             provider: normalizeProvider(req.body && req.body.llmProvider),
-            requestedBy: req.user.userId
+            requestedBy: req.user.userId,
+            registry: req.app.locals.llmRegistry
         });
         res.status(result.httpStatus).json(result.body);
     } catch (error) {

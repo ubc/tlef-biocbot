@@ -559,7 +559,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const label = llmProviderLabel(provider);
         const prompt = action === 'prepare'
             ? `Refresh current material for ${label}? Only missing or changed items will be embedded.`
-            : `Switch this AI surface to ${label}? Existing embeddings will be reused.`;
+            : `Switch this AI surface to ${label}? Existing embeddings are reused, and only missing `
+                + `or changed items are indexed before the switch completes.`;
         if (!options.confirmed && !confirm(prompt)) return;
 
         const url = await llmProviderActionUrl(prefix, action);
@@ -571,19 +572,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         const result = await parseJsonResponse(response);
 
-        // Switching is intentionally attempted before preparation. When the
-        // target profile is already current (the common GPT -> Sandbox -> GPT
-        // case), the backend activates it immediately and no embedding prompt
-        // or migration is created. Only genuinely missing/changed items fall
-        // through to the explicit preparation action.
-        if (!response.ok && action === 'switch' && result.code === 'LLM_PROVIDER_NOT_PREPARED') {
-            const count = Number(result.unpreparedCount) || 0;
-            const itemLabel = count === 1 ? 'item needs' : 'items need';
-            if (!confirm(`${count} ${itemLabel} preparation for ${label}. Prepare ${count === 1 ? 'it' : 'them'} now?`)) {
-                return;
-            }
-            return runLlmProviderAction(prefix, 'prepare', { confirmed: true });
-        }
+        // Switching is one round trip. When the target profile is already
+        // current (the common GPT -> Sandbox -> GPT case) the backend activates
+        // it immediately; otherwise it starts the indexing job itself and
+        // activates the platform when that job finishes.
         if (!response.ok || !result.success) {
             throw new Error(result.message || `Could not ${action} ${label}`);
         }
@@ -970,7 +962,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function renderPlatformModelControls(platform) {
         const ui = LLM_PLATFORM_UI[platform.provider];
         if (!ui) return;
-        const { idPrefix } = ui;
+        const { idPrefix, label } = ui;
         const effortsByModel = platform.reasoningEffortsByModel || {};
         const defaultsByModel = platform.defaultReasoningEffortByModel || {};
 
@@ -1079,29 +1071,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         const pending = document.getElementById(`${idPrefix}-embedding-pending`);
-        const reindex = document.getElementById(`reindex-${idPrefix}-embedding`);
         const rollback = document.getElementById(`rollback-${idPrefix}-embedding`);
+        const isReindexing = Boolean(platform.pendingEmbedding?.migrationId);
         if (pending) {
             if (platform.pendingEmbedding) {
                 const activeDescription = platform.embeddingModel
                     ? `${platform.embeddingModel} stays active until re-indexing finishes.`
                     : 'No embedding model is active yet.';
                 pending.hidden = false;
-                pending.textContent = platform.pendingEmbedding.migrationId
+                // Re-indexing is never started from this panel. The surface's own
+                // platform control applies the saved choice when it switches to
+                // (or refreshes) that platform.
+                pending.textContent = isReindexing
                     ? `Re-indexing: ${platform.pendingEmbedding.embeddingModel}. ${activeDescription}`
-                    : `Selected: ${platform.pendingEmbedding.embeddingModel}. Click Re-index now to apply it. ${activeDescription}`;
+                    : `Saved: ${platform.pendingEmbedding.embeddingModel}. `
+                        + `It is applied when this surface switches to ${label}. ${activeDescription}`;
             } else {
                 pending.hidden = true;
                 pending.textContent = '';
             }
         }
-        const isReindexing = Boolean(platform.pendingEmbedding?.migrationId);
         if (embeddingSelect) embeddingSelect.disabled = isReindexing;
-        if (reindex) {
-            reindex.hidden = !platform.pendingEmbedding;
-            reindex.disabled = isReindexing;
-            reindex.textContent = isReindexing ? 'Re-indexing…' : 'Re-index now';
-        }
         if (rollback) {
             rollback.hidden = !platform.pendingEmbedding;
             rollback.textContent = isReindexing ? 'Cancel re-indexing' : 'Discard embedding change';
@@ -1248,50 +1238,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         showNotification(result.message || `${label} embedding selection saved`, 'success');
         await loadLLMSettings();
         return true;
-    }
-
-    async function startPlatformEmbeddingReindex(provider) {
-        const { label } = LLM_PLATFORM_UI[provider];
-        const current = llmPlatformSettings[provider];
-        const embeddingModel = current?.pendingEmbedding?.embeddingModel;
-        if (!embeddingModel) throw new Error('Save an embedding model selection first');
-        if (current.pendingEmbedding.migrationId) return;
-
-        const impactResponse = await fetchModelSettings('/api/settings/llm/embedding/impact', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ provider, embeddingModel, ...llmScopePayload() })
-        });
-        const impact = await impactResponse.json();
-        if (!impactResponse.ok || !impact.success) {
-            throw new Error(impact.error || 'Could not calculate the re-indexing impact');
-        }
-
-        const impactConfirmed = window.confirm(
-            `Start re-indexing for ${embeddingModel}?\n\n`
-            + `Surfaces affected: ${impact.impact.surfaces.length}\n`
-            + `Courses affected: ${impact.impact.courses}\n`
-            + `Items to re-index: ${impact.impact.itemsToReindex}\n`
-            + `Already current: ${impact.impact.itemsAlreadyCurrent}\n\n`
-            + `New collection: ${impact.profile.collection} (${impact.profile.vectorSize} dimensions).\n`
-            + 'The current embedding model stays active until re-indexing finishes. '
-            + 'No existing vectors or collections are deleted.'
-        );
-        if (!impactConfirmed) return;
-
-        const response = await fetchModelSettings('/api/settings/llm/embedding', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ provider, embeddingModel, ...llmScopePayload() })
-        });
-        const result = await response.json();
-        if (!response.ok || !result.success) {
-            throw new Error(result.error || 'Failed to stage the embedding model change');
-        }
-        showNotification(result.message || 'Re-indexing started', 'success');
-        await loadLLMSettings();
     }
 
     async function rollbackPlatformEmbeddingModel(provider) {
@@ -2427,18 +2373,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     wireSectionButton('save-proxy-llm-settings', async () => {
         await savePlatformModelSettings('ubc-llm-proxy');
     }, { busyLabel: 'Saving...' });
-
-    wireSectionButton('reindex-llm-embedding', async () => {
-        await startPlatformEmbeddingReindex('openai');
-    }, { busyLabel: 'Starting…' });
-
-    wireSectionButton('reindex-sandbox-llm-embedding', async () => {
-        await startPlatformEmbeddingReindex('ubc-llm-sandbox');
-    }, { busyLabel: 'Starting…' });
-
-    wireSectionButton('reindex-proxy-llm-embedding', async () => {
-        await startPlatformEmbeddingReindex('ubc-llm-proxy');
-    }, { busyLabel: 'Starting…' });
 
     wireSectionButton('rollback-llm-embedding', async () => {
         await rollbackPlatformEmbeddingModel('openai');
