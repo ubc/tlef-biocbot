@@ -72,6 +72,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     let llmModelScope = null;
     let llmSettingsRequestId = 0;
     let activeModelAccordion = null;
+    let markAdminSettingsReady;
+    const adminSettingsReady = new Promise(resolve => { markAdminSettingsReady = resolve; });
     const modelEditorContext = document.getElementById('llm-model-scope-context');
     const modelEditorHome = modelEditorContext?.parentElement || null;
     const modelEditorHomeMarker = modelEditorContext ? document.createComment('llm-model-editor-home') : null;
@@ -109,7 +111,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (reloadDefaults) await loadLLMSettings(null);
     }
 
-    async function openScopedModelEditor(scope, container, label, button) {
+    async function openScopedModelEditor(scope, container, label, button, placeAfter = null) {
         if (!container || !modelEditorContext) return;
         if (activeModelAccordion?.button === button) {
             await closeScopedModelEditor();
@@ -122,7 +124,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         body.className = 'scoped-model-accordion';
         body.setAttribute('role', 'region');
         body.setAttribute('aria-label', `${label} model settings`);
-        container.append(body);
+        if (placeAfter) placeAfter.after(body);
+        else container.append(body);
 
         const context = modelEditorContext;
         context.textContent = scope
@@ -156,11 +159,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             {
                 id: 'configure-notes-models',
                 controls: document.querySelector('#notes-llm-key-section .llm-key-controls'),
+                placeAfter: document.getElementById('notes-llm-key-section'),
                 resolve: async () => ({ scope: { type: 'notes', id: 'notesLlm' }, label: 'instructor notes' })
             },
             {
                 id: 'configure-instructor-superchat-models',
                 controls: document.querySelector('#instructor-superchat-llm-key-section .llm-key-controls'),
+                container: document.getElementById('settings-panel-admin-platform'),
                 resolve: async () => ({ scope: { type: 'superCourseChat', id: 'superCourseChat' }, label: 'global instructor Super Course chat' })
             }
         ];
@@ -173,13 +178,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             button.textContent = 'Configure models';
             button.setAttribute('aria-expanded', 'false');
             button.addEventListener('click', async () => {
+                // The page loads defaults and key state asynchronously. Wait
+                // for that first pass so it cannot overwrite this scoped load
+                // and leave the dropdowns empty.
+                await adminSettingsReady;
                 const resolved = await definition.resolve();
                 if (!resolved) {
                     showNotification('Select an AI surface first.', 'error');
                     return;
                 }
-                const section = definition.controls.closest('.settings-section');
-                await openScopedModelEditor(resolved.scope, section, resolved.label, button);
+                const container = definition.container || definition.controls.closest('.settings-section');
+                await openScopedModelEditor(resolved.scope, container, resolved.label, button, definition.placeAfter);
             });
             definition.controls.append(button);
         }
@@ -348,6 +357,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Load initial settings including prompts
     await loadSettings(canManageDB);
+    markAdminSettingsReady();
 
     // Visibility of the lifecycle and admin groups may have changed during load;
     // re-resolve the current hash against what this user can actually see.

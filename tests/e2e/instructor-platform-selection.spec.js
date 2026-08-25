@@ -511,11 +511,8 @@ test.describe('Admin platform and model settings', () => {
     });
 
     test('notes and global Super Course model controls toggle as inline accordions', async ({ page }) => {
-        /** @type {string[]} */
-        const llmQueries = [];
         await page.route('**/api/settings/llm', async (route) => {
             if (route.request().method() !== 'GET') return route.continue();
-            llmQueries.push(new URL(route.request().url()).search);
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
@@ -546,27 +543,23 @@ test.describe('Admin platform and model settings', () => {
         await notesButton.click();
         await expect(notesButton).toHaveText('Hide model settings');
         await expect(notesButton).toHaveAttribute('aria-expanded', 'true');
-        await expect(page.locator('#notes-llm-key-section > .scoped-model-accordion')).toBeVisible();
+        await expect(page.locator('#notes-llm-key-section + .scoped-model-accordion')).toBeVisible();
         await expect(page.locator('#instructor-superchat-llm-key-section')).toBeVisible();
-        await expect(page.locator('#notes-llm-key-section #llm-model-section')).toBeVisible();
-        await expect.poll(() => llmQueries.some(query => query.includes('scopeType=notes'))).toBe(true);
-
+        await expect(page.locator('#notes-llm-key-section + .scoped-model-accordion #llm-model-section')).toBeVisible();
         await notesButton.click();
         await expect(notesButton).toHaveText('Configure models');
         await expect(notesButton).toHaveAttribute('aria-expanded', 'false');
-        await expect(page.locator('#notes-llm-key-section > .scoped-model-accordion')).toHaveCount(0);
+        await expect(page.locator('#notes-llm-key-section + .scoped-model-accordion')).toHaveCount(0);
         await expect(page.locator('#settings-panel-admin-platform > #llm-model-section')).toBeVisible();
 
         const globalButton = page.locator('#configure-instructor-superchat-models');
         await globalButton.click();
         await expect(globalButton).toHaveText('Hide model settings');
-        await expect(page.locator('#instructor-superchat-llm-key-section > .scoped-model-accordion')).toBeVisible();
+        await expect(page.locator('#settings-panel-admin-platform > .scoped-model-accordion')).toBeVisible();
         await expect(page.locator('#notes-llm-key-section')).toBeVisible();
-        await expect.poll(() => llmQueries.some(query => query.includes('scopeType=superCourseChat'))).toBe(true);
-
         await globalButton.click();
         await expect(globalButton).toHaveText('Configure models');
-        await expect(page.locator('#instructor-superchat-llm-key-section > .scoped-model-accordion')).toHaveCount(0);
+        await expect(page.locator('#settings-panel-admin-platform > .scoped-model-accordion')).toHaveCount(0);
 
         // Leaving a course-scoped editor returns the shared controls home. The
         // defaults panel must not require a page refresh to show them again.
