@@ -393,6 +393,44 @@ describe('POST /llm/embedding/impact — preview before confirming', () => {
 });
 
 describe('POST /llm/embedding — staged, never destructive', () => {
+    test('saving an embedding choice does not start re-indexing until explicitly requested', async () => {
+        const db = memoryDb({
+            settings: [],
+            courses: [{
+                courseId: 'C1',
+                activeLlmProvider: OPENAI,
+                llmCredentials: { [OPENAI]: buildKeySubdocument('sk-a', 'a', OPENAI) }
+            }],
+            documents: [{ documentId: 'd1', courseId: 'C1', content: 'text' }],
+        });
+        await scopeModelSettings.materialize(db, { type: 'course', id: 'C1' });
+
+        const staged = await request(app({ db })).post('/llm/embedding/stage').send({
+            ...COURSE_SCOPE,
+            provider: OPENAI,
+            embeddingModel: 'text-embedding-3-large'
+        });
+
+        expect(staged.status).toBe(200);
+        expect(startedMigrations).toEqual([]);
+        let settings = await scopeModelSettings.getAll(db, { type: 'course', id: 'C1' });
+        expect(settings.pendingEmbedding[OPENAI]).toMatchObject({
+            embeddingModel: 'text-embedding-3-large',
+            migrationId: null
+        });
+        expect(settings.providers[OPENAI].embeddingModel).toBe('text-embedding-3-small');
+
+        const started = await request(app({ db })).post('/llm/embedding').send({
+            ...COURSE_SCOPE,
+            provider: OPENAI
+        });
+
+        expect(started.status).toBe(202);
+        expect(startedMigrations).toHaveLength(1);
+        settings = await scopeModelSettings.getAll(db, { type: 'course', id: 'C1' });
+        expect(settings.pendingEmbedding[OPENAI].migrationId).toBe(startedMigrations[0]);
+    });
+
     test('proxy embedding validation records the returned dimension in the staged profile', async () => {
         process.env.BIOCBOT_TEST_LLM_STUB = '1';
         process.env.BIOCBOT_TEST_PROXY_MODELS = 'proxy-chat,proxy-embed';
@@ -469,6 +507,35 @@ describe('POST /llm/embedding — staged, never destructive', () => {
         expect(startedMigrations).toHaveLength(1);
         const { pendingEmbedding } = await scopeModelSettings.getAll(db, { type: 'course', id: 'C1' });
         expect(pendingEmbedding[OPENAI].embeddingModel).toBe('text-embedding-3-large');
+    });
+
+    test('starting the same embedding migration twice returns the existing job', async () => {
+        const db = memoryDb({
+            settings: [],
+            courses: [{
+                courseId: 'C1',
+                activeLlmProvider: OPENAI,
+                llmCredentials: { [OPENAI]: buildKeySubdocument('sk-a', 'a', OPENAI) }
+            }],
+            documents: [{ documentId: 'd1', courseId: 'C1', content: 'text' }],
+        });
+        await scopeModelSettings.materialize(db, { type: 'course', id: 'C1' });
+        await request(app({ db })).post('/llm/embedding').send({
+            ...COURSE_SCOPE,
+            provider: OPENAI,
+            embeddingModel: 'text-embedding-3-large'
+        });
+
+        const duplicate = await request(app({ db })).post('/llm/embedding').send({
+            ...COURSE_SCOPE,
+            provider: OPENAI,
+            embeddingModel: 'text-embedding-3-large'
+        });
+
+        expect(duplicate.status).toBe(202);
+        expect(duplicate.body.message).toMatch(/already in progress/);
+        expect(duplicate.body.migration.migrationId).toBe(startedMigrations[0]);
+        expect(startedMigrations).toHaveLength(1);
     });
 
     test('selecting the model already in use is a no-op', async () => {

@@ -1361,12 +1361,11 @@ router.post('/llm/embedding/impact', async (req, res) => {
 });
 
 /**
- * POST /api/settings/llm/embedding
- * Stage an embedding-model change. A new profile (and therefore a new
- * collection) is created; the previous profile stays ACTIVE and its collection
- * is never deleted, so a rollback is just re-selecting the old model.
+ * POST /api/settings/llm/embedding/stage
+ * Save an embedding choice without starting re-indexing. Scoped surfaces keep
+ * the choice as pending until the instructor explicitly starts the job.
  */
-router.post('/llm/embedding', async (req, res) => {
+router.post('/llm/embedding/stage', async (req, res) => {
     try {
         const db = req.app.locals.db;
         if (!db) {
@@ -1379,13 +1378,27 @@ router.post('/llm/embedding', async (req, res) => {
         const provider = normalizeProvider(body.provider, configuredProvider());
         const embeddingModel = body.embeddingModel;
         const embeddingRevision = body.embeddingRevision || undefined;
-        const current = await oneModelSettings(db, scope, provider);
+        const { providers, pendingEmbedding } = await allModelSettings(db, scope);
+        const current = providers[provider];
+        const pending = pendingEmbedding[provider];
 
         if (!isAllowedEmbeddingModel(provider, embeddingModel, scopedModelRoster(current))) {
             return res.status(400).json({
                 success: false,
                 error: `Invalid embedding model for ${providerLabel(provider)}`
             });
+        }
+
+        if (pending?.migrationId) {
+            const active = await migrations.getMigration(db, pending.migrationId);
+            if (active && migrations.ACTIVE_STATUSES.includes(active.status)) {
+                return res.status(409).json({
+                    success: false,
+                    code: 'EMBEDDING_MIGRATION_ACTIVE',
+                    error: `A ${providerLabel(provider)} embedding change is already re-indexing.`,
+                    migration: migrations.publicMigrationView(active)
+                });
+            }
         }
 
         let vectorSize = current.vectorSize || undefined;
@@ -1402,8 +1415,127 @@ router.post('/llm/embedding', async (req, res) => {
             revision: embeddingRevision,
             vectorSize
         });
+
+        if (!scope) {
+            await adminModelSettings.stagePendingEmbedding(db, provider, {
+                embeddingModel,
+                embeddingRevision: profile.revision,
+                vectorSize: profile.vectorSize,
+                migrationId: null
+            });
+            await adminModelSettings.activatePendingEmbedding(db, provider, {
+                embeddingModel,
+                embeddingRevision: profile.revision
+            });
+            invalidateModelCaches(req);
+            return res.json({
+                success: true,
+                message: `${providerLabel(provider)} default embedding model saved.`,
+                pendingEmbedding: null
+            });
+        }
+
+        if (current.embeddingModel === embeddingModel
+            && current.embeddingRevision === profile.revision
+            && !pending) {
+            return res.json({
+                success: true,
+                message: `${providerLabel(provider)} already uses this embedding model.`,
+                pendingEmbedding: null
+            });
+        }
+
+        const staged = await scopeModelSettings.stagePendingEmbedding(db, scope, provider, {
+            embeddingModel,
+            embeddingRevision: profile.revision,
+            vectorSize: profile.vectorSize,
+            migrationId: null
+        });
+        invalidateModelCaches(req);
+        return res.json({
+            success: true,
+            message: `${providerLabel(provider)} embedding selection saved. Click Re-index now to apply it.`,
+            pendingEmbedding: staged
+        });
+    } catch (error) {
+        if (error.code === 'INVALID_EMBEDDING_MODEL') {
+            return res.status(400).json({ success: false, error: error.message });
+        }
+        console.error('Error saving embedding selection:', error);
+        return res.status(500).json({ success: false, error: 'Failed to save embedding selection' });
+    }
+});
+
+/**
+ * POST /api/settings/llm/embedding
+ * Stage an embedding-model change. A new profile (and therefore a new
+ * collection) is created; the previous profile stays ACTIVE and its collection
+ * is never deleted, so a rollback is just re-selecting the old model.
+ */
+router.post('/llm/embedding', async (req, res) => {
+    try {
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: 'Database connection not available' });
+        }
+        if (!requireSystemAdmin(req, res)) return;
+
+        const body = req.body || {};
+        const scope = requestedLlmScope(req);
+        const provider = normalizeProvider(body.provider, configuredProvider());
+        const requestedEmbeddingModel = body.embeddingModel;
+        const embeddingRevision = body.embeddingRevision || undefined;
+        const { providers, pendingEmbedding } = await allModelSettings(db, scope);
+        const current = providers[provider];
+        const pending = pendingEmbedding[provider];
+        const embeddingModel = requestedEmbeddingModel || pending?.embeddingModel;
+
+        if (!isAllowedEmbeddingModel(provider, embeddingModel, scopedModelRoster(current))) {
+            return res.status(400).json({
+                success: false,
+                error: `Invalid embedding model for ${providerLabel(provider)}`
+            });
+        }
+
+        let vectorSize = pending?.embeddingModel === embeddingModel
+            ? pending.vectorSize || current.vectorSize || undefined
+            : current.vectorSize || undefined;
+        if (provider === PROVIDERS.PROXY && !(pending?.embeddingModel === embeddingModel && pending.vectorSize)) {
+            try {
+                ({ vectorSize } = await providerKeys.validateProxyEmbeddingModel(db, embeddingModel, scope));
+            } catch (error) {
+                return res.status(400).json({ success: false, error: error.message, code: error.code });
+            }
+        }
+        const profile = buildEmbeddingProfile({
+            provider,
+            embeddingModel,
+            revision: embeddingRevision,
+            vectorSize
+        });
         const sameConfiguredProfile = current.embeddingModel === embeddingModel
             && current.embeddingRevision === profile.revision;
+
+        const active = scope ? await migrations.findActiveMigration(db, scope) : null;
+        if (active) {
+            const sameTarget = active.targetProfileKey === profile.key;
+            if (sameTarget) {
+                return res.status(202).json({
+                    success: true,
+                    message: `Re-indexing for ${embeddingModel} is already in progress.`,
+                    provider,
+                    scope,
+                    migration: migrations.publicMigrationView(active)
+                });
+            }
+            return res.status(409).json({
+                success: false,
+                code: 'EMBEDDING_MIGRATION_ACTIVE',
+                error: `A ${providerLabel(provider)} embedding change is already re-indexing. `
+                    + 'Cancel it before staging another model.',
+                migration: migrations.publicMigrationView(active)
+            });
+        }
 
         // The unscoped document is only a template for future AI surfaces. It
         // has no retrieval pool and therefore changes immediately without a
@@ -1454,17 +1586,6 @@ router.post('/llm/embedding', async (req, res) => {
         // One embedding change at a time per scope/platform. Two overlapping jobs
         // would fight over the single staged setting, and the first to finish
         // would activate a model the other is still indexing.
-        const active = await migrations.findActiveMigration(db, scope);
-        if (active) {
-            return res.status(409).json({
-                success: false,
-                code: 'EMBEDDING_MIGRATION_ACTIVE',
-                error: `A ${providerLabel(provider)} embedding change is already re-indexing. `
-                    + 'Cancel it before staging another model.',
-                migration: migrations.publicMigrationView(active)
-            });
-        }
-
         surfaces ||= await providerKeys.migrationScopeContent(db, scope);
         const { job } = await migrations.createMigration(db, {
             scope,

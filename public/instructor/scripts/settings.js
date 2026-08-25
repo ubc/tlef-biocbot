@@ -1053,9 +1053,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         fillSelect(
             embeddingSelect,
             platform.allowedEmbeddingModels || [],
-            platform.embeddingModel
+            platform.pendingEmbedding?.embeddingModel || platform.embeddingModel
         );
-        if (platform.provider === 'ubc-llm-proxy' && !platform.embeddingModel && embeddingSelect) {
+        if (platform.provider === 'ubc-llm-proxy'
+            && !platform.pendingEmbedding?.embeddingModel
+            && !platform.embeddingModel
+            && embeddingSelect) {
             const placeholder = new Option('Select an embedding model', '', true, true);
             placeholder.disabled = true;
             embeddingSelect.prepend(placeholder);
@@ -1076,18 +1079,33 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         const pending = document.getElementById(`${idPrefix}-embedding-pending`);
+        const reindex = document.getElementById(`reindex-${idPrefix}-embedding`);
         const rollback = document.getElementById(`rollback-${idPrefix}-embedding`);
         if (pending) {
             if (platform.pendingEmbedding) {
+                const activeDescription = platform.embeddingModel
+                    ? `${platform.embeddingModel} stays active until re-indexing finishes.`
+                    : 'No embedding model is active yet.';
                 pending.hidden = false;
-                pending.textContent = `Staged: ${platform.pendingEmbedding.embeddingModel}. `
-                    + `${platform.embeddingModel} stays active until re-indexing finishes.`;
+                pending.textContent = platform.pendingEmbedding.migrationId
+                    ? `Re-indexing: ${platform.pendingEmbedding.embeddingModel}. ${activeDescription}`
+                    : `Selected: ${platform.pendingEmbedding.embeddingModel}. Click Re-index now to apply it. ${activeDescription}`;
             } else {
                 pending.hidden = true;
                 pending.textContent = '';
             }
         }
-        if (rollback) rollback.hidden = !platform.pendingEmbedding;
+        const isReindexing = Boolean(platform.pendingEmbedding?.migrationId);
+        if (embeddingSelect) embeddingSelect.disabled = isReindexing;
+        if (reindex) {
+            reindex.hidden = !platform.pendingEmbedding;
+            reindex.disabled = isReindexing;
+            reindex.textContent = isReindexing ? 'Re-indexing…' : 'Re-index now';
+        }
+        if (rollback) {
+            rollback.hidden = !platform.pendingEmbedding;
+            rollback.textContent = isReindexing ? 'Cancel re-indexing' : 'Discard embedding change';
+        }
     }
 
     async function loadLLMSettings(scope = undefined) {
@@ -1190,8 +1208,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             throw new Error(result.error || 'Failed to save LLM settings');
         }
 
-        const embeddingChanged = await changePlatformEmbeddingModel(provider);
-        if (!embeddingChanged) {
+        const embeddingStaged = await stagePlatformEmbeddingModel(provider);
+        if (!embeddingStaged) {
             showNotification(`${label} model settings saved`, 'success');
         }
     }
@@ -1202,18 +1220,42 @@ document.addEventListener('DOMContentLoaded', async () => {
      *
      * @returns {Promise<boolean>} true when a change was actually staged
      */
-    async function changePlatformEmbeddingModel(provider) {
+    async function stagePlatformEmbeddingModel(provider) {
         const { idPrefix, label } = LLM_PLATFORM_UI[provider];
         const embeddingModel = document.getElementById(`${idPrefix}-embedding-select`)?.value;
         if (!embeddingModel) return false;
 
-        // Unchanged embedding model: nothing to re-index.
         const current = llmPlatformSettings[provider];
-        if (current && current.embeddingModel === embeddingModel
-            && !current.pendingEmbedding
-            && provider !== 'ubc-llm-proxy') {
+        if (current?.pendingEmbedding?.migrationId) {
+            if (current.pendingEmbedding.embeddingModel === embeddingModel) return false;
+            throw new Error('Cancel the current re-indexing job before choosing another embedding model.');
+        }
+        if (current?.pendingEmbedding?.embeddingModel === embeddingModel) return false;
+        if (current?.embeddingModel === embeddingModel && !current.pendingEmbedding) {
             return false;
         }
+
+        const response = await fetchModelSettings('/api/settings/llm/embedding/stage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ provider, embeddingModel, ...llmScopePayload() })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || 'Failed to save the embedding model selection');
+        }
+        showNotification(result.message || `${label} embedding selection saved`, 'success');
+        await loadLLMSettings();
+        return true;
+    }
+
+    async function startPlatformEmbeddingReindex(provider) {
+        const { label } = LLM_PLATFORM_UI[provider];
+        const current = llmPlatformSettings[provider];
+        const embeddingModel = current?.pendingEmbedding?.embeddingModel;
+        if (!embeddingModel) throw new Error('Save an embedding model selection first');
+        if (current.pendingEmbedding.migrationId) return;
 
         const impactResponse = await fetchModelSettings('/api/settings/llm/embedding/impact', {
             method: 'POST',
@@ -1223,16 +1265,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         const impact = await impactResponse.json();
         if (!impactResponse.ok || !impact.success) {
-            throw new Error(impact.error || 'Could not calculate the impact of this change');
-        }
-        if (current && current.embeddingModel === embeddingModel
-            && !current.pendingEmbedding
-            && impact.impact.itemsToReindex === 0) {
-            return false;
+            throw new Error(impact.error || 'Could not calculate the re-indexing impact');
         }
 
-        const confirmed = window.confirm(
-            `Change the ${label} embedding model to ${embeddingModel}?\n\n`
+        const impactConfirmed = window.confirm(
+            `Start re-indexing for ${embeddingModel}?\n\n`
             + `Surfaces affected: ${impact.impact.surfaces.length}\n`
             + `Courses affected: ${impact.impact.courses}\n`
             + `Items to re-index: ${impact.impact.itemsToReindex}\n`
@@ -1241,7 +1278,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             + 'The current embedding model stays active until re-indexing finishes. '
             + 'No existing vectors or collections are deleted.'
         );
-        if (!confirmed) return false;
+        if (!impactConfirmed) return;
 
         const response = await fetchModelSettings('/api/settings/llm/embedding', {
             method: 'POST',
@@ -1255,11 +1292,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         showNotification(result.message || 'Re-indexing started', 'success');
         await loadLLMSettings();
-        return true;
     }
 
     async function rollbackPlatformEmbeddingModel(provider) {
-        const response = await fetch('/api/settings/llm/embedding/rollback', {
+        const response = await fetchModelSettings('/api/settings/llm/embedding/rollback', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
@@ -2391,6 +2427,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     wireSectionButton('save-proxy-llm-settings', async () => {
         await savePlatformModelSettings('ubc-llm-proxy');
     }, { busyLabel: 'Saving...' });
+
+    wireSectionButton('reindex-llm-embedding', async () => {
+        await startPlatformEmbeddingReindex('openai');
+    }, { busyLabel: 'Starting…' });
+
+    wireSectionButton('reindex-sandbox-llm-embedding', async () => {
+        await startPlatformEmbeddingReindex('ubc-llm-sandbox');
+    }, { busyLabel: 'Starting…' });
+
+    wireSectionButton('reindex-proxy-llm-embedding', async () => {
+        await startPlatformEmbeddingReindex('ubc-llm-proxy');
+    }, { busyLabel: 'Starting…' });
 
     wireSectionButton('rollback-llm-embedding', async () => {
         await rollbackPlatformEmbeddingModel('openai');

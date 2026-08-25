@@ -757,9 +757,13 @@ test.describe('Admin platform and model settings', () => {
         await page.locator('.settings-tile[data-panel="admin-platform"]').click();
 
         await expect(page.locator('#llm-embedding-pending')).toBeVisible();
-        await expect(page.locator('#llm-embedding-pending')).toContainText('Staged: text-embedding-3-large');
+        await expect(page.locator('#llm-embedding-pending')).toContainText('Re-indexing: text-embedding-3-large');
         await expect(page.locator('#llm-embedding-pending'))
             .toContainText('text-embedding-3-small stays active until re-indexing finishes');
+        await expect(page.locator('#reindex-llm-embedding')).toBeVisible();
+        await expect(page.locator('#reindex-llm-embedding')).toBeDisabled();
+        await expect(page.locator('#reindex-llm-embedding')).toHaveText('Re-indexing…');
         await expect(page.locator('#rollback-llm-embedding')).toBeVisible();
+        await expect(page.locator('#rollback-llm-embedding')).toHaveText('Cancel re-indexing');
     });
 });

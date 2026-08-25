@@ -1003,13 +1003,14 @@
                                     <div class="setting-item">
                                         <div class="setting-info">
                                             <h4 id="llm-embedding-label">Embedding model</h4>
-                                            <p id="llm-embedding-desc">Saving a different embedding model shows you the re-indexing impact first, then stages it. The current model stays active until re-indexing finishes, and no existing vectors are deleted.</p>
+                                            <p id="llm-embedding-desc">Save an embedding choice first, then start re-indexing explicitly. The current model stays active until re-indexing finishes, and no existing vectors are deleted.</p>
                                             <p class="llm-embedding-collection-note">Collection: <span id="llm-embedding-collection"></span></p>
                                             <p id="llm-embedding-pending" class="llm-embedding-pending" hidden></p>
                                         </div>
                                         <div class="setting-controls llm-embedding-controls">
                                             <select id="llm-embedding-select" class="number-input" aria-labelledby="llm-embedding-label" aria-describedby="llm-embedding-desc"></select>
-                                            <button id="rollback-llm-embedding" class="secondary-button" hidden>Cancel staged change</button>
+                                            <button id="reindex-llm-embedding" class="primary-button" hidden>Re-index now</button>
+                                            <button id="rollback-llm-embedding" class="secondary-button" hidden>Discard embedding change</button>
                                         </div>
                                     </div>
                                 </div>
@@ -1082,13 +1083,14 @@
                                     <div class="setting-item">
                                         <div class="setting-info">
                                             <h4 id="sandbox-llm-embedding-label">Embedding model</h4>
-                                            <p id="sandbox-llm-embedding-desc">Saving a different embedding model shows you the re-indexing impact first, then stages it. The current model stays active until re-indexing finishes.</p>
+                                            <p id="sandbox-llm-embedding-desc">Save an embedding choice first, then start re-indexing explicitly. The current model stays active until re-indexing finishes.</p>
                                             <p class="llm-embedding-collection-note">Collection: <span id="sandbox-llm-embedding-collection"></span></p>
                                             <p id="sandbox-llm-embedding-pending" class="llm-embedding-pending" hidden></p>
                                         </div>
                                         <div class="setting-controls llm-embedding-controls">
                                             <select id="sandbox-llm-embedding-select" class="number-input" aria-labelledby="sandbox-llm-embedding-label" aria-describedby="sandbox-llm-embedding-desc"></select>
-                                            <button id="rollback-sandbox-llm-embedding" class="secondary-button" hidden>Cancel staged change</button>
+                                            <button id="reindex-sandbox-llm-embedding" class="primary-button" hidden>Re-index now</button>
+                                            <button id="rollback-sandbox-llm-embedding" class="secondary-button" hidden>Discard embedding change</button>
                                         </div>
                                     </div>
                                 </div>
@@ -1162,13 +1164,14 @@
                                     <div class="setting-item">
                                         <div class="setting-info">
                                             <h4 id="proxy-llm-embedding-label">Embedding model</h4>
-                                            <p id="proxy-llm-embedding-desc">The selection is validated by generating an embedding. Its returned vector size defines the new collection before re-indexing starts.</p>
+                                            <p id="proxy-llm-embedding-desc">Save an embedding choice first, then start re-indexing explicitly. Known models use their verified vector size; unknown models are validated when saved.</p>
                                             <p class="llm-embedding-collection-note">Collection: <span id="proxy-llm-embedding-collection">Not configured</span></p>
                                             <p id="proxy-llm-embedding-pending" class="llm-embedding-pending" hidden></p>
                                         </div>
                                         <div class="setting-controls llm-embedding-controls">
                                             <select id="proxy-llm-embedding-select" class="number-input" aria-labelledby="proxy-llm-embedding-label" aria-describedby="proxy-llm-embedding-desc"></select>
-                                            <button id="rollback-proxy-llm-embedding" class="secondary-button" hidden>Cancel staged change</button>
+                                            <button id="reindex-proxy-llm-embedding" class="primary-button" hidden>Re-index now</button>
+                                            <button id="rollback-proxy-llm-embedding" class="secondary-button" hidden>Discard embedding change</button>
                                         </div>
                                     </div>
                                 </div>
