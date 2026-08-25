@@ -36,21 +36,22 @@ async function fetchCourseId() {
         return courseIdFromUrl;
     }
 
-    // Check localStorage for the last selected course
-    const storedCourseId = localStorage.getItem('selectedCourseId');
-    if (storedCourseId) {
-        console.log(`🔍 [GET_COURSE_ID] Found course in localStorage: ${storedCourseId}`);
-        return storedCourseId;
+    // A selected course is stored for the whole browser origin, so it can
+    // survive a logout, an account switch, or revoked course access. Wait for
+    // the current user and validate the stored value before any settings
+    // loader is allowed to cache and use it.
+    if (!getCurrentInstructorId()) {
+        await waitForAuth();
     }
-    
-    // If no course ID in URL or storage, try to get it from the user's courses
-    try {
-        // Wait for auth to be ready if needed
-        if (!getCurrentInstructorId()) {
-             await waitForAuth();
-        }
 
-        const userId = getCurrentInstructorId(); // This works for both instructors and TAs
+    const userId = getCurrentInstructorId(); // This works for instructors and TAs
+    const storedCourseId = localStorage.getItem('selectedCourseId');
+    let accessibleCourses = null;
+
+    // Resolve the user's accessible courses once. Besides selecting a default,
+    // this prevents stale localStorage from causing every settings section to
+    // issue its own unauthorized request.
+    try {
         if (!userId) {
             console.error('No user ID available');
             return null;
@@ -82,19 +83,32 @@ async function fetchCourseId() {
             
             let courses = [];
             if (isTAUser) {
-                courses = result.data || [];
+                courses = Array.isArray(result.data) ? result.data : [];
             } else {
-                courses = result.data && result.data.courses ? result.data.courses : [];
+                courses = result.data && Array.isArray(result.data.courses) ? result.data.courses : [];
             }
-            
+
+            accessibleCourses = courses;
+
+            if (storedCourseId) {
+                const storedCourse = courses.find(course => course.courseId === storedCourseId);
+                if (storedCourse) {
+                    console.log(`🔍 [GET_COURSE_ID] Found accessible course in localStorage: ${storedCourseId}`);
+                    return storedCourseId;
+                }
+
+                console.log(`🔍 [GET_COURSE_ID] Clearing stale course from localStorage: ${storedCourseId}`);
+                localStorage.removeItem('selectedCourseId');
+            }
+
             if (courses.length > 0) {
-                // Return the first course found
                 const firstCourse = courses[0];
-                console.log(`🔍 [GET_COURSE_ID] Found course:`, firstCourse.courseId);
+                localStorage.setItem('selectedCourseId', firstCourse.courseId);
+                console.log(`🔍 [GET_COURSE_ID] Selected accessible course:`, firstCourse.courseId);
                 return firstCourse.courseId;
-            } else {
-                console.log(`🔍 [GET_COURSE_ID] No courses found in response`);
             }
+
+            console.log(`🔍 [GET_COURSE_ID] No courses found in response`);
         } else {
             const errorText = await response.text();
             console.error(`🔍 [GET_COURSE_ID] API error: ${response.status} - ${errorText}`);
@@ -102,8 +116,15 @@ async function fetchCourseId() {
     } catch (error) {
         console.error('Error fetching instructor courses:', error);
     }
-    
-    
+
+    // Do not trust a stored course when the access check failed. Keeping it in
+    // storage is useful for retrying after a temporary network error, but using
+    // it here would recreate the unauthorized request cascade this resolver is
+    // meant to prevent.
+    if (storedCourseId && accessibleCourses === null) {
+        return null;
+    }
+
     // Additional fallback: Check if we can get course ID from the current user's preferences
     const currentUser = getCurrentUser();
     if (currentUser && currentUser.preferences && currentUser.preferences.courseId) {

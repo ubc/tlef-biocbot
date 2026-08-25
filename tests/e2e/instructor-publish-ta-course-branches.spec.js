@@ -1033,9 +1033,9 @@ test.describe('instructor publish, TA, course, and polling branches', () => {
         expect(alertMessage).toBe('No course selected. Please try again.');
     });
 
-    test('loads selected course from localStorage when URL has no course', async ({ page }) => {
+    test('loads an accessible selected course from localStorage when URL has no course', async ({ page }) => {
         await openInstructorScriptHarness(page, {
-            selectedCourseId: 'LOCAL-STORAGE-COURSE',
+            selectedCourseId: COURSE_ID,
         });
         const selectedCourse = await page.evaluate(async () => {
             const instructorWindow = /** @type {InstructorWindow} */ (window);
@@ -1043,7 +1043,31 @@ test.describe('instructor publish, TA, course, and polling branches', () => {
             return instructorWindow.getCurrentCourseId();
         });
 
-        expect(selectedCourse).toBe('LOCAL-STORAGE-COURSE');
+        expect(selectedCourse).toBe(COURSE_ID);
+    });
+
+    test('replaces a stale stored course before instructor settings loaders can use it', async ({ page }) => {
+        await openInstructorScriptHarness(page, {
+            selectedCourseId: 'STALE-COURSE-FROM-ANOTHER-USER',
+            controls: {
+                instructorCourses: [branchCourse({ courseId: COURSE_ID })],
+            },
+        });
+
+        const result = await page.evaluate(async () => {
+            const instructorWindow = /** @type {InstructorWindow} */ (window);
+            window.history.replaceState({}, '', '/instructor/settings');
+            const resolvedCourseId = await instructorWindow.getCurrentCourseId();
+            return {
+                resolvedCourseId,
+                storedCourseId: localStorage.getItem('selectedCourseId'),
+            };
+        });
+
+        expect(result).toEqual({
+            resolvedCourseId: COURSE_ID,
+            storedCourseId: COURSE_ID,
+        });
     });
 
     test('waits for auth when the instructor id is initially unavailable', async ({ page }) => {
