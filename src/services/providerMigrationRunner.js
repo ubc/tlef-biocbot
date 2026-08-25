@@ -25,6 +25,7 @@ const { activeProviderOf, credentialForProvider, decryptApiKey } = require('./ll
 const { getCourseSuperchatIds } = require('../models/Course');
 const { resolveSuperCourseChatSettings } = require('./superCourseService');
 const migrations = require('./providerMigrationService');
+const failureReasons = require('./migrationFailureReasons');
 
 const { ITEM_STATUSES, MIGRATION_STATUSES, MAX_ATTEMPTS } = migrations;
 
@@ -171,7 +172,13 @@ async function resolveTargetProfile(db, job, scope = job.scope) {
  * base service so the embeddings client is created once per key.
  */
 async function createVectorServices(profile, { needNotes, shouldCancel = null }) {
-    const qdrant = new QdrantService({ embeddingProfile: profile, shouldCancel });
+    const qdrant = new QdrantService({
+        embeddingProfile: profile,
+        shouldCancel,
+        // The job's own items are the real test of the provider; a warm-up
+        // embedding here only adds a call that can hang before item 1.
+        skipEmbeddingProbe: true
+    });
     await qdrant.initialize();
 
     let notesQdrant = null;
@@ -498,7 +505,10 @@ async function runMigration(db, migrationId, options = {}) {
                 await migrations.recordItemResult(db, migrationId, item.itemId, item.itemType, {
                     status: attempts >= MAX_ATTEMPTS ? ITEM_STATUSES.FAILED : ITEM_STATUSES.PENDING,
                     attempts,
-                    error: String(error.message || error).slice(0, 500)
+                    error: String(error.message || error).slice(0, 500),
+                    // Classified here, where the Error object still carries its
+                    // code and HTTP status, rather than re-guessed from a string.
+                    failureReason: failureReasons.classifyFailure(error)
                 });
                 console.error(`❌ Migration ${migrationId}: ${item.itemType} ${item.itemId} failed (attempt ${attempts}):`, error.message);
 
@@ -529,8 +539,10 @@ async function runMigration(db, migrationId, options = {}) {
     const failed = (job.items || []).filter(item => item.status === ITEM_STATUSES.FAILED);
 
     if (failed.length > 0) {
-        // When every item failed the same way — a missing credential, an
-        // unreachable endpoint — report that cause rather than a bare count.
+        // `job.error` stays technical on purpose: it names the provider's own
+        // words and, for a credential failure, the surface that is missing a
+        // key — detail no readable sentence can carry. What a person sees is
+        // built separately in publicMigrationView's `failureSummary`.
         const distinctErrors = [...new Set(failed.map(item => item.error).filter(Boolean))];
         const summary = distinctErrors.length === 1
             ? distinctErrors[0]
@@ -554,9 +566,11 @@ async function runMigration(db, migrationId, options = {}) {
         }
     }
 
-    if (job.kind === 'embedding-model') {
-        // Only promote the model THIS job indexed — a newer staged change has
-        // its own migration and its own vectors to wait for.
+    // Only promote the model THIS job indexed — a newer staged change has its
+    // own migration and its own vectors to wait for. A prepare/switch job
+    // qualifies too: it is what applies an embedding choice saved in the model
+    // settings panel, which never starts a job of its own.
+    if (job.kind === 'embedding-model' || job.kind === 'provider' || job.kind === 'prepare') {
         const expected = {
             embeddingModel: job.targetProfile.embeddingModel,
             embeddingRevision: job.targetProfile.revision

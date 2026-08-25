@@ -469,9 +469,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         reasoningItem.style.display = '';
         reasoningSelect.disabled = true;
         reasoningSelect.replaceChildren(new Option('Checking supported efforts…', '', true, true));
+        const discoveryKey = `${llmModelScope?.type || 'defaults'}:${llmModelScope?.id || 'new'}:${model}`;
 
         try {
-            const discoveryKey = `${llmModelScope?.type || 'defaults'}:${llmModelScope?.id || 'new'}:${model}`;
             let discovery = proxyReasoningEffortCache.get(discoveryKey);
             if (!discovery) {
                 discovery = fetch('/api/settings/llm/reasoning-efforts', {
@@ -484,18 +484,27 @@ document.addEventListener('DOMContentLoaded', async () => {
                     if (!response.ok || !result.success) {
                         throw new Error(result.error || 'Unable to detect supported reasoning efforts');
                     }
-                    return result.reasoningEfforts || [];
+                    return {
+                        efforts: result.reasoningEfforts || [],
+                        defaultReasoningEffort: result.defaultReasoningEffort || null
+                    };
                 });
                 proxyReasoningEffortCache.set(discoveryKey, discovery);
             }
 
-            const efforts = await discovery;
+            const { efforts, defaultReasoningEffort } = await discovery;
             platform.reasoningEffortsByModel ||= {};
             platform.defaultReasoningEffortByModel ||= {};
             platform.reasoningEffortsByModel[model] = efforts;
-            platform.defaultReasoningEffortByModel[model] = efforts.includes(previouslySelected)
-                ? previouslySelected
-                : efforts.includes('low') ? 'low' : efforts[0];
+            const savedModel = lane === 'backend' ? platform.backendChatModel : platform.chatModel;
+            const savedEffort = lane === 'backend' ? platform.backendReasoningEffort : platform.reasoningEffort;
+            platform.defaultReasoningEffortByModel[model] = savedModel === model && efforts.includes(savedEffort)
+                ? savedEffort
+                : efforts.includes(defaultReasoningEffort)
+                    ? defaultReasoningEffort
+                    : efforts.includes(previouslySelected)
+                        ? previouslySelected
+                        : efforts.includes('low') ? 'low' : efforts[0];
 
             reasoningSelect.replaceChildren();
             updateReasoningVisibility(
@@ -506,7 +515,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             );
             discoverySucceeded = true;
         } catch (error) {
-            proxyReasoningEffortCache.delete(model);
+            proxyReasoningEffortCache.delete(discoveryKey);
             reasoningSelect.replaceChildren(new Option('Reasoning check failed', '', true, true));
             reasoningItem.style.display = '';
             showNotification(error.message, 'error');
@@ -550,7 +559,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const label = llmProviderLabel(provider);
         const prompt = action === 'prepare'
             ? `Refresh current material for ${label}? Only missing or changed items will be embedded.`
-            : `Switch this AI surface to ${label}? Existing embeddings will be reused.`;
+            : `Switch this AI surface to ${label}? Existing embeddings are reused, and only missing `
+                + `or changed items are indexed before the switch completes.`;
         if (!options.confirmed && !confirm(prompt)) return;
 
         const url = await llmProviderActionUrl(prefix, action);
@@ -562,19 +572,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         const result = await parseJsonResponse(response);
 
-        // Switching is intentionally attempted before preparation. When the
-        // target profile is already current (the common GPT -> Sandbox -> GPT
-        // case), the backend activates it immediately and no embedding prompt
-        // or migration is created. Only genuinely missing/changed items fall
-        // through to the explicit preparation action.
-        if (!response.ok && action === 'switch' && result.code === 'LLM_PROVIDER_NOT_PREPARED') {
-            const count = Number(result.unpreparedCount) || 0;
-            const itemLabel = count === 1 ? 'item needs' : 'items need';
-            if (!confirm(`${count} ${itemLabel} preparation for ${label}. Prepare ${count === 1 ? 'it' : 'them'} now?`)) {
-                return;
-            }
-            return runLlmProviderAction(prefix, 'prepare', { confirmed: true });
-        }
+        // Switching is one round trip. When the target profile is already
+        // current (the common GPT -> Sandbox -> GPT case) the backend activates
+        // it immediately; otherwise it starts the indexing job itself and
+        // activates the platform when that job finishes.
         if (!response.ok || !result.success) {
             throw new Error(result.message || `Could not ${action} ${label}`);
         }
@@ -961,7 +962,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function renderPlatformModelControls(platform) {
         const ui = LLM_PLATFORM_UI[platform.provider];
         if (!ui) return;
-        const { idPrefix } = ui;
+        const { idPrefix, label } = ui;
         const effortsByModel = platform.reasoningEffortsByModel || {};
         const defaultsByModel = platform.defaultReasoningEffortByModel || {};
 
@@ -1044,9 +1045,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         fillSelect(
             embeddingSelect,
             platform.allowedEmbeddingModels || [],
-            platform.embeddingModel
+            platform.pendingEmbedding?.embeddingModel || platform.embeddingModel
         );
-        if (platform.provider === 'ubc-llm-proxy' && !platform.embeddingModel && embeddingSelect) {
+        if (platform.provider === 'ubc-llm-proxy'
+            && !platform.pendingEmbedding?.embeddingModel
+            && !platform.embeddingModel
+            && embeddingSelect) {
             const placeholder = new Option('Select an embedding model', '', true, true);
             placeholder.disabled = true;
             embeddingSelect.prepend(placeholder);
@@ -1068,17 +1072,30 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const pending = document.getElementById(`${idPrefix}-embedding-pending`);
         const rollback = document.getElementById(`rollback-${idPrefix}-embedding`);
+        const isReindexing = Boolean(platform.pendingEmbedding?.migrationId);
         if (pending) {
             if (platform.pendingEmbedding) {
+                const activeDescription = platform.embeddingModel
+                    ? `${platform.embeddingModel} stays active until re-indexing finishes.`
+                    : 'No embedding model is active yet.';
                 pending.hidden = false;
-                pending.textContent = `Staged: ${platform.pendingEmbedding.embeddingModel}. `
-                    + `${platform.embeddingModel} stays active until re-indexing finishes.`;
+                // Re-indexing is never started from this panel. The surface's own
+                // platform control applies the saved choice when it switches to
+                // (or refreshes) that platform.
+                pending.textContent = isReindexing
+                    ? `Re-indexing: ${platform.pendingEmbedding.embeddingModel}. ${activeDescription}`
+                    : `Saved: ${platform.pendingEmbedding.embeddingModel}. `
+                        + `It is applied when this surface switches to ${label}. ${activeDescription}`;
             } else {
                 pending.hidden = true;
                 pending.textContent = '';
             }
         }
-        if (rollback) rollback.hidden = !platform.pendingEmbedding;
+        if (embeddingSelect) embeddingSelect.disabled = isReindexing;
+        if (rollback) {
+            rollback.hidden = !platform.pendingEmbedding;
+            rollback.textContent = isReindexing ? 'Cancel re-indexing' : 'Discard embedding change';
+        }
     }
 
     async function loadLLMSettings(scope = undefined) {
@@ -1137,6 +1154,21 @@ document.addEventListener('DOMContentLoaded', async () => {
      * confirmation, the change is staged — one Save button, no second control
      * that silently owns half the section.
      */
+    async function fetchModelSettings(url, options) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15_000);
+        try {
+            return await fetch(url, { ...options, signal: controller.signal });
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                throw new Error('The model-settings request timed out. Please try again.');
+            }
+            throw error;
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
     async function savePlatformModelSettings(provider) {
         const { idPrefix, label } = LLM_PLATFORM_UI[provider];
         const chatModel = document.getElementById(`${idPrefix}-model-select`)?.value;
@@ -1147,7 +1179,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!chatModel) throw new Error('Select a model first');
         if (!backendInheritsFrontend && !backendChatModel) throw new Error('Select a back-end model first');
 
-        const response = await fetch('/api/settings/llm', {
+        const response = await fetchModelSettings('/api/settings/llm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
@@ -1166,8 +1198,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             throw new Error(result.error || 'Failed to save LLM settings');
         }
 
-        const embeddingChanged = await changePlatformEmbeddingModel(provider);
-        if (!embeddingChanged) {
+        const embeddingStaged = await stagePlatformEmbeddingModel(provider);
+        if (!embeddingStaged) {
             showNotification(`${label} model settings saved`, 'success');
         }
     }
@@ -1178,48 +1210,22 @@ document.addEventListener('DOMContentLoaded', async () => {
      *
      * @returns {Promise<boolean>} true when a change was actually staged
      */
-    async function changePlatformEmbeddingModel(provider) {
+    async function stagePlatformEmbeddingModel(provider) {
         const { idPrefix, label } = LLM_PLATFORM_UI[provider];
         const embeddingModel = document.getElementById(`${idPrefix}-embedding-select`)?.value;
         if (!embeddingModel) return false;
 
-        // Unchanged embedding model: nothing to re-index.
         const current = llmPlatformSettings[provider];
-        if (current && current.embeddingModel === embeddingModel
-            && !current.pendingEmbedding
-            && provider !== 'ubc-llm-proxy') {
+        if (current?.pendingEmbedding?.migrationId) {
+            if (current.pendingEmbedding.embeddingModel === embeddingModel) return false;
+            throw new Error('Cancel the current re-indexing job before choosing another embedding model.');
+        }
+        if (current?.pendingEmbedding?.embeddingModel === embeddingModel) return false;
+        if (current?.embeddingModel === embeddingModel && !current.pendingEmbedding) {
             return false;
         }
 
-        const impactResponse = await fetch('/api/settings/llm/embedding/impact', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ provider, embeddingModel, ...llmScopePayload() })
-        });
-        const impact = await impactResponse.json();
-        if (!impactResponse.ok || !impact.success) {
-            throw new Error(impact.error || 'Could not calculate the impact of this change');
-        }
-        if (current && current.embeddingModel === embeddingModel
-            && !current.pendingEmbedding
-            && impact.impact.itemsToReindex === 0) {
-            return false;
-        }
-
-        const confirmed = window.confirm(
-            `Change the ${label} embedding model to ${embeddingModel}?\n\n`
-            + `Surfaces affected: ${impact.impact.surfaces.length}\n`
-            + `Courses affected: ${impact.impact.courses}\n`
-            + `Items to re-index: ${impact.impact.itemsToReindex}\n`
-            + `Already current: ${impact.impact.itemsAlreadyCurrent}\n\n`
-            + `New collection: ${impact.profile.collection} (${impact.profile.vectorSize} dimensions).\n`
-            + 'The current embedding model stays active until re-indexing finishes. '
-            + 'No existing vectors or collections are deleted.'
-        );
-        if (!confirmed) return false;
-
-        const response = await fetch('/api/settings/llm/embedding', {
+        const response = await fetchModelSettings('/api/settings/llm/embedding/stage', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
@@ -1227,15 +1233,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         const result = await response.json();
         if (!response.ok || !result.success) {
-            throw new Error(result.error || 'Failed to stage the embedding model change');
+            throw new Error(result.error || 'Failed to save the embedding model selection');
         }
-        showNotification(result.message || 'Re-indexing started', 'success');
+        showNotification(result.message || `${label} embedding selection saved`, 'success');
         await loadLLMSettings();
         return true;
     }
 
     async function rollbackPlatformEmbeddingModel(provider) {
-        const response = await fetch('/api/settings/llm/embedding/rollback', {
+        const response = await fetchModelSettings('/api/settings/llm/embedding/rollback', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',

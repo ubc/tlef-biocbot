@@ -144,6 +144,34 @@ describe('QdrantService', () => {
         expect(mockCreateEmbeddings).toHaveBeenCalled();
     });
 
+    test('skipEmbeddingProbe leaves the provider untouched until real work arrives', async () => {
+        const client = {
+            getCollections: jest.fn(async () => ({ collections: [{ name: 'biocbot_documents' }] })),
+            getCollection: jest.fn(async () => ({ config: { params: { vectors: { size: 1536 } } } })),
+        };
+        QdrantClient.mockImplementation(() => client);
+        ChunkingModule.mockImplementation(() => ({ getDefaultStrategyName: () => 'custom' }));
+        const embed = jest.fn(async () => [[1, 2, 3]]);
+        const service = new QdrantService({ embeddings: { embed }, skipEmbeddingProbe: true });
+
+        await service.initialize();
+
+        expect(embed).not.toHaveBeenCalled();
+    });
+
+    test('a hung embedding call is abandoned instead of stalling its caller forever', async () => {
+        jest.useFakeTimers();
+        try {
+            const service = makeService({ embeddings: { embed: jest.fn(() => new Promise(() => {})) } });
+            const pending = service.embed('text');
+            const assertion = expect(pending).rejects.toMatchObject({ code: 'EMBEDDING_TIMEOUT' });
+            await jest.advanceTimersByTimeAsync(30_000);
+            await assertion;
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
     test('an OpenAI embedding profile does not inherit the server-wide Sandbox endpoint', async () => {
         config.getLLMConfig.mockReturnValue({
             provider: 'ubc-llm-sandbox',

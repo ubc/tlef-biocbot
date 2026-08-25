@@ -18,6 +18,15 @@ const {
 
 console.log('✅ Successfully imported embeddings library:', typeof EmbeddingsModule);
 
+// A provider that accepts the connection and then never answers would otherwise
+// hang a migration forever on its first item, with no failed item to retry and
+// no error to show. Bound every embedding call so a stall becomes a normal
+// item failure instead.
+const EMBEDDING_TIMEOUT_MS = Math.max(
+    5000,
+    Number(process.env.EMBEDDING_TIMEOUT_MS) || 30_000
+);
+
 /**
  * Last-resort embedding profile for callers that predate profile plumbing —
  * Qdrant maintenance operations (skipEmbeddings) and local dev runtimes.
@@ -42,6 +51,32 @@ function envFallbackProfile() {
     return buildEmbeddingProfile({ provider, embeddingModel, endpoint, apiKey: apiKey || null });
 }
 
+/**
+ * Reject a hung embedding call instead of waiting on it forever. The provider
+ * request itself keeps running; only this caller stops waiting, which is enough
+ * to turn a stalled migration item into a retryable failure.
+ */
+async function withEmbeddingDeadline(promise, embeddingModel) {
+    let timer = null;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise((_, reject) => {
+                timer = setTimeout(() => {
+                    const error = new Error(
+                        `Embedding request for ${embeddingModel} timed out after `
+                        + `${Math.round(EMBEDDING_TIMEOUT_MS / 1000)}s`
+                    );
+                    error.code = 'EMBEDDING_TIMEOUT';
+                    reject(error);
+                }, EMBEDDING_TIMEOUT_MS);
+            })
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
 class QdrantService {
     /**
      * @param {Object} options
@@ -56,6 +91,10 @@ class QdrantService {
         this.chunker = null;
         this.llmConfigOverride = options.llmConfig || null;
         this.skipEmbeddings = options.skipEmbeddings === true;
+        // The probe in initialize() is diagnostic only — the profile, not the
+        // provider, decides the vector size. A migration skips it so the job's
+        // first real item is also its first provider call.
+        this.skipEmbeddingProbe = options.skipEmbeddingProbe === true;
         this.shouldCancel = typeof options.shouldCancel === 'function'
             ? options.shouldCancel
             : null;
@@ -235,7 +274,7 @@ class QdrantService {
             console.log(`✅ Successfully initialized embeddings service (vector size: ${this.vectorSize} dimensions)`);
             
             // Test embeddings service to verify it's working (but don't rely on it for vector size)
-            if (!this.skipEmbeddings) {
+            if (!this.skipEmbeddings && !this.skipEmbeddingProbe) {
                 console.log('Testing embeddings service...');
                 try {
                     const testEmbedding = await this.embed('test');
@@ -614,7 +653,10 @@ class QdrantService {
 
     async embed(input) {
         try {
-            return await this.embeddings.embed(input);
+            return await withEmbeddingDeadline(
+                this.embeddings.embed(input),
+                this.embeddingModel
+            );
         } catch (error) {
             const status = mapProviderErrorToStatus(error);
             if (status && this.onProviderKeyFailure) {

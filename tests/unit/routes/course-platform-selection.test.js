@@ -230,7 +230,7 @@ describe('course key settings', () => {
         expect(startedMigrations).toEqual([]);
     });
 
-    test('switching back needs no key but refuses until material is prepared', async () => {
+    test('switching back needs no key and prepares missing material in the same call', async () => {
         const db = memoryDb({
             courses: [keyedCourse(SANDBOX, { [OPENAI]: 'sk-gpt-1111', [SANDBOX]: 'sbx-key-2222' })],
             documents: [{ documentId: 'd1', courseId: 'C1', content: 'text' }],
@@ -239,9 +239,11 @@ describe('course key settings', () => {
         const res = await request(courses({ db, user: instructor }))
             .post('/C1/llm-provider').send({ llmProvider: OPENAI });
 
-        expect(res.status).toBe(409);
-        expect(res.body).toMatchObject({ code: 'LLM_PROVIDER_NOT_PREPARED', unpreparedCount: 1 });
-        expect(startedMigrations).toHaveLength(0);
+        expect(res.status).toBe(202);
+        expect(res.body.migration).toMatchObject({ kind: 'prepare', toProvider: OPENAI, total: 1 });
+        expect(startedMigrations).toHaveLength(1);
+        // The platform only flips once the job finishes.
+        expect((await db.collection('courses').findOne({ courseId: 'C1' })).activeLlmProvider).toBe(SANDBOX);
         expect(mockValidateProviderKey).not.toHaveBeenCalled();
     });
 

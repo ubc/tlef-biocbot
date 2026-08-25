@@ -26,8 +26,10 @@ jest.mock('../../../src/services/llmKeyStore', () => {
 });
 
 const providerKeys = require('../../../src/services/providerKeyService');
+const { LLMModule } = require('ubc-genai-toolkit-llm');
 const migrations = require('../../../src/services/providerMigrationService');
 const adminModelSettings = require('../../../src/services/adminModelSettings');
+const scopeModelSettings = require('../../../src/services/scopeModelSettings');
 const { buildKeySubdocument } = require('../../../src/services/llmKeyStore');
 const { providerLabel } = require('../../../src/services/llmProviders');
 const { buildEmbeddingProfile } = require('../../../src/services/embeddingConfig');
@@ -132,6 +134,120 @@ describe('validating against the right platform', () => {
             if (oldEfforts === undefined) delete process.env.BIOCBOT_TEST_PROXY_REASONING_EFFORTS;
             else process.env.BIOCBOT_TEST_PROXY_REASONING_EFFORTS = oldEfforts;
         }
+    });
+
+    test('known Qwen reasoning efforts do not wait for a live discovery completion', async () => {
+        const oldStub = process.env.BIOCBOT_TEST_LLM_STUB;
+        delete process.env.BIOCBOT_TEST_LLM_STUB;
+        const db = memoryDb({
+            courses: [{
+                courseId: 'C1',
+                llmCredentials: { [PROXY]: buildKeySubdocument('prx-qwen-key', 'i1', PROXY) }
+            }]
+        });
+        const sendMessage = jest.spyOn(LLMModule.prototype, 'sendMessage');
+
+        try {
+            await expect(providerKeys.discoverProxyReasoningEfforts(
+                db,
+                'qwen3.6-35b-a3b',
+                COURSE_SCOPE
+            )).resolves.toEqual(['none', 'low', 'medium', 'high']);
+            expect(sendMessage).not.toHaveBeenCalled();
+        } finally {
+            sendMessage.mockRestore();
+            if (oldStub === undefined) delete process.env.BIOCBOT_TEST_LLM_STUB;
+            else process.env.BIOCBOT_TEST_LLM_STUB = oldStub;
+        }
+    });
+
+    test('known Qwen chat and embedding settings save without live validation calls', async () => {
+        const oldStub = process.env.BIOCBOT_TEST_LLM_STUB;
+        delete process.env.BIOCBOT_TEST_LLM_STUB;
+        const db = memoryDb({
+            courses: [{
+                courseId: 'C1',
+                llmCredentials: { [PROXY]: buildKeySubdocument('prx-qwen-key', 'i1', PROXY) }
+            }]
+        });
+        const sendMessage = jest.spyOn(LLMModule.prototype, 'sendMessage');
+        const embed = jest.spyOn(LLMModule.prototype, 'embed');
+
+        try {
+            await expect(providerKeys.validateProxyChatSettings(db, [{
+                model: 'qwen3.6-35b-a3b', reasoningEffort: 'low'
+            }], COURSE_SCOPE)).resolves.toEqual({ vectorSize: null });
+            await expect(providerKeys.validateProxyEmbeddingModel(
+                db,
+                'qwen3-embedding-0.6b',
+                COURSE_SCOPE
+            )).resolves.toEqual({ vectorSize: 1024 });
+            expect(sendMessage).not.toHaveBeenCalled();
+            expect(embed).not.toHaveBeenCalled();
+        } finally {
+            sendMessage.mockRestore();
+            embed.mockRestore();
+            if (oldStub === undefined) delete process.env.BIOCBOT_TEST_LLM_STUB;
+            else process.env.BIOCBOT_TEST_LLM_STUB = oldStub;
+        }
+    });
+
+    test('known Qwen settings reject unsupported effort values without a provider call', async () => {
+        const oldStub = process.env.BIOCBOT_TEST_LLM_STUB;
+        delete process.env.BIOCBOT_TEST_LLM_STUB;
+        const db = memoryDb({
+            courses: [{
+                courseId: 'C1',
+                llmCredentials: { [PROXY]: buildKeySubdocument('prx-qwen-key', 'i1', PROXY) }
+            }]
+        });
+        const sendMessage = jest.spyOn(LLMModule.prototype, 'sendMessage');
+
+        try {
+            await expect(providerKeys.validateProxyChatSettings(db, [{
+                model: 'qwen3.6-35b-a3b', reasoningEffort: 'max'
+            }], COURSE_SCOPE)).rejects.toMatchObject({ code: 'MODEL_OPERATION_INCOMPATIBLE' });
+            expect(sendMessage).not.toHaveBeenCalled();
+        } finally {
+            sendMessage.mockRestore();
+            if (oldStub === undefined) delete process.env.BIOCBOT_TEST_LLM_STUB;
+            else process.env.BIOCBOT_TEST_LLM_STUB = oldStub;
+        }
+    });
+
+    test('proxy reasoning probes run concurrently and preserve effort order', async () => {
+        const pending = new Map();
+        const llm = {
+            sendMessage: jest.fn((_, options) => new Promise((resolve, reject) => {
+                pending.set(options.reasoningEffort, { resolve, reject });
+            }))
+        };
+        const efforts = ['none', 'low', 'high'];
+
+        const discovery = providerKeys.probeProxyReasoningEfforts(llm, 'proxy-chat', {
+            reasoningEfforts: efforts,
+            timeoutMs: 1000
+        });
+        await Promise.resolve();
+
+        expect(llm.sendMessage).toHaveBeenCalledTimes(3);
+        pending.get('high').resolve({ content: 'OK' });
+        pending.get('none').resolve({ content: 'OK' });
+        pending.get('low').reject(new Error('unsupported'));
+
+        await expect(discovery).resolves.toEqual(['none', 'high']);
+    });
+
+    test('proxy reasoning discovery has a bounded deadline', async () => {
+        const llm = { sendMessage: jest.fn(() => new Promise(() => {})) };
+
+        await expect(providerKeys.probeProxyReasoningEfforts(llm, 'slow-model', {
+            reasoningEfforts: ['none'],
+            timeoutMs: 5
+        })).rejects.toMatchObject({
+            code: 'MODEL_OPERATION_INCOMPATIBLE',
+            cause: expect.objectContaining({ code: 'PROXY_OPERATION_TIMEOUT' })
+        });
     });
 });
 
@@ -309,7 +425,7 @@ describe('switching back to a stored platform', () => {
         };
     }
 
-    test('an unprepared provider is refused with a clear next action', async () => {
+    test('an unprepared provider is prepared by the switch itself', async () => {
         const db = memoryDb({
             courses: [dualKeyCourse()],
             documents: [{ documentId: 'd1', courseId: 'C1', content: 'text' }],
@@ -319,14 +435,14 @@ describe('switching back to a stored platform', () => {
             scope: COURSE_SCOPE, provider: OPENAI, requestedBy: 'i1', registry: registry(),
         });
 
-        expect(result.httpStatus).toBe(409);
-        expect(result.body).toMatchObject({ code: 'LLM_PROVIDER_NOT_PREPARED', unpreparedCount: 1 });
-        expect(startedMigrations).toHaveLength(0);
+        expect(result.httpStatus).toBe(202);
+        expect(result.body.migration).toMatchObject({ kind: 'prepare', toProvider: OPENAI, total: 1 });
+        expect(startedMigrations).toHaveLength(1);
         expect(mockValidateProviderKey).not.toHaveBeenCalled();
 
         const course = await db.collection('courses').findOne({ courseId: 'C1' });
         expect(course.activeLlmProvider).toBe(SANDBOX);   // unchanged until migration completes
-        expect(course.pendingLlmProvider).toBeUndefined();
+        expect(course.pendingLlmProvider).toBe(OPENAI);
     });
 
     test('explicit preparation starts a background job without changing the active provider', async () => {
@@ -435,6 +551,65 @@ describe('switching back to a stored platform', () => {
         expect(mockValidateProviderKey).not.toHaveBeenCalled();
     });
 
+    test('a saved embedding choice is what the switch indexes', async () => {
+        const db = memoryDb({
+            courses: [dualKeyCourse()],
+            documents: [{ documentId: 'd1', courseId: 'C1', content: 'text' }],
+        });
+        await scopeModelSettings.materialize(db, COURSE_SCOPE);
+        await scopeModelSettings.stagePendingEmbedding(db, COURSE_SCOPE, OPENAI, {
+            embeddingModel: 'text-embedding-3-large',
+        });
+
+        const result = await providerKeys.switchToStoredProvider(db, {
+            scope: COURSE_SCOPE, provider: OPENAI, requestedBy: 'i1', registry: registry(),
+        });
+
+        expect(result.httpStatus).toBe(202);
+        expect(result.body.migration.targetProfile).toMatchObject({
+            provider: OPENAI,
+            embeddingModel: 'text-embedding-3-large',
+        });
+        // Retrieval keeps using the active model while the new one is built.
+        const settings = await scopeModelSettings.getAll(db, COURSE_SCOPE);
+        expect(settings.providers[OPENAI].embeddingModel).toBe('text-embedding-3-small');
+    });
+
+    test('a saved embedding choice that is already indexed is activated with the platform', async () => {
+        const text = 'text';
+        const largeProfile = buildEmbeddingProfile({
+            provider: OPENAI, embeddingModel: 'text-embedding-3-large',
+        });
+        const db = memoryDb({
+            courses: [dualKeyCourse()],
+            documents: [{
+                documentId: 'd1', courseId: 'C1', content: text,
+                embeddingIndexes: {
+                    [largeProfile.storageKey]: buildIndexRecord({
+                        profile: largeProfile,
+                        hash: contentHash(text),
+                        status: INDEX_STATUSES.READY,
+                        indexedAt: new Date(),
+                    }),
+                },
+            }],
+        });
+        await scopeModelSettings.materialize(db, COURSE_SCOPE);
+        await scopeModelSettings.stagePendingEmbedding(db, COURSE_SCOPE, OPENAI, {
+            embeddingModel: 'text-embedding-3-large',
+        });
+
+        const result = await providerKeys.switchToStoredProvider(db, {
+            scope: COURSE_SCOPE, provider: OPENAI, requestedBy: 'i1', registry: registry(),
+        });
+
+        expect(result.httpStatus).toBe(200);
+        expect(startedMigrations).toEqual([]);
+        const settings = await scopeModelSettings.getAll(db, COURSE_SCOPE);
+        expect(settings.providers[OPENAI].embeddingModel).toBe('text-embedding-3-large');
+        expect(settings.pendingEmbedding[OPENAI]).toBeUndefined();
+    });
+
     test('switching to a platform with no stored key asks for one', async () => {
         const db = memoryDb({
             courses: [{
@@ -504,6 +679,50 @@ describe('testing a stored key', () => {
         const course = await db.collection('courses').findOne({ courseId: 'C1' });
         expect(course.llmCredentials[OPENAI].status).toBe('invalid');
         expect(course.llmCredentials[OPENAI].ciphertext).toBeTruthy();
+    });
+
+    test('testing a Proxy key checks the roster without rerunning model operations', async () => {
+        const db = memoryDb({
+            courses: [{
+                courseId: 'C1',
+                activeLlmProvider: PROXY,
+                llmCredentials: { [PROXY]: buildKeySubdocument('prx-key', 'i1', PROXY) },
+                llmModelSettings: {
+                    providers: {
+                        [PROXY]: {
+                            chatModel: 'qwen3.6-35b-a3b',
+                            reasoningEffort: 'none',
+                            embeddingModel: 'qwen3-embedding-0.6b',
+                            vectorSize: 1024,
+                            configurationStatus: 'ready'
+                        }
+                    }
+                }
+            }]
+        });
+        mockValidateProviderKey.mockResolvedValue({
+            ok: true,
+            status: 'valid',
+            provider: PROXY,
+            models: ['qwen3.6-35b-a3b', 'qwen3-embedding-0.6b']
+        });
+        const sendMessage = jest.spyOn(LLMModule.prototype, 'sendMessage');
+        const embed = jest.spyOn(LLMModule.prototype, 'embed');
+
+        try {
+            const result = await providerKeys.testSurfaceKey(db, { scope: COURSE_SCOPE, provider: PROXY });
+
+            expect(result.httpStatus).toBe(200);
+            expect(mockValidateProviderKey).toHaveBeenCalledWith(expect.objectContaining({
+                provider: PROXY,
+                apiKey: 'prx-key'
+            }));
+            expect(sendMessage).not.toHaveBeenCalled();
+            expect(embed).not.toHaveBeenCalled();
+        } finally {
+            sendMessage.mockRestore();
+            embed.mockRestore();
+        }
     });
 
     test('testing a platform with no stored key reports LLM_KEY_MISSING', async () => {

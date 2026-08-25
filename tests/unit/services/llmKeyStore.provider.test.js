@@ -272,6 +272,25 @@ describe('provider-aware validation', () => {
         expect(fetchMock).not.toHaveBeenCalled();
     });
 
+    test('Proxy discovery stops waiting after its validation deadline', async () => {
+        const available = jest.spyOn(LLMModule.prototype, 'getAvailableModels')
+            .mockImplementation(() => new Promise(() => {}));
+
+        try {
+            const result = await validateProviderKey({
+                provider: PROXY,
+                apiKey: 'prx-real',
+                endpoint: 'https://proxy.example/v1',
+                timeoutMs: 5,
+            });
+
+            expect(result).toMatchObject({ ok: false, status: KEY_STATUSES.INVALID, provider: PROXY });
+            expect(result.detail).toContain('did not return its model list within 5 ms');
+        } finally {
+            available.mockRestore();
+        }
+    });
+
     test('OpenAI probes api.openai.com with the configured chat and embedding models', async () => {
         const models = ['gpt-4.1-mini', 'text-embedding-3-small'];
         fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: models.map(id => ({ id })) }) });

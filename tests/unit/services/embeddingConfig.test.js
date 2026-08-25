@@ -10,6 +10,7 @@ const {
     collectionNameForEmbedding,
     documentsCollectionBase,
     embeddingProfileKey,
+    knownVectorSizeForEmbeddingModel,
     modelCollectionSuffix,
     notesCollectionBase,
     parseEmbeddingProfileKey,
@@ -32,6 +33,11 @@ beforeEach(() => {
 afterAll(() => { process.env = OLD_ENV; });
 
 describe('collection routing per platform', () => {
+    test('distinguishes known embedding dimensions from fallback dimensions', () => {
+        expect(knownVectorSizeForEmbeddingModel('qwen3-embedding-0.6b')).toBe(1024);
+        expect(knownVectorSizeForEmbeddingModel('unlisted-proxy-embedding')).toBeNull();
+    });
+
     test('GPT small keeps the legacy collection; Sandbox Qwen gets its own', () => {
         const gpt = buildEmbeddingProfile({ provider: 'openai', embeddingModel: 'text-embedding-3-small' });
         const sandbox = buildEmbeddingProfile({ provider: 'ubc-llm-sandbox', embeddingModel: 'qwen3-embedding-0.6b' });

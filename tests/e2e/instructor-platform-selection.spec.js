@@ -299,29 +299,16 @@ test.describe('Instructor platform selection', () => {
 
     test('switching prepares missing material without re-entering the key', async ({ page }) => {
         let switchRequest = null;
-        let prepareRequest = null;
         await mockCourseKeyState(page, baseState({
             llmKeysByProvider: {
                 openai: { status: 'valid', last4: '1111', validatedAt: null, updatedAt: null },
                 'ubc-llm-sandbox': { status: 'valid', last4: '2222', validatedAt: null, updatedAt: null },
             },
         }));
+        // One round trip: the switch itself starts the indexing job and the
+        // platform activates when that job finishes.
         await page.route('**/api/courses/*/llm-provider', async (route) => {
             switchRequest = JSON.parse(route.request().postData() || '{}');
-            await route.fulfill({
-                status: 409,
-                contentType: 'application/json',
-                body: JSON.stringify({
-                    success: false,
-                    code: 'LLM_PROVIDER_NOT_PREPARED',
-                    message: '2 items still need preparation.',
-                    unpreparedCount: 2,
-                    needsPreparation: true,
-                }),
-            });
-        });
-        await page.route('**/api/courses/*/llm-provider/prepare', async (route) => {
-            prepareRequest = JSON.parse(route.request().postData() || '{}');
             await route.fulfill({
                 status: 202,
                 contentType: 'application/json',
@@ -351,7 +338,7 @@ test.describe('Instructor platform selection', () => {
 
         // The key is already stored, so saving is only ever a replacement...
         await expect(page.locator('#save-course-llm-key')).toHaveText('Replace UBC On-Premise LLM key');
-        // ...and the switch is attempted before any preparation job.
+        // ...and one switch click covers both preparing and activating.
         await expect(page.locator('#course-llm-prepare')).toBeEnabled();
         await expect(page.locator('#course-llm-prepare')).toHaveText('Switch to UBC On-Premise LLM');
 
@@ -363,10 +350,9 @@ test.describe('Instructor platform selection', () => {
         await page.locator('#course-llm-prepare').click();
 
         await expect.poll(() => switchRequest).toEqual({ llmProvider: 'ubc-llm-sandbox' });
-        await expect.poll(() => prepareRequest).toEqual({ llmProvider: 'ubc-llm-sandbox' });
         expect(dialogs).toEqual([
-            'Switch this AI surface to UBC On-Premise LLM? Existing embeddings will be reused.',
-            '2 items need preparation for UBC On-Premise LLM. Prepare them now?',
+            'Switch this AI surface to UBC On-Premise LLM? Existing embeddings are reused, '
+                + 'and only missing or changed items are indexed before the switch completes.',
         ]);
         // Progress replaces the button state; no key was ever re-entered.
         await expect(page.locator('#course-llm-migration')).toBeVisible();
@@ -413,7 +399,18 @@ test.describe('Instructor platform selection', () => {
             completed: 3,
             failed: 1,
             currentItem: null,
-            failures: [{ itemType: 'document', itemId: 'd4', title: 'Lecture 4.pdf', error: 'provider rejected', attempts: 3 }],
+            failures: [{
+                itemType: 'document', itemId: 'd4', title: 'Lecture 4.pdf',
+                error: 'Embedding request for qwen3-embedding-0.6b timed out after 30s',
+                failureReason: 'provider_timeout', attempts: 3,
+            }],
+            failureSummary: {
+                reason: 'provider_timeout',
+                headline: 'UBC On-Premise LLM did not respond in time.',
+                detail: 'No course material was changed, and OpenAI Chat GPT is still answering questions. '
+                    + 'The platform may be temporarily unavailable or under maintenance — wait a few minutes and try again.',
+                affected: [{ title: 'Lecture 4.pdf', cause: null }],
+            },
             targetProfile: { provider: 'ubc-llm-sandbox' },
         };
 
@@ -447,13 +444,22 @@ test.describe('Instructor platform selection', () => {
         // Progress is polled, not pushed: the panel updates without a reload.
         await expect.poll(() => migrationPolls.length, { timeout: 15_000 }).toBeGreaterThan(0);
 
-        // After the poll, the failure and retry control appear.
+        // After the poll the failure appears — as prose, not as an error dump.
         await expect(page.locator('#course-llm-migration-status'))
-            .toContainText('stopped with 1 failure', { timeout: 15_000 });
-        await expect(page.locator('#course-llm-migration-status'))
-            .toContainText('The previous platform is still active');
-        await expect(page.locator('#course-llm-migration-failures'))
-            .toContainText('Lecture 4.pdf: provider rejected');
+            .toHaveText('UBC On-Premise LLM did not respond in time.', { timeout: 15_000 });
+        await expect(page.locator('#course-llm-migration-detail'))
+            .toContainText('OpenAI Chat GPT is still answering questions');
+        await expect(page.locator('#course-llm-migration-detail')).toContainText('try again');
+
+        // The affected file is named; the provider's error text is not shown.
+        await expect(page.locator('#course-llm-migration-failures-label')).toContainText('This item was affected');
+        await expect(page.locator('#course-llm-migration-failures')).toHaveText('Lecture 4.pdf');
+
+        const panelText = await page.locator('#course-llm-migration').innerText();
+        for (const jargon of ['Embedding request', 'timed out after', 'qwen3', 'chunk']) {
+            expect(panelText).not.toContain(jargon);
+        }
+
         await expect(page.locator('#course-llm-migration-retry')).toBeVisible();
     });
 
@@ -757,9 +763,51 @@ test.describe('Admin platform and model settings', () => {
         await page.locator('.settings-tile[data-panel="admin-platform"]').click();
 
         await expect(page.locator('#llm-embedding-pending')).toBeVisible();
-        await expect(page.locator('#llm-embedding-pending')).toContainText('Staged: text-embedding-3-large');
+        await expect(page.locator('#llm-embedding-pending')).toContainText('Re-indexing: text-embedding-3-large');
         await expect(page.locator('#llm-embedding-pending'))
             .toContainText('text-embedding-3-small stays active until re-indexing finishes');
+        await expect(page.locator('#reindex-llm-embedding')).toHaveCount(0);
         await expect(page.locator('#rollback-llm-embedding')).toBeVisible();
+        await expect(page.locator('#rollback-llm-embedding')).toHaveText('Cancel re-indexing');
+    });
+
+    test('a saved embedding choice waits for a platform switch, not a button here', async ({ page }) => {
+        await page.route('**/api/settings/llm', async (route) => {
+            if (route.request().method() !== 'GET') return route.continue();
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    success: true,
+                    platforms: [{
+                        provider: 'openai', label: 'OpenAI Chat GPT',
+                        chatModel: 'gpt-4.1-mini', embeddingModel: 'text-embedding-3-small',
+                        reasoningEffort: 'minimal', supportsReasoning: false,
+                        allowedModels: ['gpt-4.1-mini'],
+                        allowedEmbeddingModels: ['text-embedding-3-small', 'text-embedding-3-large'],
+                        reasoningEffortsByModel: {}, defaultReasoningEffortByModel: {},
+                        collection: 'biocbot_documents', vectorSize: 1536,
+                        // Saved, with no job of its own.
+                        pendingEmbedding: { embeddingModel: 'text-embedding-3-large', migrationId: null },
+                    }],
+                    settings: { model: 'gpt-4.1-mini', provider: 'openai' },
+                }),
+            });
+        });
+
+        await page.goto(`/instructor/settings?courseId=${COURSE_ID}`);
+        await expect(page.locator('h1')).toHaveText('Settings', { timeout: 15_000 });
+        await page.locator('.settings-tile[data-panel="admin-platform"]').click();
+
+        await expect(page.locator('#llm-embedding-pending')).toBeVisible();
+        await expect(page.locator('#llm-embedding-pending'))
+            .toContainText('Saved: text-embedding-3-large');
+        await expect(page.locator('#llm-embedding-pending'))
+            .toContainText('It is applied when this surface switches to OpenAI Chat GPT');
+        // The panel records the choice and nothing else — no re-index control,
+        // and the selector stays editable because no job is running.
+        await expect(page.locator('#reindex-llm-embedding')).toHaveCount(0);
+        await expect(page.locator('#llm-embedding-select')).toBeEnabled();
+        await expect(page.locator('#rollback-llm-embedding')).toHaveText('Discard embedding change');
     });
 });

@@ -99,7 +99,13 @@ describe('GET /:migrationId', () => {
 
         expect(res.body.migration.failed).toBe(1);
         expect(res.body.migration.failures).toEqual([
-            { itemType: 'document', itemId: 'd2', title: 'Two.pdf', error: 'provider rejected', attempts: 3 },
+            {
+                itemType: 'document', itemId: 'd2', title: 'Two.pdf',
+                // The provider's own words stay for the console...
+                error: 'provider rejected', attempts: 3,
+                // ...and the classification the panel renders prose from.
+                failureReason: 'unknown',
+            },
         ]);
     });
 
