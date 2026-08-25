@@ -25,7 +25,7 @@ afterAll(() => { process.env = OLD_ENV; });
 describe('bootstrap defaults', () => {
     test('the expected initial defaults for each platform', () => {
         expect(adminModelSettings.bootstrapDefaults(OPENAI)).toMatchObject({
-            chatModel: 'gpt-4.1-mini',
+            chatModel: 'gpt-5.6-luna',
             embeddingModel: 'text-embedding-3-small',
             embeddingRevision: 'v1',
         });
@@ -68,7 +68,7 @@ describe('reading settings', () => {
         const db = memoryDb({ settings: [] });
         const { providers } = await adminModelSettings.getAllProviderSettings(db, { force: true });
 
-        expect(providers[OPENAI].chatModel).toBe('gpt-4.1-mini');
+        expect(providers[OPENAI]).toMatchObject({ chatModel: 'gpt-5.6-luna', reasoningEffort: 'low' });
         expect(providers[SANDBOX].embeddingModel).toBe('qwen3-embedding-0.6b');
         expect(providers[PROXY]).toMatchObject({
             chatModel: null,
@@ -183,7 +183,7 @@ describe('reading settings', () => {
 
         expect(providers[SANDBOX]).toMatchObject({ chatModel: 'gpt-oss-120b', reasoningEffort: 'medium' });
         // The other platform still gets its own defaults.
-        expect(providers[OPENAI].chatModel).toBe('gpt-4.1-mini');
+        expect(providers[OPENAI].chatModel).toBe('gpt-5.6-luna');
     });
 
     test('a stored model that is not allowed for its platform falls back to the default', async () => {
@@ -198,7 +198,7 @@ describe('reading settings', () => {
         });
 
         const settings = await adminModelSettings.getProviderSettings(db, OPENAI, { force: true });
-        expect(settings.chatModel).toBe('gpt-4.1-mini');
+        expect(settings.chatModel).toBe('gpt-5.6-luna');
         expect(settings.embeddingModel).toBe('text-embedding-3-small');
     });
 
@@ -207,7 +207,7 @@ describe('reading settings', () => {
         jest.spyOn(console, 'warn').mockImplementation(() => {});
 
         await expect(adminModelSettings.getAllProviderSettings(failing, { force: true }))
-            .resolves.toMatchObject({ providers: { [OPENAI]: { chatModel: 'gpt-4.1-mini' } } });
+            .resolves.toMatchObject({ providers: { [OPENAI]: { chatModel: 'gpt-5.6-luna', reasoningEffort: 'low' } } });
 
         adminModelSettings.invalidateCache();
         await expect(adminModelSettings.getAllProviderSettings(failing, { force: true, throwOnError: true }))

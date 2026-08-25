@@ -70,6 +70,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Latest per-platform settings from /api/settings/llm, keyed by provider.
     let llmPlatformSettings = {};
     let llmModelScope = null;
+    let activeModelAccordion = null;
+    const modelEditorContext = document.getElementById('llm-model-scope-context');
+    const modelEditorHome = modelEditorContext?.parentElement || null;
+    const modelEditorHomeMarker = modelEditorContext ? document.createComment('llm-model-editor-home') : null;
+    if (modelEditorContext && modelEditorHomeMarker) {
+        modelEditorContext.before(modelEditorHomeMarker);
+    }
 
     function llmScopePayload() {
         return llmModelScope
@@ -83,20 +90,49 @@ document.addEventListener('DOMContentLoaded', async () => {
             .filter(Boolean);
     }
 
-    async function openScopedModelEditor(scope, container, label) {
-        if (!container) return;
-        let context = document.getElementById('llm-model-scope-context');
-        if (!context) {
-            context = document.createElement('p');
-            context.id = 'llm-model-scope-context';
-            context.className = 'section-description';
+    function restoreModelEditorHome() {
+        if (!modelEditorHome || !modelEditorHomeMarker || !modelEditorContext) return;
+        modelEditorHomeMarker.after(modelEditorContext, ...modelSections());
+    }
+
+    async function closeScopedModelEditor({ reloadDefaults = true } = {}) {
+        if (!activeModelAccordion) return;
+        const { button, body } = activeModelAccordion;
+        activeModelAccordion = null;
+        button.textContent = 'Configure models';
+        button.setAttribute('aria-expanded', 'false');
+        button.removeAttribute('aria-controls');
+        restoreModelEditorHome();
+        body.remove();
+        llmModelScope = null;
+        if (reloadDefaults) await loadLLMSettings(null);
+    }
+
+    async function openScopedModelEditor(scope, container, label, button) {
+        if (!container || !modelEditorContext) return;
+        if (activeModelAccordion?.button === button) {
+            await closeScopedModelEditor();
+            return;
         }
+        if (activeModelAccordion) await closeScopedModelEditor({ reloadDefaults: false });
+
+        const body = document.createElement('div');
+        body.id = `${button.id}-panel`;
+        body.className = 'scoped-model-accordion';
+        body.setAttribute('role', 'region');
+        body.setAttribute('aria-label', `${label} model settings`);
+        container.append(body);
+
+        const context = modelEditorContext;
         context.textContent = scope
             ? `System-admin model configuration for ${label}. Changes affect only this AI surface.`
             : 'Default templates for newly created AI configurations. Existing surfaces are not changed.';
-        container.append(context, ...modelSections());
+        body.append(context, ...modelSections());
+        activeModelAccordion = { button, body };
+        button.textContent = 'Hide model settings';
+        button.setAttribute('aria-expanded', 'true');
+        button.setAttribute('aria-controls', body.id);
         await loadLLMSettings(scope);
-        context.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     function setupScopedModelButtons() {
@@ -134,6 +170,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             button.type = 'button';
             button.className = 'secondary-button';
             button.textContent = 'Configure models';
+            button.setAttribute('aria-expanded', 'false');
             button.addEventListener('click', async () => {
                 const resolved = await definition.resolve();
                 if (!resolved) {
@@ -141,22 +178,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                     return;
                 }
                 const section = definition.controls.closest('.settings-section');
-                await openScopedModelEditor(resolved.scope, section, resolved.label);
+                await openScopedModelEditor(resolved.scope, section, resolved.label, button);
             });
             definition.controls.append(button);
         }
 
-        const adminPanel = document.getElementById('settings-panel-admin-platform');
-        const title = adminPanel?.querySelector('.settings-panel-title');
-        if (title && !document.getElementById('configure-new-scope-defaults')) {
-            const button = document.createElement('button');
-            button.id = 'configure-new-scope-defaults';
-            button.type = 'button';
-            button.className = 'secondary-button';
-            button.textContent = 'Edit new-scope defaults';
-            button.addEventListener('click', () => openScopedModelEditor(null, adminPanel, 'new AI configurations'));
-            title.insertAdjacentElement('afterend', button);
-        }
     }
     // Proxy `/models` responses do not include reasoning capabilities. Cache
     // operation-probed results for this settings-page session by exact model id.

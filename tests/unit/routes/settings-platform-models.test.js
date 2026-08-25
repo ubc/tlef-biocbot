@@ -68,8 +68,8 @@ describe('GET /llm — grouped by platform', () => {
         const [gpt, sandbox, proxy] = res.body.platforms;
         expect(gpt).toMatchObject({
             label: providerLabel(OPENAI),
-            chatModel: 'gpt-4.1-mini',
-            backendChatModel: 'gpt-4.1-mini',
+            chatModel: 'gpt-5.6-luna',
+            backendChatModel: 'gpt-5.6-luna',
             backendInheritsFrontend: true,
             embeddingModel: 'text-embedding-3-small',
             collection: 'biocbot_documents',
@@ -188,9 +188,9 @@ describe('scope-owned model settings', () => {
         expect((await scopeModelSettings.getProviderSettings(db, { type: 'course', id: 'A' }, OPENAI)).chatModel)
             .toBe('gpt-5.6-luna');
         expect((await scopeModelSettings.getProviderSettings(db, { type: 'course', id: 'B' }, OPENAI)).chatModel)
-            .toBe('gpt-4.1-mini');
+            .toBe('gpt-5.6-luna');
         expect((await adminModelSettings.getProviderSettings(db, OPENAI, { force: true })).chatModel)
-            .toBe('gpt-4.1-mini');
+            .toBe('gpt-5.6-luna');
     });
 
     test('the scoped catalog exposes only providers with a key on that scope', async () => {

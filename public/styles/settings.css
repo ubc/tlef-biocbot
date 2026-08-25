@@ -287,6 +287,17 @@
     border-top: 1px solid var(--border-color);
 }
 
+.scoped-model-accordion {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+.scoped-model-accordion > .settings-section {
+    box-shadow: none;
+    border: 1px solid var(--border-color);
+}
+
 .settings-dirty-note {
     margin-right: auto;
     font-size: 13px;

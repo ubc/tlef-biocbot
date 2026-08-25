@@ -76,7 +76,7 @@ describe('validating against the right platform', () => {
         expect(mockValidateProviderKey).toHaveBeenCalledWith({
             provider: OPENAI,
             apiKey: 'sk-key',
-            chatModel: 'gpt-4.1-mini',
+            chatModel: 'gpt-5.6-luna',
             embeddingModel: 'text-embedding-3-small',
             endpoint: null,
         });

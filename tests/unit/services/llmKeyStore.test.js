@@ -411,8 +411,10 @@ describe('llmKeyStore.validateApiKey — OpenAI provider with a mocked fetch (no
         expect(embedInit.headers.Authorization).toBe('Bearer sk-real');
         const [chatUrl, chatInit] = fetchMock.mock.calls[2];
         expect(chatUrl).toBe('https://api.openai.com/v1/chat/completions');
-        // Default (non gpt-5) model probes with a single-token completion.
-        expect(JSON.parse(chatInit.body)).toMatchObject({ model: 'gpt-4.1-mini', max_tokens: 1 });
+        // The default GPT-5.6 Luna probe uses its supported completion and reasoning fields.
+        expect(JSON.parse(chatInit.body)).toMatchObject({
+            model: 'gpt-5.6-luna', max_completion_tokens: 16, reasoning_effort: 'low'
+        });
     });
 
     test('gpt-5 models use max_completion_tokens with a model-specific reasoning effort', async () => {

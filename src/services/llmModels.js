@@ -1,4 +1,4 @@
-const OPENAI_DEFAULT_MODEL = 'gpt-4.1-mini';
+const OPENAI_DEFAULT_MODEL = 'gpt-5.6-luna';
 const SANDBOX_DEFAULT_MODEL = 'qwen3.6-35b-a3b';
 const PROXY_PROVIDER = 'ubc-llm-proxy';
 const PROXY_REASONING_EFFORTS = Object.freeze([

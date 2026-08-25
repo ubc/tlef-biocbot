@@ -72,7 +72,7 @@ describe('a scope resolves its own platform', () => {
         expect(services.embeddingProfile.collection).toBe('biocbot_documents');
         expect(services.embeddingProfile.vectorSize).toBe(1536);
         expect(LLMService.create.mock.calls[0][0].llmConfig).toMatchObject({
-            provider: OPENAI, apiKey: 'sk-gpt-key-1111', defaultModel: 'gpt-4.1-mini',
+            provider: OPENAI, apiKey: 'sk-gpt-key-1111', defaultModel: 'gpt-5.6-luna',
         });
     });
 
@@ -297,7 +297,7 @@ describe('cache identity', () => {
         registry.clear();
 
         const services = await registry.forCourse(db, 'C1');
-        expect(services.modelSettings.chatModel).toBe('gpt-4.1-mini');
+        expect(services.modelSettings.chatModel).toBe('gpt-5.6-luna');
     });
 
     test('changing the course model snapshot rebuilds only that scope', async () => {

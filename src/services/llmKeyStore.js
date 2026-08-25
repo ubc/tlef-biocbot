@@ -483,7 +483,7 @@ async function openaiModelRoster(baseUrl, apiKey) {
 }
 
 function chatValidationBody(model) {
-    const usedModel = model || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+    const usedModel = model || process.env.OPENAI_MODEL || 'gpt-5.6-luna';
     const body = {
         model: usedModel,
         messages: [{ role: 'user', content: 'ping' }]
