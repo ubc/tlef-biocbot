@@ -14,6 +14,7 @@ const { ensureIndexes: ensureFlashcardIndexes } = require('./models/FlashcardDec
 const { ensureIndexes: ensureProviderMigrationIndexes } = require('./services/providerMigrationService');
 const { resumePendingMigrations } = require('./services/providerMigrationRunner');
 const { backfillExistingScopes } = require('./services/scopeModelSettings');
+const { initializeChatEncryption } = require('./services/chatEncryption');
 const coursesRoutes = require('./routes/courses');
 const flagsRoutes = require('./routes/flags');
 const lecturesRoutes = require('./routes/lectures');
@@ -797,6 +798,11 @@ async function startServer() {
         await resumePendingMigrations(db).catch((error) => {
             console.error('⚠️ Failed to resume provider migrations:', error.message);
         });
+
+        // Keep startup migrations and connect-mongo on the driver's raw Db.
+        // Routes receive the protected wrapper only after startup work is done;
+        // unconfigured collections continue to pass through unchanged.
+        app.locals.db = await initializeChatEncryption(db);
 
         // Set up routes after authentication is initialized
         setupProtectedRoutes();
