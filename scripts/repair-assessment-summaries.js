@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { MongoClient } = require('mongodb');
 const AssessmentScoring = require('../public/common/scripts/assessment-scoring');
+const { initializeChatEncryption } = require('../src/services/chatEncryption');
 
 function parseArgs(argv) {
     const options = { apply: false };
@@ -230,11 +231,14 @@ async function main() {
         return;
     }
 
-    const client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017');
+    const client = new MongoClient(
+        process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://localhost:27017'
+    );
     await client.connect();
     try {
-        const db = client.db(process.env.MONGODB_DB || 'biocbot-dev');
-        const collection = db.collection('chat_sessions');
+        const rawDb = client.db(process.env.MONGODB_DB || 'biocbot-dev');
+        const applicationDb = await initializeChatEncryption(rawDb);
+        const collection = applicationDb.collection('chat_sessions');
         const sessions = await collection.find(buildQuery(options)).toArray();
         const pending = [];
         const report = [];
@@ -267,7 +271,10 @@ async function main() {
                     sessionId: session.sessionId,
                     chatData: session.chatData
                 })), null, 2),
-                { flag: 'wx' }
+                // This maintenance backup contains application-readable chat
+                // data. Restrict it to the current OS user and handle it under
+                // the same policy as any other plaintext export.
+                { flag: 'wx', mode: 0o600 }
             );
             for (const { session, repaired } of pending) {
                 await collection.updateOne(

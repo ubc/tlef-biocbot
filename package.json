@@ -10,6 +10,14 @@
     "dev:client": "browser-sync start --proxy 'http://localhost:8050' --files 'public' --browser 'Google Chrome'",
     "grant:system-admin": "node scripts/grant-system-admin.js",
     "seed:local-lms-grades": "node scripts/seed-local-lms-grades.js --yes",
+    "encryption:canary": "node scripts/check-chat-encryption.js",
+    "encryption:plan": "ubc-genai-encryption plan --config ./src/config/encryption.js",
+    "encryption:plan:all": "ubc-genai-encryption plan --config ./src/config/encryption.js --all-configured",
+    "encryption:status": "ubc-genai-encryption status --config ./src/config/encryption.js",
+    "encryption:migrate": "ubc-genai-encryption migrate --config ./src/config/encryption.js",
+    "encryption:migrate:dry-run": "ubc-genai-encryption migrate --config ./src/config/encryption.js --dry-run",
+    "encryption:verify": "ubc-genai-encryption verify --config ./src/config/encryption.js",
+    "encryption:verify:all": "ubc-genai-encryption verify --config ./src/config/encryption.js --all-configured",
     "test": "playwright test",
     "test:e2e": "playwright test",
     "test:a11y": "playwright test --config=playwright.a11y.config.js",
@@ -57,12 +65,15 @@
     "ubc-genai-toolkit-llm": "^0.7.0"
   },
   "optionalDependencies": {
+    "@ubc/genai-toolkit-encryption": "0.1.0",
     "@ubc/ubc-genai-toolkit-course-list-sync": "^0.1.3",
     "@ubc/ubc-genai-toolkit-lms-integration": "^1.0.4"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.59.1",
+    "@types/jest": "30.0.0",
+    "@types/node": "22.20.1",
     "browser-sync": "^3.0.4",
     "cross-env": "^7.0.3",
     "delegates": "^1.0.0",

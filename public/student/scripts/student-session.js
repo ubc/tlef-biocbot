@@ -80,6 +80,10 @@ function hasSavedChatSessionContent(chatData) {
     return hasMessages || hasAssessment;
 }
 
+function isHistoryChatRestorePending() {
+    return sessionStorage.getItem('loadChatData') !== null;
+}
+
 function clearChatSessionExpirationTimer() {
     if (chatSessionExpirationTimer !== null) {
         clearTimeout(chatSessionExpirationTimer);
@@ -93,6 +97,7 @@ function clearChatSessionExpirationTimer() {
  */
 function scheduleChatSessionExpiration(chatData = getCurrentChatData()) {
     clearChatSessionExpirationTimer();
+    if (isHistoryChatRestorePending()) return;
     if (!hasSavedChatSessionContent(chatData)) return;
 
     const lastActivityMs = getSavedChatLastActivityMs(chatData);
@@ -469,10 +474,19 @@ function shouldCreateNewSession(chatData) {
         return false;
     }
 
-    // If chat input is disabled, assessment is being taken - create new session
+    // An assessment is part of one chat session, even though its input is
+    // hidden. Only request a new ID when neither the collected snapshot nor
+    // the course/unit session key already identifies that session.
     if (chatInputContainer.style.display === 'none') {
-
-        return true;
+        const studentId = chatData?.metadata?.studentId;
+        const courseId = chatData?.metadata?.courseId;
+        const unitName = chatData?.metadata?.unitName;
+        const embeddedSessionId = chatData?.sessionInfo?.sessionId;
+        const sessionKey = studentId && courseId && unitName
+            ? `biocbot_session_${studentId}_${courseId}_${unitName}`
+            : null;
+        const storedSessionId = sessionKey ? localStorage.getItem(sessionKey) : null;
+        return !embeddedSessionId && !storedSessionId;
     }
 
     // If chat input is enabled, assessment is completed - use existing session
@@ -968,11 +982,12 @@ function restoreSessionRotationNotice() {
  * so this is driven by persisted activity timestamps on return.
  */
 async function checkForExpiredSessionOnReturn() {
-    if (document.hidden || isRotatingInactiveSession) return false;
+    if (document.hidden || isRotatingInactiveSession || isHistoryChatRestorePending()) return false;
 
     isRotatingInactiveSession = true;
     try {
         await refreshChatSessionTimeoutForSelectedCourse();
+        if (isHistoryChatRestorePending()) return false;
         const chatData = getCurrentChatData();
         if (!chatData || !isSavedChatSessionStale(chatData)) return false;
 
@@ -1188,6 +1203,13 @@ async function collectAllChatData() {
     const studentId = getCurrentStudentId();
     const unitName = localStorage.getItem('selectedUnitName') || getCurrentUnitName();
     const currentMode = localStorage.getItem('studentMode') || 'tutor';
+    const existingChatData = getCurrentChatData();
+    const sessionKey = `biocbot_session_${studentId}_${courseId}_${unitName}`;
+    let sessionId = existingChatData?.sessionInfo?.sessionId || localStorage.getItem(sessionKey);
+    if (!sessionId) {
+        sessionId = `autosave_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        localStorage.setItem(sessionKey, sessionId);
+    }
 
     // Process all message elements
     const messageElements = chatMessages.querySelectorAll('.message');
@@ -1223,10 +1245,12 @@ async function collectAllChatData() {
         studentAnswers: studentAnswersData,
         assessmentScore: practiceTestData?.score ?? null,
         sessionInfo: {
+            sessionId: sessionId,
             startTime: getSessionStartTime(messages),
             endTime: new Date().toISOString(),
             duration: calculateSessionDuration({ metadata: { totalMessages: messages.length }, messages: messages })
-        }
+        },
+        lastActivityTimestamp: existingChatData?.lastActivityTimestamp || new Date().toISOString()
     };
 
     return chatData;

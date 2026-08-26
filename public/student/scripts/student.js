@@ -61,6 +61,13 @@ function initializeKeyboardControlActivation() {
 document.addEventListener('DOMContentLoaded', async () => {
     initializeKeyboardControlActivation();
 
+    // History navigation carries the selected chat in sessionStorage. Stage it
+    // before the first awaited startup request so course/session initialization
+    // cannot create a fresh assessment over the requested continuation.
+    if (typeof stageHistoryChatDataForLoad === 'function') {
+        stageHistoryChatDataForLoad();
+    }
+
     try {
         const courseId = localStorage.getItem('selectedCourseId');
         if (courseId) {
