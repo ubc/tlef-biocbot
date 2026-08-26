@@ -1,15 +1,39 @@
 # Student chat encryption rollout
 
-BiocBot uses `@ubc/genai-toolkit-encryption` to encrypt the `chatData` field in
-MongoDB's `chat_sessions` collection. Application code continues to read and
-write normal JavaScript objects; MongoDB stores an authenticated AES-256-GCM
-envelope instead of the transcript payload.
+BiocBot uses `@ubc/genai-toolkit-encryption` to encrypt the `chatData` field of
+its chat-transcript collections in MongoDB. Application code continues to read
+and write normal JavaScript objects; MongoDB stores an authenticated
+AES-256-GCM envelope instead of the transcript payload.
 
-The first rollout deliberately leaves `courseId`, `studentId`, `sessionId`,
-`studentName`, `unitName`, `title`, timestamps, counts, and deletion flags in
-plaintext. They remain available for existing filters, sorts, retention jobs,
-pseudonymization, and dashboards. Expanding the schema to names or identifiers
-requires a separate query/index review.
+## Protected collections
+
+One policy, one key, one namespace covers all three:
+
+| Collection | Encrypted field | Written by |
+| --- | --- | --- |
+| `chat_sessions` | `chatData` | student course chat |
+| `student_super_course_chat_sessions` | `chatData` | student Super Course chat |
+| `instructor_chat_sessions` | `chatData` | instructor Super Course chat |
+
+The list lives in `ENCRYPTED_CHAT_COLLECTIONS` in `src/config/chatEncryption.js`
+and is the single source the config, the synthetic canary, and the tests all
+read. Add a collection there and it is protected everywhere at once.
+
+Nothing else is encrypted. `mentalHealthFlags`, `quizAttempts`, `users`,
+`documents`, Qdrant payloads, and LMS tokens are all out of scope for this
+rollout.
+
+The rollout deliberately leaves `courseId`, `studentId`, `instructorId`,
+`superchatId`, `sessionId`, `studentName`, `instructorName`, `unitName`,
+`title`, `messageCount`, `duration`, `savedAt`, timestamps, and deletion flags
+in plaintext. They remain available for existing filters, sorts, retention jobs,
+pseudonymization, and dashboards — including the `distinct('studentId', …)`
+query behind Super Course pseudonyms. Expanding the schema to names or
+identifiers requires a separate query/index review.
+
+Each envelope's additional authenticated data binds it to its own namespace,
+collection, field, and key id, so a ciphertext cannot be moved between these
+three collections even though they share a key.
 
 ## Security boundary
 
@@ -37,8 +61,11 @@ npm run encryption:canary
 ```
 
 It creates a uniquely named temporary database, writes one synthetic chat
-through the wrapper, verifies the raw envelope and protected round trip, reports
-only non-sensitive structural metadata, and drops the temporary database.
+through the wrapper **into every collection in `ENCRYPTED_CHAT_COLLECTIONS`**,
+verifies the raw envelope and protected round trip for each, reports only
+non-sensitive structural metadata, and drops the temporary database. A
+collection added to the policy but not actually protected fails the canary
+instead of passing it silently.
 
 1. Generate a dedicated key:
 
@@ -67,48 +94,125 @@ only non-sensitive structural metadata, and drops the temporary database.
 
 All commands load `.env` through `src/config/encryption.js`. `plan`, dry-run,
 and verify are read-only for application data. Run them from the repository
-root:
+root.
+
+### Every command names its own collection
+
+The npm scripts **no longer hardcode a collection**. Each invocation must state
+its scope with `-- --collection <name>`.
+
+This is deliberate. The toolkit declares `--collection` as a repeatable option,
+so passing the flag twice *accumulates* rather than overriding:
 
 ```bash
-npm run encryption:plan
-npm run encryption:migrate:dry-run
+# What the old hardcoded script did with an extra flag:
+#   plan --collection chat_sessions --collection student_super_course_chat_sessions
+#   -> scope resolves to BOTH collections
 ```
 
-Before any migration write, take and test a current backup that does not contain
-the encryption key. Then run a bounded canary:
+For `plan` that is merely surprising. For `migrate` it silently widens the blast
+radius to a collection the operator never named. With the flag removed from the
+scripts, a bare invocation now fails loudly instead:
+
+```text
+collection scope is required: pass --collection <name> one or more times,
+or --all-configured to opt in to every configured collection
+```
+
+`--all-configured` is available for the read-only commands
+(`encryption:plan:all`, `encryption:verify:all`) and refuses to combine with
+`--collection`. Migrations are intentionally left one collection at a time.
+
+### `student_super_course_chat_sessions`
 
 ```bash
-npm run encryption:migrate -- --max-documents 25 --backup-confirmed --verify
+# 1. Plan and dry-run (read-only)
+npm run encryption:plan -- --collection student_super_course_chat_sessions
+npm run encryption:migrate:dry-run -- --collection student_super_course_chat_sessions
+
+# 2. Bounded canary, after a tested backup that does not contain the key
+npm run encryption:migrate -- --collection student_super_course_chat_sessions --max-documents 25 --backup-confirmed --verify
 npm run encryption:status
-npm run encryption:verify
+npm run encryption:verify -- --collection student_super_course_chat_sessions
+
+# 3. Full migration, then verification
+npm run encryption:migrate -- --collection student_super_course_chat_sessions --backup-confirmed --verify
+npm run encryption:verify -- --collection student_super_course_chat_sessions
 ```
 
-Review the canary, then resume the same collection without the limit:
+### `instructor_chat_sessions`
 
 ```bash
-npm run encryption:migrate -- --backup-confirmed --verify
-npm run encryption:verify
+# 1. Plan and dry-run (read-only)
+npm run encryption:plan -- --collection instructor_chat_sessions
+npm run encryption:migrate:dry-run -- --collection instructor_chat_sessions
+
+# 2. Bounded canary, after a tested backup that does not contain the key
+npm run encryption:migrate -- --collection instructor_chat_sessions --max-documents 25 --backup-confirmed --verify
+npm run encryption:status
+npm run encryption:verify -- --collection instructor_chat_sessions
+
+# 3. Full migration, then verification
+npm run encryption:migrate -- --collection instructor_chat_sessions --backup-confirmed --verify
+npm run encryption:verify -- --collection instructor_chat_sessions
 ```
+
+### `chat_sessions`
+
+Unchanged apart from naming the collection explicitly:
+
+```bash
+npm run encryption:plan -- --collection chat_sessions
+npm run encryption:migrate:dry-run -- --collection chat_sessions
+npm run encryption:migrate -- --collection chat_sessions --max-documents 25 --backup-confirmed --verify
+npm run encryption:migrate -- --collection chat_sessions --backup-confirmed --verify
+npm run encryption:verify -- --collection chat_sessions
+```
+
+Run each collection's canary, review it, and only then remove `--max-documents`.
+Migrate one collection at a time so a failure is scoped to one dataset.
 
 The toolkit migration is idempotent, resumable, lease-protected, and checks for
 concurrent changes before updating a document. Its checkpoint collection is
 `_ubc_encryption_migrations` and contains operational metadata, not chat data or
 keys.
 
+### Schema fingerprint change
+
+Adding the two collections changes the configuration's schema fingerprint
+(`02379b2de95ff204…` to `b5cf92b20420346a…`). Two consequences:
+
+- The default migration id derives from the fingerprint, so it changes too. Any
+  checkpoint from the earlier `chat_sessions` migration is not resumed by
+  default, and `npm run encryption:status` reports it with
+  `schemaMatchesCurrentConfig: false`. That row is historical; it is not an
+  error. Passing an explicit `--migration-id` from before the change would raise
+  a lease error — start a new id instead.
+- **Existing ciphertext is unaffected.** The fingerprint is migration metadata
+  only; it is not part of the additional authenticated data. Envelopes written
+  under the previous single-collection policy still decrypt, which
+  `tests/unit/services/chatEncryption.test.js` asserts directly.
+
 ## Moving from mixed to strict
 
-Keep mixed reads while plaintext and encrypted documents coexist. Only after a
-full verification succeeds should staging change to:
+Keep mixed reads while plaintext and encrypted documents coexist. The policies
+are global, not per collection, so strict mode requires **all three**
+collections to be fully migrated and verified first. Only then should staging
+change to:
 
 ```text
 BIOCBOT_CHAT_ENCRYPTION_READ_POLICY=strict
 BIOCBOT_CHAT_ENCRYPTION_QUERY_POLICY=encrypted
 ```
 
+Both switches move together: the toolkit rejects a `strict` read policy
+alongside a `mixed` query policy at configuration time.
+
 Restart and exercise save, history, continue-chat, instructor download, student
-analytics, deletion, title update, and pseudonym flows. Strict reads fail closed
-if any configured `chatData` value is plaintext, malformed, tampered with, or
-encrypted under an unavailable key.
+analytics, deletion, title update, and pseudonym flows — for the course chat,
+the student Super Course chat, and the instructor Super Course chat. Strict
+reads fail closed if any configured `chatData` value is plaintext, malformed,
+tampered with, or encrypted under an unavailable key.
 
 ## Staging gate
 
@@ -120,8 +224,11 @@ Before staging deployment:
 - Capture a tested pre-migration backup and a restore point.
 - Run the test suite and a local encrypted-write/raw-storage canary.
 - Deploy mixed-read/encrypted-write mode first.
-- Confirm a newly saved chat is encrypted at rest and readable in every UI.
-- Run plan, dry-run, a small migration canary, full migration, and verification.
+- Confirm a newly saved chat is encrypted at rest and readable in every UI, for
+  all three transcript collections.
+- Run plan, dry-run, a small migration canary, full migration, and verification
+  — separately for `chat_sessions`, `student_super_course_chat_sessions`, and
+  `instructor_chat_sessions`.
 - Switch to strict/encrypted policies in a later deployment after verification.
 - Monitor typed toolkit authentication and plaintext-rejection failures.
 

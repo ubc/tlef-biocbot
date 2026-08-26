@@ -52,11 +52,37 @@ const CHAT_ENCRYPTION_NAMESPACE = 'tlef-biocbot';
 const ACTIVE_CHAT_KEY_ID = 'student-chat-2026-01';
 
 /**
+ * Every collection whose transcript payload is protected, in the order an
+ * operator should migrate them.
+ *
+ * One policy, one key, one namespace: each of these stores its transcript in
+ * the same opaque `chatData` field, so they share a single field policy rather
+ * than three hand-maintained copies of it. The migration CLI, the synthetic
+ * canary, and the rollout runbook all read this list, so a collection can never
+ * be encrypted in one place and forgotten in another.
+ *
+ * Note that the AAD binds each envelope to its own collection name, so a
+ * ciphertext cannot be moved between these collections even though they share a
+ * key.
+ *
+ * @type {readonly string[]}
+ */
+const ENCRYPTED_CHAT_COLLECTIONS = Object.freeze([
+    'chat_sessions',
+    'student_super_course_chat_sessions',
+    'instructor_chat_sessions'
+]);
+
+/** The single field policy applied to every collection above. */
+const CHAT_PAYLOAD_FIELDS = Object.freeze({ chatData: { encrypt: true } });
+
+/**
  * Build BiocBot's application-owned encryption policy.
  *
- * The first rollout intentionally protects only the opaque chatData payload.
- * Operational fields stay plaintext so existing filters, sorts, retention,
- * pseudonymization, and dashboard queries keep their current semantics.
+ * The rollout intentionally protects only the opaque chatData payload of the
+ * chat-transcript collections. Operational fields stay plaintext so existing
+ * filters, sorts, retention, pseudonymization, and dashboard queries keep their
+ * current semantics.
  *
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} env
  * @returns {import('@ubc/genai-toolkit-encryption').EncryptionConfig}
@@ -85,13 +111,9 @@ function buildChatEncryptionConfig(env = process.env) {
         readPolicy,
         queryPolicy,
         writePolicy: 'encrypted',
-        collections: {
-            chat_sessions: {
-                fields: {
-                    chatData: { encrypt: true }
-                }
-            }
-        },
+        collections: Object.fromEntries(
+            ENCRYPTED_CHAT_COLLECTIONS.map((name) => [name, { fields: { ...CHAT_PAYLOAD_FIELDS } }])
+        ),
         database: {
             uriEnv: 'MONGO_URI'
         }
@@ -101,6 +123,7 @@ function buildChatEncryptionConfig(env = process.env) {
 module.exports = {
     ACTIVE_CHAT_KEY_ID,
     CHAT_ENCRYPTION_NAMESPACE,
+    ENCRYPTED_CHAT_COLLECTIONS,
     TOOLKIT_PACKAGE,
     buildChatEncryptionConfig,
     loadEncryptionToolkit,
