@@ -7,6 +7,13 @@ const {
     initializeChatEncryption,
     isChatEncryptionEnabled
 } = require('../../../src/services/chatEncryption');
+const { loadEncryptionToolkit } = require('../../../src/config/chatEncryption');
+
+// The toolkit is an optional dependency on GitHub Packages, so an install
+// without a registry token (CI, a fresh clone) does not have it. The feature
+// flag and pass-through behaviour still get covered there; only the cases that
+// exercise real encryption need the package present.
+const describeWithToolkit = loadEncryptionToolkit() ? describe : describe.skip;
 
 const SYNTHETIC_KEY = Buffer.alloc(32, 7).toString('base64');
 
@@ -64,6 +71,9 @@ describe('student chat encryption startup', () => {
         })).toThrow('BIOCBOT_CHAT_ENCRYPTION_ENABLED must be true, false, 1, or 0');
     });
 
+});
+
+describeWithToolkit('student chat encryption with the toolkit installed', () => {
     test('fails closed when enabled without a key', async () => {
         await expect(initializeChatEncryption(fakeDb(), {
             BIOCBOT_CHAT_ENCRYPTION_ENABLED: 'true'

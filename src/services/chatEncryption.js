@@ -1,7 +1,9 @@
 'use strict';
 
-const { createEncryptedDb } = require('@ubc/genai-toolkit-encryption');
-const { buildChatEncryptionConfig } = require('../config/chatEncryption');
+const {
+    buildChatEncryptionConfig,
+    requireEncryptionToolkit
+} = require('../config/chatEncryption');
 
 const ENABLE_ENV = 'BIOCBOT_CHAT_ENCRYPTION_ENABLED';
 
@@ -38,6 +40,7 @@ async function initializeChatEncryption(rawDb, env = process.env) {
         return rawDb;
     }
 
+    const { createEncryptedDb } = requireEncryptionToolkit();
     const config = buildChatEncryptionConfig(env);
     const protectedDb = await createEncryptedDb(rawDb, config);
     console.log(

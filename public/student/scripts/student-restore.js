@@ -481,6 +481,7 @@ function loadChatData(chatData) {
             const studentId = chatData.metadata.studentId;
             const autoSaveKey = `biocbot_current_chat_${studentId}`;
             localStorage.setItem(autoSaveKey, JSON.stringify(chatData));
+            scheduleChatSessionExpiration(chatData);
 
 
 
@@ -540,28 +541,58 @@ function formatHistoryDate(dateString) {
 /**
  * Check for chat data to load from history
  */
-async function checkForChatDataToLoad() {
-    // Fetch current struggle state first
-    if (typeof fetchCurrentStruggleState === 'function') {
-        window.currentStruggleState = await fetchCurrentStruggleState();
-         // Update UI indicator immediately
-        if (typeof updateStruggleUI === 'function') {
-            updateStruggleUI(window.currentStruggleState);
-        }
-    }
+function stageHistoryChatDataForLoad() {
+    const storedChatData = sessionStorage.getItem('loadChatData');
+    if (!storedChatData) return null;
+
     try {
+        const chatData = JSON.parse(storedChatData);
+        window.loadingFromHistory = true;
 
-        const storedChatData = sessionStorage.getItem('loadChatData');
+        // Clicking Continue Chat is an explicit return to this session. Rebase
+        // its activity window so an older history item is not restored and
+        // immediately rotated by the background inactivity policy.
+        chatData.lastActivityTimestamp = new Date().toISOString();
 
+        // Stage the selected course/unit and chat before any asynchronous page
+        // initialization can create a competing fresh assessment session.
+        if (chatData?.metadata?.courseId) {
+            localStorage.setItem('selectedCourseId', chatData.metadata.courseId);
+        }
+        if (chatData?.metadata?.courseName) {
+            localStorage.setItem('selectedCourseName', chatData.metadata.courseName);
+        }
+        if (chatData?.metadata?.unitName) {
+            localStorage.setItem('selectedUnitName', chatData.metadata.unitName);
+        }
 
-        if (storedChatData) {
-            const chatData = JSON.parse(storedChatData);
+        const studentId = chatData?.metadata?.studentId || getCurrentStudentId();
+        if (studentId) {
+            localStorage.setItem(`biocbot_current_chat_${studentId}`, JSON.stringify(chatData));
+        }
 
+        return chatData;
+    } catch (error) {
+        console.error('Error staging chat data from history:', error);
+        return null;
+    }
+}
 
-            // Set flag to indicate we're loading from history
-            window.loadingFromHistory = true;
+async function checkForChatDataToLoad() {
+    try {
+        // Stage synchronously before the struggle-state request yields to other
+        // startup work. student.js also calls this at the start of page boot.
+        const chatData = stageHistoryChatDataForLoad();
 
+        // Fetch current struggle state before rendering the restored messages.
+        if (typeof fetchCurrentStruggleState === 'function') {
+            window.currentStruggleState = await fetchCurrentStruggleState();
+            if (typeof updateStruggleUI === 'function') {
+                updateStruggleUI(window.currentStruggleState);
+            }
+        }
 
+        if (chatData) {
             // Clear the stored data
             sessionStorage.removeItem('loadChatData');
 
@@ -569,8 +600,6 @@ async function checkForChatDataToLoad() {
             // Load the chat data
 
             loadChatData(chatData);
-        } else {
-
         }
     } catch (error) {
         console.error('Error checking for chat data to load:', error);

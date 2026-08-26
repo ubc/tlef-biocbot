@@ -5,13 +5,17 @@ require('dotenv').config({ quiet: true });
 
 const { randomBytes } = require('node:crypto');
 const { MongoClient } = require('mongodb');
-const { createEncryptedDb } = require('@ubc/genai-toolkit-encryption');
-const { buildChatEncryptionConfig } = require('../src/config/chatEncryption');
+const {
+    buildChatEncryptionConfig,
+    requireEncryptionToolkit
+} = require('../src/config/chatEncryption');
 
 async function main() {
     if (!process.env.MONGO_URI) {
         throw new Error('MONGO_URI is required for the synthetic encryption canary');
     }
+
+    const { createEncryptedDb } = requireEncryptionToolkit();
 
     const databaseName = `biocbot-encryption-canary-${process.pid}-${Date.now()}`;
     const client = new MongoClient(process.env.MONGO_URI);

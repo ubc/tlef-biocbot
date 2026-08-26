@@ -970,7 +970,7 @@ test.describe('student.js compact browser harness', () => {
     test('preserves timestamps and elapsed timing through repeated history reloads', async ({ page }) => {
         await openStudentScriptHarness(page);
 
-        const timing = await page.evaluate(async () => {
+        const timing = await page.evaluate(async (studentId) => {
             const w = /** @type {any} */ (window);
             const originalMessages = [
                 {
@@ -1000,14 +1000,24 @@ test.describe('student.js compact browser harness', () => {
             const chatData = {
                 metadata: {
                     courseId: localStorage.getItem('selectedCourseId'),
-                    courseName: 'BIOC Harness', studentId: 'timing-student',
+                    courseName: 'BIOC Harness', studentId,
                     unitName: 'Unit 1', currentMode: 'tutor', totalMessages: originalMessages.length,
                 },
                 messages: originalMessages,
                 practiceTests: null,
                 studentAnswers: { answers: [] },
                 sessionInfo: { sessionId: 'timing-session' },
+                lastActivityTimestamp: new Date().toISOString(),
             };
+
+            localStorage.setItem(
+                `biocbot_current_chat_${studentId}`,
+                JSON.stringify(chatData)
+            );
+            localStorage.setItem(
+                `biocbot_session_${studentId}_${chatData.metadata.courseId}_Unit 1`,
+                'timing-session'
+            );
 
             const snapshot = (/** @type {any[]} */ messages) => messages.map(message => ({
                 messageType: message.messageType,
@@ -1036,12 +1046,16 @@ test.describe('student.js compact browser harness', () => {
                 expected: snapshot(originalMessages),
                 first: snapshot(firstCollection.messages),
                 second: snapshot(secondCollection.messages),
+                firstSessionId: firstCollection.sessionInfo.sessionId,
+                secondSessionId: secondCollection.sessionInfo.sessionId,
                 firstDom,
             };
-        });
+        }, studentId);
 
         expect(timing.first).toEqual(timing.expected);
         expect(timing.second).toEqual(timing.expected);
+        expect(timing.firstSessionId).toBe('timing-session');
+        expect(timing.secondSessionId).toBe('timing-session');
         expect(timing.firstDom.every((message) =>
             /^\d+$/.test(String(message.timestamp))
             && /^\d+$/.test(String(message.elapsedTime))

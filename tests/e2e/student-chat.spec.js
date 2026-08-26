@@ -1604,7 +1604,7 @@ test.describe('Chat history page — empty + continue', () => {
             studentName: 'E2E Student',
             title: 'Resumeable',
             messages: [
-                { type: 'user', content: 'before reload', timestamp: new Date().toISOString() },
+                { type: 'user', content: 'before reload', timestamp: '2026-01-01T00:00:00.000Z' },
             ],
         });
 
@@ -1623,6 +1623,13 @@ test.describe('Chat history page — empty + continue', () => {
         await page.waitForURL((url) => url.pathname === '/student' || url.pathname === '/student/', {
             timeout: 15_000,
         });
+
+        await expect(page.locator('#chat-messages')).toContainText('before reload', {
+            timeout: 15_000,
+        });
+        await expect(page.locator('#chat-messages')).not.toContainText(
+            'Your previous session ended after'
+        );
 
         // history.js stores the chat data in sessionStorage under 'loadChatData'.
         const loaded = await page.evaluate(() => sessionStorage.getItem('loadChatData'));
