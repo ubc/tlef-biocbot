@@ -685,15 +685,37 @@ test.describe('server.js — pages and legacy endpoints', () => {
         expect([200, 302]).toContain(res.status());
     });
 
-    test('GET /api/health returns service status object', async ({ request: api }) => {
-        const res = await api.get('/api/health');
-        // Either 200 healthy or 503 degraded — both branches are exercised on the
-        // server side; we just need the route to fire.
-        expect([200, 503]).toContain(res.status());
-        const body = await res.json();
-        expect(body).toHaveProperty('services');
-        expect(body.services).toHaveProperty('mongodb');
-    });
+    for (const path of ['/api/health/live', '/api/health/ready', '/api/health']) {
+        test(`GET ${path} is public and returns only a status`, async ({ baseURL }) => {
+            const api = await request.newContext({ baseURL });
+            try {
+                const res = await api.get(path, { maxRedirects: 0 });
+                // The live test stack supplies MongoDB and Qdrant. Dependency
+                // failure/503 branches are exercised in the route unit tests.
+                expect(res.status()).toBe(200);
+                const status = path.endsWith('/live') ? 'ok' : 'healthy';
+                expect(await res.json()).toEqual({ status });
+                expect(res.headers()['cache-control']).toBe('no-store');
+                expect(res.headers()['set-cookie']).toBeUndefined();
+
+                // Probe routes run before JSON parsing and never turn a
+                // conditional request into a 304 or redirect to sign-in.
+                const conditional = await api.get(path, {
+                    headers: {
+                        'If-None-Match': '*',
+                        'Content-Type': 'application/json',
+                        Cookie: 'biocbot.sid=stale-cookie',
+                    },
+                    data: '{',
+                    maxRedirects: 0,
+                });
+                expect(conditional.status()).toBe(200);
+                expect(await conditional.json()).toEqual({ status });
+            } finally {
+                await api.dispose();
+            }
+        });
+    }
 });
 
 // uncovered: SAML-only, requires real IdP — src/routes/shibboleth.js paths

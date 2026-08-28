@@ -139,6 +139,35 @@ npm run dev
 For the staged student-chat encryption rollout, see
 [`documentation/student-chat-encryption-rollout.md`](documentation/student-chat-encryption-rollout.md).
 
+## Health checks
+
+Configure the load balancer to request `GET /api/health` without authentication
+and accept **HTTP 200 only**. `/api/health/ready` is an equivalent readiness route.
+Both return only `{"status":"healthy"}` (200) or `{"status":"unhealthy"}` (503).
+Use `/api/health/live` for process liveness; it returns `{"status":"ok"}` (200)
+without checking dependencies. `/health` and `/healthz` are not aliases.
+
+Readiness requires completed startup (including migrations and enabled chat
+encryption), initialized authentication and the scoped LLM registry, and reachable
+MongoDB and Qdrant. It checks Qdrant without creating or requiring a particular
+collection. An auth initialization check does not verify the external SSO service.
+These routes bypass body parsing, sessions and authentication, and expose no
+service names, configuration, credentials or upstream errors.
+
+LLM credentials and models saved inside the app are not tested by these probes.
+No model listings, chat completions or external LMS/Academic API requests run.
+A healthy result means the application can accept traffic; it does not guarantee
+every course's AI provider can generate answers. Monitor provider/inference
+availability separately; do not use liveness as a substitute for readiness.
+
+Dependency probes run in parallel with a two-second timeout, share concurrent
+requests and cache successes and failures for five seconds per process. Allow
+more than two seconds for the load-balancer timeout (for example, three seconds)
+and account for that cache interval when setting failure/recovery thresholds.
+All responses use `Cache-Control: no-store` to prevent intermediary caching.
+Readiness transitions log fixed failing check names on the server, without
+upstream error text. The HTTP listener opens only after startup succeeds.
+
 ## 📚 Usage
 
 ### For Instructors

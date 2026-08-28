@@ -138,7 +138,8 @@ class ConfigService {
      * @returns {Object} Vector database configuration object
      */
     getVectorDBConfig() {
-        this.ensureValidated();
+        // Vector infrastructure is independent of legacy global LLM settings.
+        // Scoped providers obtain their credentials and models from MongoDB.
         
         // If QDRANT_URL is provided, parse it to extract host and port
         if (process.env.QDRANT_URL) {

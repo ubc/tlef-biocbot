@@ -178,6 +178,14 @@ describe('config.getDatabaseConfig', () => {
 });
 
 describe('config.getVectorDBConfig', () => {
+    test('does not require legacy global LLM credentials or models', () => {
+        process.env.LLM_PROVIDER = 'ubc-llm-sandbox';
+        process.env.QDRANT_URL = 'http://qhost:7000';
+        expect(config.getVectorDBConfig()).toEqual({ host: 'qhost', port: 7000 });
+        // Infrastructure reads must not mark the independent LLM config valid.
+        expect(() => config.getLLMConfig()).toThrow('LLM_API_KEY is required');
+    });
+
     test('parses host/port out of QDRANT_URL', () => {
         process.env.QDRANT_URL = 'http://qhost:7000';
         expect(config.getVectorDBConfig()).toEqual({ host: 'qhost', port: 7000 });

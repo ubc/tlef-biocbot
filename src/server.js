@@ -45,6 +45,7 @@ const providerMigrationsRoutes = require('./routes/providerMigrations');
 const academicSyncRoutes = require('./routes/academicSync');
 const studentPseudonymRoutes = require('./routes/studentPseudonyms');
 const previewRoutes = require('./routes/preview');
+const { createHealthRouter } = require('./routes/health');
 const { createCanvasLmsRouter } = require('./routes/canvasLms');
 const { createLmsGradesRouter } = require('./routes/lmsGrades');
 const { createLmsRosterSyncRouter } = require('./routes/lmsRosterSync');
@@ -86,6 +87,11 @@ let authService;
 let authMiddleware;
 let passport;
 let lmsIntegration;
+
+// Public probes bypass body parsing, sessions and auth, including requests
+// carrying a stale session cookie while MongoDB is unavailable.
+app.locals.startupComplete = false;
+app.use('/api/health', createHealthRouter({ getRawDb: () => db }));
 
 /**
  * Initialize the LLM service
@@ -557,97 +563,6 @@ app.get('/settings', (req, res) => {
     res.redirect('/student');
 });
 
-// Health check endpoint to verify all services
-app.get('/api/health', async (req, res) => {
-    const healthStatus = {
-        status: 'checking',
-        timestamp: new Date().toISOString(),
-        services: {},
-        environment: {
-            NODE_ENV: process.env.NODE_ENV,
-            LLM_PROVIDER: process.env.LLM_PROVIDER,
-            QDRANT_URL: process.env.QDRANT_URL ? 'SET' : 'NOT SET',
-            OLLAMA_ENDPOINT: process.env.OLLAMA_ENDPOINT ? 'SET' : 'NOT SET'
-        }
-    };
-
-    try {
-        // Test MongoDB connection
-        if (!db) {
-            healthStatus.services.mongodb = { status: 'error', message: 'Database not connected' };
-        } else {
-            try {
-                await db.admin().ping();
-                healthStatus.services.mongodb = { status: 'healthy', message: 'Connected' };
-            } catch (error) {
-                healthStatus.services.mongodb = { status: 'error', message: error.message };
-            }
-        }
-
-        // Test configuration loading
-        try {
-            const config = require('./services/config');
-            const llmConfig = config.getLLMConfig();
-            const vectorConfig = config.getVectorDBConfig();
-            healthStatus.services.config = {
-                status: 'healthy',
-                message: 'Configuration loaded successfully',
-                llmProvider: llmConfig.provider,
-                vectorHost: vectorConfig.host,
-                vectorPort: vectorConfig.port
-            };
-        } catch (error) {
-            healthStatus.services.config = { status: 'error', message: error.message };
-        }
-
-        // Test Qdrant connection
-        try {
-            const QdrantService = require('./services/qdrantService');
-            const qdrantService = new QdrantService({ skipEmbeddings: true });
-            await qdrantService.initialize();
-            healthStatus.services.qdrant = { status: 'healthy', message: 'Connected' };
-        } catch (error) {
-            healthStatus.services.qdrant = { status: 'error', message: error.message };
-        }
-
-        // Test LLM connection
-        try {
-            if (app.locals.llm) {
-                const isConnected = await app.locals.llm.testConnection();
-                healthStatus.services.llm = {
-                    status: isConnected ? 'healthy' : 'error',
-                    message: isConnected ? 'Connected' : 'Connection failed',
-                    provider: app.locals.llm.getProviderName()
-                };
-            } else if (app.locals.llmRegistry) {
-                healthStatus.services.llm = {
-                    status: 'healthy',
-                    message: 'Scoped per-surface LLM registry is initialized',
-                    provider: process.env.LLM_PROVIDER || 'unknown'
-                };
-            } else {
-                healthStatus.services.llm = { status: 'error', message: 'LLM registry is not initialized' };
-            }
-        } catch (error) {
-            healthStatus.services.llm = { status: 'error', message: error.message };
-        }
-
-        // Determine overall status
-        const allHealthy = Object.values(healthStatus.services).every(service => service.status === 'healthy');
-        healthStatus.status = allHealthy ? 'healthy' : 'degraded';
-        healthStatus.message = allHealthy ? 'All services are running' : 'Some services are not available';
-
-        const statusCode = allHealthy ? 200 : 503;
-        res.status(statusCode).json(healthStatus);
-
-    } catch (error) {
-        healthStatus.status = 'error';
-        healthStatus.message = 'Health check failed';
-        healthStatus.error = error.message;
-        res.status(503).json(healthStatus);
-    }
-});
-
 /**
  * Set up API routes after authentication middleware is initialized
  */
@@ -807,6 +722,7 @@ async function startServer() {
         // Set up routes after authentication is initialized
         setupProtectedRoutes();
         setupAPIRoutes();
+        app.locals.startupComplete = true;
 
         // Start the Express server
         app.listen(port, () => {
@@ -815,6 +731,7 @@ async function startServer() {
             console.log(`👨‍🎓 Student interface: http://localhost:${port}/student`);
             console.log(`👨‍🏫 Instructor interface: http://localhost:${port}/instructor`);
             console.log(`🔍 Health check: http://localhost:${port}/api/health`);
+            console.log(`   Liveness: /api/health/live   Readiness: /api/health/ready`);
         });
 
     } catch (error) {
