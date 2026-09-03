@@ -1,6 +1,6 @@
 /**
  * Per-profile index tracking: what counts as current, what counts as stale, and
- * which collections a piece of content must be deleted from.
+ * which collections a piece of content must be deleted from. Adding random comment.
  */
 const { buildEmbeddingProfile } = require('../../../src/services/embeddingConfig');
 const {
