@@ -10,7 +10,6 @@
 /test-results
 /a11y-results
 /playwright/.auth
-package-lock.json
 .claude/
 .npmrc
 .nvmrc
