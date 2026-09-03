@@ -348,5 +348,3 @@ Steps to enable:
 ## 📄 License
 
 ISC License
-
-------------
