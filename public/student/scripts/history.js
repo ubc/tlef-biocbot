@@ -496,16 +496,17 @@ function displayChatHistory(chatHistory) {
     const noHistoryMessage = document.getElementById('no-history-message');
     
     if (!historyList) return;
-    
+
     // Clear existing content
     historyList.innerHTML = '';
-    
+
     if (chatHistory.length === 0) {
         showNoHistoryMessage();
         return;
     }
-    
-    // Hide no history message
+
+    // Show history list, hide no history message
+    historyList.style.display = '';
     if (noHistoryMessage) {
         noHistoryMessage.style.display = 'none';
     }
@@ -756,10 +757,11 @@ function showNoHistoryMessage() {
     
     if (historyList) {
         historyList.innerHTML = '';
+        historyList.style.display = 'none';
     }
-    
+
     if (noHistoryMessage) {
-        noHistoryMessage.style.display = 'block';
+        noHistoryMessage.style.display = 'flex';
     }
     
     // Clear preview panel
@@ -1084,8 +1086,7 @@ function clearPreviewPanel() {
         previewMessages.innerHTML = `
             <div class="no-selection">
                 <div class="no-selection-content">
-                    <div class="no-selection-icon">📋</div>
-                    <h3>No Chat Selected</h3>
+                    <h3>No chat selected</h3>
                     <p>Select a chat from the list to view its contents and continue the conversation.</p>
                 </div>
             </div>
