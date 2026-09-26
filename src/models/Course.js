@@ -38,10 +38,15 @@ function isValidCourseStatus(value) {
  *   instructors: [String],      // Array of instructor IDs (primary instructor + additional instructors)
  *   tas: [String],              // Array of TA IDs
  *   taPermissions: {            // TA permission settings
- *     [taId]: {                 // Permission object for each TA
- *       canAccessCourses: Boolean,  // Can access My Courses page
- *       canAccessFlags: Boolean    // Can access Flag page
- *     }
+ *     [taId]: {                 // Permission object for each TA - see
+ *       materials: Boolean,     // TA_PERMISSION_KEYS in this file and
+ *       questions: Boolean,     // src/services/permissions.js for the
+ *       flags: Boolean,         // route mapping each key gates and the
+ *       roster: Boolean,        // named role presets. A missing entry
+ *       transcripts: Boolean,   // defaults to no access (fail-closed); a
+ *       settings: Boolean,      // still-legacy {canAccessCourses,
+ *       updatedAt: Date         // canAccessFlags} entry is normalized to
+ *     }                         // this shape on read.
  *   },
  *   studentEnrollment: {        // Per-student enrollment overrides (optional)
  *     [studentId]: {
@@ -57,6 +62,7 @@ function isValidCourseStatus(value) {
  *     {
  *       name: String,           // e.g., "Unit 1", "Week 1"
  *       displayName: String,    // Custom title e.g., "Biology" (optional)
+ *       showUnitNumber: Boolean, // Show "<N>. " prefix before displayName (optional, missing/undefined means true)
  *       isPublished: Boolean,   // Publish status
  *       createdAt: Date,        // When the lecture was created
  *       updatedAt: Date,        // Last update timestamp
@@ -1384,9 +1390,10 @@ async function deleteUnit(db, courseId, unitName) {
  * @param {string} unitName - Internal name of the unit (e.g., "Unit 1")
  * @param {string} displayName - Custom display name (e.g., "Biology") or null to clear
  * @param {string} instructorId - ID of the instructor making the change
+ * @param {boolean} [showUnitNumber=true] - Whether to prefix the display name with "<N>. ". Ignored when displayName is cleared.
  * @returns {Promise<Object>} Update result
  */
-async function updateUnitDisplayName(db, courseId, unitName, displayName, instructorId) {
+async function updateUnitDisplayName(db, courseId, unitName, displayName, instructorId, showUnitNumber = true) {
     const collection = getCoursesCollection(db);
     
     const now = new Date();
@@ -1411,19 +1418,23 @@ async function updateUnitDisplayName(db, courseId, unitName, displayName, instru
         updatedAt: now,
         lastUpdatedById: instructorId
     };
-    
-    // If displayName is empty or null, remove the field; otherwise set it
+    const unsetFields = {};
+
+    // If displayName is empty or null, remove the field (and showUnitNumber with
+    // it, so the unit returns to a clean state); otherwise set both.
     if (displayName && displayName.trim()) {
         updateFields['lectures.$.displayName'] = displayName.trim();
+        updateFields['lectures.$.showUnitNumber'] = showUnitNumber !== false;
+    } else {
+        unsetFields['lectures.$.displayName'] = '';
+        unsetFields['lectures.$.showUnitNumber'] = '';
     }
-    
+
     const updateOp = {
         $set: updateFields
     };
-    
-    // If displayName is empty, also unset the field
-    if (!displayName || !displayName.trim()) {
-        updateOp.$unset = { 'lectures.$.displayName': '' };
+    if (Object.keys(unsetFields).length > 0) {
+        updateOp.$unset = unsetFields;
     }
     
     const result = await collection.updateOne(
@@ -1440,11 +1451,13 @@ async function updateUnitDisplayName(db, courseId, unitName, displayName, instru
     
     console.log(`Updated display name for ${unitName} to "${displayName || '(cleared)'}" in course ${courseId}`);
     
-    return { 
-        success: true, 
+    const clearedName = !(displayName && displayName.trim());
+    return {
+        success: true,
         modifiedCount: result.modifiedCount,
         unitName,
-        displayName: displayName && displayName.trim() ? displayName.trim() : null
+        displayName: clearedName ? null : displayName.trim(),
+        showUnitNumber: clearedName ? true : showUnitNumber !== false
     };
 }
 
@@ -1778,46 +1791,91 @@ async function getCourseByIdIncludingDeleted(db, courseId) {
 }
 
 /**
- * Update TA permissions for a specific course
+ * The six grantable TA permissions. Each gates a specific cluster of routes -
+ * see src/services/permissions.js for the full route mapping and role presets.
+ */
+const TA_PERMISSION_KEYS = ['materials', 'questions', 'flags', 'roster', 'transcripts', 'settings'];
+
+/**
+ * A TA record predates the six-flag model if it still carries either of the
+ * old two booleans. Old keys win over any stale partial new-shape data, since
+ * a record can only have been partially migrated by a lazy read that was
+ * itself interrupted.
+ */
+function isLegacyTAPermissions(permissions) {
+    return !!permissions && ('canAccessCourses' in permissions || 'canAccessFlags' in permissions);
+}
+
+/**
+ * Map the old two-boolean shape to the new six-flag shape, preserving each
+ * TA's *current effective access* rather than granting anything new.
+ *
+ * canAccessCourses covered materials/questions/settings, and - via a bug in
+ * mentalHealthFlags.js that checked the same 'courses' feature - transcripts
+ * too; migrating it to true for all four is bug-for-bug faithful, not a new
+ * grant. canAccessFlags covered flag review and (bundled in) the student
+ * roster, so it maps to both flags and roster.
+ *
+ * Uses `!== false` rather than `=== true`, matching the truthiness the
+ * frontend and checkTAPermission's old switch already treated as "allowed"
+ * (an `undefined` field was never actually enforced as denied) so the
+ * migration doesn't silently revoke access that was effectively granted.
+ */
+function migrateLegacyTAPermissions(legacy) {
+    const canAccessCourses = legacy.canAccessCourses !== false;
+    const canAccessFlags = legacy.canAccessFlags !== false;
+    return {
+        materials: canAccessCourses,
+        questions: canAccessCourses,
+        settings: canAccessCourses,
+        transcripts: canAccessCourses,
+        flags: canAccessFlags,
+        roster: canAccessFlags
+    };
+}
+
+/**
+ * Update TA permissions for a specific course.
+ *
+ * Accepts a partial permissions object - only the keys present are
+ * validated and written, via a per-field $set - so callers can toggle one
+ * permission without first reading and re-sending all six (avoids a
+ * read-modify-write race between two toggles in flight).
  * @param {Object} db - MongoDB database instance
  * @param {string} courseId - Course identifier
  * @param {string} taId - TA identifier
- * @param {Object} permissions - Permission object
- * @param {boolean} permissions.canAccessCourses - Can access My Courses page
- * @param {boolean} permissions.canAccessFlags - Can access Flag page
+ * @param {Object} permissions - Partial permission object; keys from TA_PERMISSION_KEYS
  * @returns {Promise<Object>} Update result
  */
 async function updateTAPermissions(db, courseId, taId, permissions) {
     const collection = getCoursesCollection(db);
-    
+
     const now = new Date();
-    
+
     // First, ensure the course exists
     const course = await collection.findOne({ courseId });
     if (!course) {
         return { success: false, error: 'Course not found' };
     }
-    
+
     // Check if TA is assigned to this course
     if (!course.tas || !course.tas.includes(taId)) {
         return { success: false, error: 'TA is not assigned to this course' };
     }
-    
+
+    const setFields = { updatedAt: now, [`taPermissions.${taId}.updatedAt`]: now };
+    for (const key of TA_PERMISSION_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(permissions, key)) {
+            setFields[`taPermissions.${taId}.${key}`] = permissions[key];
+        }
+    }
+
     // Update TA permissions
     const result = await collection.updateOne(
         { courseId },
-        {
-            $set: {
-                [`taPermissions.${taId}`]: {
-                    canAccessCourses: permissions.canAccessCourses,
-                    canAccessFlags: permissions.canAccessFlags,
-                    updatedAt: now
-                },
-                updatedAt: now
-            }
-        }
+        { $set: setFields }
     );
-    
+
     if (result.modifiedCount > 0) {
         console.log(`Updated TA permissions for ${taId} in course ${courseId}`);
         return { success: true, modifiedCount: result.modifiedCount };
@@ -1827,7 +1885,14 @@ async function updateTAPermissions(db, courseId, taId, permissions) {
 }
 
 /**
- * Get TA permissions for a specific course and TA
+ * Get TA permissions for a specific course and TA.
+ *
+ * Always returns the current six-flag shape. A genuinely-absent record
+ * (a TA who has never had permissions set) defaults to fail-closed - no
+ * access - reversing the old fail-open default. A record still in the old
+ * two-boolean shape (not yet touched by the migration script) is normalized
+ * on the fly via migrateLegacyTAPermissions, so reads are correct even
+ * before/without the one-time backfill running.
  * @param {Object} db - MongoDB database instance
  * @param {string} courseId - Course identifier
  * @param {string} taId - TA identifier
@@ -1835,55 +1900,60 @@ async function updateTAPermissions(db, courseId, taId, permissions) {
  */
 async function getTAPermissions(db, courseId, taId) {
     const collection = getCoursesCollection(db);
-    
+
     const course = await collection.findOne({ courseId });
     if (!course) {
         return { success: false, error: 'Course not found' };
     }
-    
+
     // Check if TA is assigned to this course
     if (!course.tas || !course.tas.includes(taId)) {
         return { success: false, error: 'TA is not assigned to this course' };
     }
-    
-    // Get TA permissions or return default permissions
-    const permissions = course.taPermissions && course.taPermissions[taId] 
-        ? course.taPermissions[taId]
-        : { canAccessCourses: true, canAccessFlags: true }; // Default to allowing access
-    
+
+    const stored = course.taPermissions && course.taPermissions[taId];
+    let permissions;
+    if (!stored) {
+        // No record at all: fail-closed default for TAs added after this shipped.
+        permissions = Object.fromEntries(TA_PERMISSION_KEYS.map(key => [key, false]));
+    } else if (isLegacyTAPermissions(stored)) {
+        permissions = migrateLegacyTAPermissions(stored);
+    } else {
+        permissions = Object.fromEntries(TA_PERMISSION_KEYS.map(key => [key, stored[key] === true]));
+    }
+
     return { success: true, permissions };
 }
 
 /**
- * Check if a TA has permission to access a specific feature
+ * Check if a TA has permission to access a specific feature.
  * @param {Object} db - MongoDB database instance
  * @param {string} courseId - Course identifier
  * @param {string} taId - TA identifier
- * @param {string} feature - Feature to check ('courses' or 'flags')
+ * @param {string} feature - One of TA_PERMISSION_KEYS
  * @returns {Promise<boolean>} True if TA has permission
  */
 async function checkTAPermission(db, courseId, taId, feature) {
+    // Explicit whitelist, not an unguarded object lookup: the stored
+    // subdocument also carries `updatedAt`, which is a truthy Date - an
+    // unguarded permissions[feature] read would let 'updatedAt' resolve as
+    // a granted permission for any TA who's ever been touched.
+    if (!TA_PERMISSION_KEYS.includes(feature)) {
+        return false;
+    }
+
     const course = await getCourseById(db, courseId);
     if (!course || course.status === 'deleted') {
         return false;
     }
 
     const result = await getTAPermissions(db, courseId, taId);
-    
+
     if (!result.success) {
         return false;
     }
-    
-    const permissions = result.permissions;
-    
-    switch (feature) {
-        case 'courses':
-            return permissions.canAccessCourses;
-        case 'flags':
-            return permissions.canAccessFlags;
-        default:
-            return false;
-    }
+
+    return result.permissions[feature] === true;
 }
 
 /**
@@ -2455,6 +2525,9 @@ module.exports = {
     updateTAPermissions,
     getTAPermissions,
     checkTAPermission,
+    TA_PERMISSION_KEYS,
+    isLegacyTAPermissions,
+    migrateLegacyTAPermissions,
     updateStudentEnrollment,
     getStudentEnrollment,
     joinCourse,
