@@ -257,7 +257,7 @@ class AgreementModal {
             if (closeBtn) closeBtn.style.display = 'block';
         } else {
             // Normal mode: show agreement controls, hide close button
-            if (checkboxContainer) checkboxContainer.style.display = 'block';
+            if (checkboxContainer) checkboxContainer.style.display = 'flex';
             if (agreeBtn) agreeBtn.style.display = 'block';
             if (closeBtn) closeBtn.style.display = 'none';
         }
