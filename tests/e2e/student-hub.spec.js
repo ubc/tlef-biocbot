@@ -8,6 +8,7 @@ const fs = require('fs/promises');
 const { test, expect, request } = require('./fixtures/monocart');
 const { TEST_USERS, storageStatePath } = require('./helpers/users');
 const { getUserIdByUsername } = require('./helpers/quiz');
+const { setSystemAdmin } = require('./helpers/downloads');
 const {
     HUB_COURSE_ID,
     HUB_OTHER_COURSE_ID,
@@ -194,6 +195,24 @@ test.describe('Student Hub UI', () => {
         await expect(activeCard).not.toContainText('Struggle Topics');
         await expect(activeCard).not.toContainText('Oxidative phosphorylation');
         await expect(activeCard.locator('.download-struggle-btn')).toHaveCount(0);
+    });
+
+    test('hides the anonymization-ID button from a non-admin instructor, and shows it for a system admin', async ({ page }) => {
+        await setSystemAdmin(instructorId, false);
+
+        await openStudentHub(page);
+        await expect(page.locator('#open-pseudonym-manager')).toBeHidden();
+
+        try {
+            await setSystemAdmin(instructorId, true);
+            await openStudentHub(page);
+            await expect(page.locator('#open-pseudonym-manager')).toBeVisible();
+
+            await page.locator('#open-pseudonym-manager').click();
+            await expect(page.locator('#pseudonym-manager')).toBeVisible();
+        } finally {
+            await setSystemAdmin(instructorId, false);
+        }
     });
 
     test('downloads a markdown struggle report for the selected student', async ({ page }) => {

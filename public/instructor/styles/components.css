@@ -39,6 +39,12 @@
   cursor: not-allowed;
 }
 
+.btn-primary[hidden],
+.btn-secondary[hidden],
+.btn-danger[hidden] {
+  display: none;
+}
+
 /* Size modifier - must come after the base classes above to win the
    padding/font-size/border-radius cascade at equal specificity. */
 .btn-small {
