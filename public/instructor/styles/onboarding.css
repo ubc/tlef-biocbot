@@ -9,7 +9,7 @@
 .progress-bar {
   width: 100%;
   height: 8px;
-  background-color: #e0e0e0;
+  background-color: var(--bb-ground-alt);
   border-radius: 4px;
   overflow: hidden;
   margin-bottom: 1rem;
@@ -29,8 +29,8 @@
 }
 
 .step-indicator {
-  font-size: 0.9rem;
-  color: #666;
+  font-size: var(--bb-text-card-body);
+  color: var(--bb-ink-70);
   position: relative;
   padding: 0.5rem 1rem;
   border-radius: 20px;
@@ -74,8 +74,8 @@
 }
 
 .welcome-header h1 {
-  font-size: 2.5rem;
-  color: #333;
+  font-size: var(--bb-text-h2);
+  color: var(--bb-ink);
   margin-bottom: 0.5rem;
   display: flex;
   align-items: center;
@@ -84,41 +84,33 @@
 }
 
 .welcome-subtitle {
-  font-size: 1.2rem;
-  color: #666;
+  font-size: var(--bb-text-h3-group);
+  color: var(--bb-ink-70);
   margin: 0;
 }
 
 .intro-section {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 1.5rem;
+  gap: var(--bb-gap-loose);
   margin-bottom: 3rem;
 }
 
-.feature-card {
-  background: #f8f9fa;
-  padding: 1.5rem;
-  border-radius: 8px;
-  text-align: center;
-  border: 1px solid #e9ecef;
-}
-
 .feature-icon {
-  font-size: 2.5rem;
+  font-size: var(--bb-text-h2);
   margin-bottom: 1rem;
   display: block;
 }
 
 .feature-card h3 {
-  color: #333;
+  color: var(--bb-ink);
   margin-bottom: 0.5rem;
-  font-size: 1.1rem;
+  font-size: var(--bb-text-lede);
 }
 
 .feature-card p {
-  color: #666;
-  font-size: 0.9rem;
+  color: var(--bb-ink-70);
+  font-size: var(--bb-text-card-body);
   line-height: 1.4;
   margin: 0;
 }
@@ -129,14 +121,14 @@
 
 .how-it-works h2 {
   text-align: center;
-  color: #333;
+  color: var(--bb-ink);
   margin-bottom: 2rem;
 }
 
 .workflow-steps {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: var(--bb-gap-loose);
 }
 
 .workflow-step {
@@ -159,13 +151,13 @@
 }
 
 .step-details h3 {
-  color: #333;
+  color: var(--bb-ink);
   margin-bottom: 0.5rem;
-  font-size: 1.1rem;
+  font-size: var(--bb-text-lede);
 }
 
 .step-details p {
-  color: #666;
+  color: var(--bb-ink-70);
   margin: 0;
   line-height: 1.4;
 }
@@ -177,13 +169,13 @@
 }
 
 .step-header .step-title {
-  color: #333;
+  color: var(--bb-ink);
   margin-bottom: 0.5rem;
-  font-size: 1.5em;
+  font-size: var(--bb-text-h3-flip);
 }
 
 .step-header p {
-  color: #666;
+  color: var(--bb-ink-70);
   margin: 0;
 }
 
@@ -197,9 +189,9 @@
 }
 
 .form-section h2 {
-  color: #333;
+  color: var(--bb-ink);
   margin-bottom: 1rem;
-  font-size: 1.2rem;
+  font-size: var(--bb-text-h3-group);
 }
 
 .form-row {
@@ -220,16 +212,16 @@
 
 .form-group label {
   font-weight: 600;
-  color: #333;
+  color: var(--bb-ink);
   margin-bottom: 0.5rem;
 }
 
 .form-group input,
 .form-group select {
   padding: 0.75rem;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--bb-ink-16);
   border-radius: 6px;
-  font-size: 1rem;
+  font-size: var(--bb-text-nav);
   transition: border-color 0.3s ease;
 }
 
@@ -250,8 +242,8 @@
 .academic-sync-status {
   min-height: 1.25rem;
   margin: 0.5rem 0 0.75rem;
-  font-size: 0.92rem;
-  color: #555;
+  font-size: var(--bb-text-card-body);
+  color: var(--bb-ink-75);
 }
 
 .academic-sync-status-success {
@@ -277,9 +269,9 @@
   gap: 0.75rem;
   align-items: start;
   padding: 0.85rem;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--bb-ink-16);
   border-radius: 6px;
-  background: #fff;
+  background: var(--bb-white);
 }
 
 .academic-section-option:hover {
@@ -288,12 +280,12 @@
 
 .academic-section-option.is-disabled {
   opacity: 0.6;
-  background: #f5f5f5;
+  background: var(--bb-ground);
   cursor: not-allowed;
 }
 
 .academic-section-option.is-disabled:hover {
-  border-color: #e0e0e0;
+  border-color: var(--bb-ink-16);
 }
 
 .academic-section-option input {
@@ -313,7 +305,7 @@
 }
 
 .academic-section-text small {
-  color: #666;
+  color: var(--bb-ink-70);
 }
 
 .content-types {
@@ -327,7 +319,7 @@
   display: flex;
   align-items: center;
   padding: 1rem;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--bb-ink-16);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -336,7 +328,7 @@
 
 .checkbox-label:hover {
   border-color: #4caf50;
-  background: #f8f9fa;
+  background: var(--bb-ground);
 }
 
 .checkbox-label input[type="checkbox"] {
@@ -355,18 +347,6 @@
   justify-content: space-between;
   margin-bottom: 2rem;
   gap: 1rem;
-}
-
-.progress-card {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  padding: 1rem;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border: 2px solid #e0e0e0;
-  transition: all 0.3s ease;
-  cursor: pointer;
 }
 
 .progress-card.active {
@@ -399,14 +379,14 @@
 
 .progress-text h2 {
   margin: 0 0 0.25rem 0;
-  font-size: 0.9rem;
-  color: #333;
+  font-size: var(--bb-text-card-body);
+  color: var(--bb-ink);
 }
 
 .progress-text p {
   margin: 0;
-  font-size: 0.8rem;
-  color: #666;
+  font-size: var(--bb-text-card-kicker);
+  color: var(--bb-ink-70);
 }
 
 /* Guided Sub-steps */
@@ -420,29 +400,29 @@
 
 .substep-header {
   text-align: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--bb-gap-loose);
 }
 
 .substep-header h2 {
-  color: #333;
+  color: var(--bb-ink);
   margin-bottom: 0.5rem;
-  font-size: 1.5rem;
+  font-size: var(--bb-text-h3-flip);
 }
 
 .substep-header p {
-  color: #666;
+  color: var(--bb-ink-70);
   margin: 0;
   max-width: 600px;
   margin: 0 auto;
 }
 
 .substep-content {
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--bb-gap-loose);
 }
 
 /* Learning Objectives Sub-step */
 .objectives-input-section {
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--bb-gap-loose);
 }
 
 .input-group {
@@ -454,9 +434,9 @@
 .objective-input {
   flex: 1;
   padding: 0.75rem;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--bb-ink-16);
   border-radius: 6px;
-  font-size: 1rem;
+  font-size: var(--bb-text-nav);
 }
 
 .objective-input:focus {
@@ -471,7 +451,7 @@
   color: white;
   border: none;
   border-radius: 6px;
-  font-size: 1.2rem;
+  font-size: var(--bb-text-h3-group);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -488,7 +468,7 @@
   border: 1px solid #4caf50;
   border-radius: 6px;
   padding: 1rem;
-  font-size: 0.9rem;
+  font-size: var(--bb-text-card-body);
   color: #2e7d32;
 }
 
@@ -505,14 +485,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem;
-  background: #f8f9fa;
+  background: var(--bb-ground);
   border-radius: 6px;
   border-left: 4px solid #4caf50;
 }
 
 .objective-text {
   flex: 1;
-  color: #333;
+  color: var(--bb-ink);
 }
 
 .remove-objective {
@@ -526,7 +506,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.8rem;
+  font-size: var(--bb-text-card-kicker);
   margin-left: 0.5rem;
 }
 
@@ -545,9 +525,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.5rem;
+  padding: var(--bb-gap-loose);
   background: white;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--bb-ink-16);
   border-radius: 8px;
   transition: all 0.3s ease;
 }
@@ -566,32 +546,32 @@
 
 .material-info h3 {
   margin: 0 0 0.5rem 0;
-  color: #333;
-  font-size: 1.1rem;
+  color: var(--bb-ink);
+  font-size: var(--bb-text-lede);
 }
 
 #step-3 .unit-objectives-section > h3,
 #step-3 .unit-materials-section > h3 {
-  font-size: 1em;
+  font-size: var(--bb-text-nav);
   margin-block: 1.33em;
 }
 
 #step-3 .material-info h4 {
-  font-size: 0.83em;
+  font-size: var(--bb-text-card-kicker);
   margin-block: 1.67em;
 }
 
 .material-info p {
   margin: 0 0 0.5rem 0;
-  color: #666;
-  font-size: 0.9rem;
+  color: var(--bb-ink-70);
+  font-size: var(--bb-text-card-body);
 }
 
 .status-badge {
   display: inline-block;
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
-  font-size: 0.8rem;
+  font-size: var(--bb-text-card-kicker);
   font-weight: 500;
 }
 
@@ -617,7 +597,7 @@
   padding: 0.75rem 1.5rem;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: var(--bb-text-card-body);
   transition: background-color 0.3s ease;
 }
 
@@ -629,15 +609,15 @@
 .questions-section {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: var(--bb-gap-loose);
 }
 
 .generate-section {
   text-align: center;
-  padding: 1.5rem;
-  background: #f8f9fa;
+  padding: var(--bb-gap-loose);
+  background: var(--bb-ground);
   border-radius: 8px;
-  border: 2px dashed #e0e0e0;
+  border: 2px dashed var(--bb-ink-16);
 }
 
 .generate-btn {
@@ -646,7 +626,7 @@
   border: none;
   padding: 1rem 2rem;
   border-radius: 6px;
-  font-size: 1rem;
+  font-size: var(--bb-text-nav);
   cursor: pointer;
   transition: all 0.3s ease;
   display: flex;
@@ -661,8 +641,8 @@
 }
 
 .generate-help {
-  color: #666;
-  font-size: 0.9rem;
+  color: var(--bb-ink-70);
+  font-size: var(--bb-text-card-body);
   margin: 0;
 }
 
@@ -673,9 +653,9 @@
 .question-input {
   flex: 1;
   padding: 0.75rem;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--bb-ink-16);
   border-radius: 6px;
-  font-size: 1rem;
+  font-size: var(--bb-text-nav);
 }
 
 .question-input:focus {
@@ -690,7 +670,7 @@
   color: white;
   border: none;
   border-radius: 6px;
-  font-size: 1.2rem;
+  font-size: var(--bb-text-h3-group);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -711,7 +691,7 @@
 
 /* Assessment Questions Styling */
 .assessment-info {
-  background: #f8f9fa;
+  background: var(--bb-ground);
   padding: 0.75rem;
   border-left: 3px solid #007bff;
   margin-bottom: 1rem;
@@ -722,41 +702,41 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--bb-gap-loose);
   padding: 0.75rem;
-  background: #e9ecef;
+  background: var(--bb-ground-alt);
   border-radius: 6px;
 }
 
 .threshold-input {
   width: 60px;
   padding: 0.25rem 0.5rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--bb-ink-16);
   border-radius: 4px;
   text-align: center;
 }
 
 .threshold-help {
   color: #6c757d;
-  font-size: 0.875rem;
+  font-size: var(--bb-text-card-kicker);
 }
 
 .questions-list {
   min-height: 100px;
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--bb-gap-loose);
 }
 
 .no-questions-message {
   text-align: center;
   padding: 2rem 1rem;
   color: #6c757d;
-  background: #f8f9fa;
+  background: var(--bb-ground);
   border-radius: 6px;
-  border: 2px dashed #dee2e6;
+  border: 2px dashed var(--bb-ink-16);
 }
 
 .question-item {
-  border: 1px solid #e1e5e9;
+  border: 1px solid var(--bb-ink-16);
   border-radius: 6px;
   margin-bottom: 1rem;
   background: white;
@@ -769,14 +749,14 @@
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
-  background: #f8f9fa;
-  border-bottom: 1px solid #e1e5e9;
+  background: var(--bb-ground);
+  border-bottom: 1px solid var(--bb-ink-16);
 }
 
 .question-type-badge {
   padding: 0.25rem 0.5rem;
   border-radius: 12px;
-  font-size: 0.75rem;
+  font-size: var(--bb-text-kicker);
   font-weight: 600;
   text-transform: uppercase;
 }
@@ -819,7 +799,7 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--bb-text-card-kicker);
 }
 
 .edit-question-btn {
@@ -845,7 +825,7 @@
 .question-text {
   margin-bottom: 1rem;
   font-weight: 500;
-  color: #333;
+  color: var(--bb-ink);
 }
 
 .question-learning-objective {
@@ -857,7 +837,7 @@
 }
 
 .question-learning-objective-label {
-  font-size: 0.8rem;
+  font-size: var(--bb-text-card-kicker);
   font-weight: 600;
   color: #4b5563;
 }
@@ -867,23 +847,23 @@
   align-items: center;
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
-  font-size: 0.78rem;
+  font-size: var(--bb-text-card-kicker);
   font-weight: 600;
   background: #e0f2fe;
   color: #075985;
 }
 
 .question-learning-objective-value.unassigned {
-  background: #f3f4f6;
+  background: var(--bb-ground);
   color: #6b7280;
 }
 
 .answer-preview {
   margin-top: 0.5rem;
   padding: 0.5rem;
-  background: #f8f9fa;
+  background: var(--bb-ground);
   border-radius: 4px;
-  font-size: 0.9rem;
+  font-size: var(--bb-text-card-body);
 }
 
 .mcq-preview {
@@ -894,7 +874,7 @@
   padding: 0.25rem 0.5rem;
   margin: 0.25rem 0;
   border-radius: 4px;
-  font-size: 0.9rem;
+  font-size: var(--bb-text-card-body);
 }
 
 .mcq-option-preview.correct {
@@ -921,14 +901,14 @@
   border-radius: 6px;
   cursor: pointer;
   font-weight: 500;
-  font-size: 0.9rem;
+  font-size: var(--bb-text-card-body);
   transition: all 0.2s ease;
 }
 
 .add-question-btn {
-  background-color: #f8f9fa;
-  border: 1px dashed #e0e0e0;
-  color: #666;
+  background: var(--bb-ground);
+  border: 1px dashed var(--bb-ink-16);
+  color: var(--bb-ink-70);
   display: flex;
   visibility: visible;
   opacity: 1;
@@ -937,9 +917,9 @@
 }
 
 .add-question-btn:hover {
-  background-color: #f0f0f0;
-  border-color: #999;
-  color: #333;
+  background-color: var(--bb-ground-alt);
+  border-color: var(--bb-ink-20);
+  color: var(--bb-ink);
 }
 
 .auto-link-btn {
@@ -973,7 +953,7 @@
 }
 
 .btn-icon {
-  font-size: 1rem;
+  font-size: var(--bb-text-nav);
 }
 
 .save-assessment {
@@ -986,7 +966,7 @@
   border: none;
   padding: 0.75rem 1.5rem;
   border-radius: 6px;
-  font-size: 0.9rem;
+  font-size: var(--bb-text-card-body);
   font-weight: 500;
   cursor: pointer;
   transition: background-color 0.3s ease;
@@ -1003,14 +983,14 @@
 }
 
 .question-form .form-section {
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--bb-gap-loose);
 }
 
 .question-form label {
   display: block;
   margin-bottom: 0.5rem;
   font-weight: 500;
-  color: #333;
+  color: var(--bb-ink);
 }
 
 .question-form select,
@@ -1018,9 +998,9 @@
 .question-form input[type="text"] {
   width: 100%;
   padding: 0.75rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--bb-ink-16);
   border-radius: 4px;
-  font-size: 1rem;
+  font-size: var(--bb-text-nav);
 }
 
 .learning-objective-note {
@@ -1029,15 +1009,15 @@
   border-radius: 6px;
   background: #eff6ff;
   color: #1d4ed8;
-  font-size: 0.85rem;
+  font-size: var(--bb-text-card-kicker);
 }
 
 .edit-learning-objective-question-text {
   margin: 0;
   padding: 0.85rem 1rem;
   border-radius: 8px;
-  background: #f8f9fa;
-  color: #333;
+  background: var(--bb-ground);
+  color: var(--bb-ink);
   line-height: 1.5;
 }
 
@@ -1065,7 +1045,7 @@ fieldset.radio-group-fieldset {
   padding: 0;
   margin-bottom: 0.5rem;
   font-weight: 500;
-  color: #333;
+  color: var(--bb-ink);
 }
 
 .radio-option {
@@ -1079,7 +1059,7 @@ fieldset.radio-group-fieldset {
 }
 
 .radio-option:hover {
-  background-color: #f8f9fa;
+  background: var(--bb-ground);
 }
 
 .radio-option input[type="radio"] {
@@ -1098,9 +1078,9 @@ fieldset.radio-group-fieldset {
   align-items: center;
   gap: 1rem;
   padding: 0.75rem;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--bb-ink-16);
   border-radius: 4px;
-  background: #f8f9fa;
+  background: var(--bb-ground);
 }
 
 .mcq-option .mcq-input {
@@ -1123,9 +1103,9 @@ fieldset.radio-group-fieldset {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 1.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid #e0e0e0;
+  margin-top: var(--bb-gap-loose);
+  padding-top: var(--bb-gap-loose);
+  border-top: 1px solid var(--bb-ink-16);
 }
 
 /* Step Actions */
@@ -1135,46 +1115,7 @@ fieldset.radio-group-fieldset {
   align-items: center;
   margin-top: 2rem;
   padding-top: 2rem;
-  border-top: 1px solid #e0e0e0;
-}
-
-.btn-primary,
-.btn-secondary {
-  padding: 0.75rem 1.5rem;
-  border-radius: 6px;
-  font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  border: none;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.btn-primary {
-  background: #2e7d32;
-  color: white;
-}
-
-.btn-primary:hover {
-  background: #45a049;
-}
-
-.btn-secondary {
-  background: #6c757d;
-  color: white;
-}
-
-.btn-secondary:hover {
-  background: #5a6268;
-}
-
-.btn-primary:disabled,
-.btn-secondary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+  border-top: 1px solid var(--bb-ink-16);
 }
 
 /* Responsive Design */
@@ -1218,7 +1159,7 @@ fieldset.radio-group-fieldset {
   }
 
   .step-content {
-    padding: 1.5rem;
+    padding: var(--bb-gap-loose);
   }
 
   .material-item {
@@ -1271,21 +1212,21 @@ fieldset.radio-group-fieldset {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1.5rem 2rem;
-  border-bottom: 1px solid #e0e0e0;
+  padding: var(--bb-gap-loose) 2rem;
+  border-bottom: 1px solid var(--bb-ink-16);
 }
 
 .modal-header h2 {
   margin: 0;
-  color: #333;
+  color: var(--bb-ink);
 }
 
 .modal-close {
   background: none;
   border: none;
-  font-size: 1.5rem;
+  font-size: var(--bb-text-h3-flip);
   cursor: pointer;
-  color: #666;
+  color: var(--bb-ink-70);
   padding: 0;
   width: 30px;
   height: 30px;
@@ -1295,7 +1236,7 @@ fieldset.radio-group-fieldset {
 }
 
 .modal-close:hover {
-  color: #333;
+  color: var(--bb-ink);
 }
 
 .modal-body {
@@ -1303,8 +1244,8 @@ fieldset.radio-group-fieldset {
 }
 
 .modal-footer {
-  padding: 1.5rem 2rem;
-  border-top: 1px solid #e0e0e0;
+  padding: var(--bb-gap-loose) 2rem;
+  border-top: 1px solid var(--bb-ink-16);
 }
 
 .modal-actions {
@@ -1317,7 +1258,7 @@ fieldset.radio-group-fieldset {
 .upload-section {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: var(--bb-gap-loose);
 }
 
 .file-upload-container {
@@ -1331,7 +1272,7 @@ fieldset.radio-group-fieldset {
   gap: 1rem;
   width: 100%;
   padding: 2rem;
-  border: 2px dashed #e0e0e0;
+  border: 2px dashed var(--bb-ink-16);
   border-radius: 8px;
   background: white;
   cursor: pointer;
@@ -1340,12 +1281,12 @@ fieldset.radio-group-fieldset {
 
 .upload-file-btn:hover {
   border-color: #4caf50;
-  background: #f8f9fa;
+  background: var(--bb-ground);
 }
 
 .upload-icon {
-  font-size: 2rem;
-  color: #666;
+  font-size: var(--bb-text-h2-sub);
+  color: var(--bb-ink-70);
 }
 
 .input-section {
@@ -1356,15 +1297,15 @@ fieldset.radio-group-fieldset {
 
 .input-section label {
   font-weight: 600;
-  color: #333;
+  color: var(--bb-ink);
 }
 
 .input-section input,
 .input-section textarea {
   padding: 0.75rem;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--bb-ink-16);
   border-radius: 6px;
-  font-size: 1rem;
+  font-size: var(--bb-text-nav);
   transition: border-color 0.3s ease;
 }
 
@@ -1379,7 +1320,7 @@ fieldset.radio-group-fieldset {
   flex-direction: column;
   gap: 0.25rem;
   padding: 1rem;
-  background: #f8f9fa;
+  background: var(--bb-ground);
   border-radius: 6px;
   margin-top: 1rem;
 }
@@ -1390,12 +1331,12 @@ fieldset.radio-group-fieldset {
 
 .file-name {
   font-weight: 600;
-  color: #333;
+  color: var(--bb-ink);
 }
 
 .file-size {
-  color: #666;
-  font-size: 0.9rem;
+  color: var(--bb-ink-70);
+  font-size: var(--bb-text-card-body);
 }
 
 /* Learning Objectives Styles */
@@ -1412,9 +1353,9 @@ fieldset.radio-group-fieldset {
 .objectives-input-section .objective-input {
   flex: 1;
   padding: 0.75rem;
-  border: 2px solid #e1e5e9;
+  border: 2px solid var(--bb-ink-16);
   border-radius: 8px;
-  font-size: 1rem;
+  font-size: var(--bb-text-nav);
   transition: border-color 0.3s ease;
 }
 
@@ -1429,7 +1370,7 @@ fieldset.radio-group-fieldset {
   border: none;
   border-radius: 8px;
   padding: 0.75rem 1.5rem;
-  font-size: 1.2rem;
+  font-size: var(--bb-text-h3-group);
   cursor: pointer;
   transition: background-color 0.3s ease;
 }
@@ -1446,8 +1387,8 @@ fieldset.radio-group-fieldset {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #f8f9fa;
-  border: 1px solid #e1e5e9;
+  background: var(--bb-ground);
+  border: 1px solid var(--bb-ink-16);
   border-radius: 6px;
   padding: 0.75rem 1rem;
   margin-bottom: 0.5rem;
@@ -1455,7 +1396,7 @@ fieldset.radio-group-fieldset {
 
 .objective-display-item .objective-text {
   flex: 1;
-  color: #333;
+  color: var(--bb-ink);
 }
 
 .objective-display-item .remove-objective {
@@ -1465,7 +1406,7 @@ fieldset.radio-group-fieldset {
   border-radius: 4px;
   padding: 0.25rem 0.5rem;
   cursor: pointer;
-  font-size: 1rem;
+  font-size: var(--bb-text-nav);
   margin-left: 1rem;
 }
 
@@ -1501,13 +1442,13 @@ fieldset.radio-group-fieldset {
 
 .onboarding-complete .welcome-header h1 {
   color: white;
-  font-size: 3rem;
+  font-size: var(--bb-text-stat);
   margin-bottom: 1rem;
 }
 
 .onboarding-complete .welcome-subtitle {
   color: rgba(255, 255, 255, 0.9);
-  font-size: 1.3rem;
+  font-size: var(--bb-text-h3-step);
   margin-bottom: 1rem;
 }
 
@@ -1515,13 +1456,13 @@ fieldset.radio-group-fieldset {
   background: rgba(255, 255, 255, 0.1);
   border: 2px solid rgba(255, 255, 255, 0.3);
   border-radius: 8px;
-  padding: 1.5rem;
+  padding: var(--bb-gap-loose);
   margin-bottom: 2rem;
 }
 
 .onboarding-complete .completion-message p {
   color: white;
-  font-size: 1.1rem;
+  font-size: var(--bb-text-lede);
   margin: 0;
   text-align: center;
 }
@@ -1549,7 +1490,7 @@ fieldset.radio-group-fieldset {
 }
 
 .completion-actions .btn-primary:hover {
-  background: #f8f9fa;
+  background: var(--bb-ground);
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
@@ -1568,17 +1509,17 @@ fieldset.radio-group-fieldset {
 
 /* Join Course Section */
 .join-course-info {
-  background: #f8f9fa;
-  border: 2px solid #e9ecef;
+  background: var(--bb-ground);
+  border: 2px solid var(--bb-ink-16);
   border-radius: 8px;
-  padding: 1.5rem;
+  padding: var(--bb-gap-loose);
   margin: 1rem 0;
 }
 
 .join-course-info h3 {
   color: #495057;
   margin-bottom: 0.5rem;
-  font-size: 1.2rem;
+  font-size: var(--bb-text-h3-group);
 }
 
 .join-course-info p {
@@ -1589,7 +1530,7 @@ fieldset.radio-group-fieldset {
 
 .course-details {
   background: white;
-  border: 1px solid #dee2e6;
+  border: 1px solid var(--bb-ink-16);
   border-radius: 6px;
   padding: 1rem;
   margin-top: 1rem;
@@ -1598,13 +1539,13 @@ fieldset.radio-group-fieldset {
 .course-info h4 {
   color: #495057;
   margin-bottom: 0.5rem;
-  font-size: 1.1rem;
+  font-size: var(--bb-text-lede);
 }
 
 .course-info p {
   color: #6c757d;
   margin-bottom: 0.25rem;
-  font-size: 0.9rem;
+  font-size: var(--bb-text-card-body);
 }
 
 .course-info p:last-child {
@@ -1621,17 +1562,17 @@ fieldset.radio-group-fieldset {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    column-gap: 24px;
+    column-gap: var(--bb-gap-loose);
     row-gap: 8px;
     margin: 0 0 4px;
     padding: 8px 12px;
-    border: 1px solid #d7d7d7;
+    border: 1px solid var(--bb-ink-16);
     border-radius: 6px;
 }
 
 .llm-platform-choice legend {
     padding: 0 4px;
-    font-size: 13px;
+    font-size: var(--bb-text-card-kicker);
     font-weight: 600;
 }
 
@@ -1647,7 +1588,7 @@ fieldset.radio-group-fieldset {
        and let the row wrap instead of squeezing the text into a column. */
     flex: 0 0 auto;
     white-space: nowrap;
-    font-size: 14px;
+    font-size: var(--bb-text-card-kicker);
     font-weight: 500;
     cursor: pointer;
 }

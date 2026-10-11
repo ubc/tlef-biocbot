@@ -1,4 +1,6 @@
 /* Base Styles */
+@import url('tokens.css');
+
 :root {
     --primary-color: #4a6fa5;
     --secondary-color: #6b8cae;
@@ -863,6 +865,111 @@ summary:focus-visible {
     outline: 3px solid #0055b7 !important;
     outline-offset: 2px;
     border-radius: 2px;
+}
+
+/* Instructor app typography: scoped under .instructor-app (set on <body> in
+   public/instructor/*.html) so it adopts the homepage's Barlow/--bb-text-*
+   scale without touching the base rules above, which student pages still
+   use as-is. */
+.instructor-app {
+    font-family: var(--bb-font-body);
+}
+
+/* Browsers don't inherit font-family onto form controls by default, so
+   without this they'd fall back to the OS UI font and clash with Barlow. */
+.instructor-app button,
+.instructor-app input,
+.instructor-app select,
+.instructor-app textarea {
+    font-family: inherit;
+}
+
+/* Page-level horizontal inset, matching the homepage's --bb-pad-x container
+   margin. Vertical padding stays the fixed 20px the base .main-content rule
+   already used (--bb-pad-x's own 20px floor lines up with it at narrow
+   widths); only left/right grow on wider screens. */
+.instructor-app .main-content {
+    padding-top: 20px;
+    padding-right: var(--bb-pad-x);
+    padding-bottom: 20px;
+    padding-left: var(--bb-pad-x);
+}
+
+/* Page title row: each page had picked its own padding/margin/background
+   for this wrapper (home.css added a 30px/40px inset + white card, chat.css
+   its own background+padding, downloads/notes/flagged each a different
+   margin-bottom), so the title landed at a different x/y position on every
+   page. Pin it to one box so the title is always in the same spot when
+   switching tabs. (Onboarding's .welcome-header is deliberately excluded:
+   it's a centered wizard card, not a left-aligned page banner, so matching
+   position there isn't meaningful.) */
+.instructor-app .main-content header,
+.instructor-app .content-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin: 0 0 20px;
+    padding: 0 0 20px;
+    background: none;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Page titles: homepage's own h1/h2/h3 inherit the body font too (Barlow
+   Condensed on the homepage is reserved for small uppercase kickers/nav/
+   buttons, not headline copy), so these just pick up the size token.
+   .content-header covers Student Hub/TA Hub, which use a div instead of a
+   semantic <header> for their title block; .welcome-header covers the
+   Onboarding title. Color/weight are set here too and win over each page's
+   own *-header h1 rule (chat.css, downloads.css, flagged.css, home.css,
+   onboarding.css, ...) on specificity, since those pages had each picked a
+   different color/weight independently. */
+.instructor-app .main-content header h1,
+.instructor-app .content-header h1,
+.instructor-app .welcome-header h1 {
+    font-size: var(--bb-text-h2-sub);
+    color: var(--text-color);
+    font-weight: 600;
+}
+
+.instructor-app .user-role,
+.instructor-app .sidebar .user-action,
+.instructor-app .main-nav .student-preview-option {
+    font-size: var(--bb-text-kicker);
+}
+
+.instructor-app button,
+.instructor-app .button,
+.instructor-app .btn-ai,
+.instructor-app input,
+.instructor-app select,
+.instructor-app textarea,
+.instructor-app .new-session-button,
+.instructor-app .account-menu-email,
+.instructor-app .account-menu-item,
+.instructor-app .switch-role a,
+.instructor-app .field-feedback {
+    font-size: var(--bb-text-card-body);
+}
+
+.instructor-app .ai-icon,
+.instructor-app .new-session-icon,
+.instructor-app .notification-close {
+    font-size: var(--bb-text-nav);
+}
+
+@media (max-width: 768px) {
+    .instructor-app .main-content header h1,
+    .instructor-app .content-header h1,
+    .instructor-app .welcome-header h1 {
+        font-size: var(--bb-text-h3-group);
+    }
+
+    .instructor-app .new-session-button,
+    .instructor-app .mobile-header-toggle {
+        font-size: var(--bb-text-card-kicker);
+    }
 }
 
 .icon-inline {

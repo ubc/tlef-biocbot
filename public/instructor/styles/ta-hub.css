@@ -7,24 +7,24 @@
 .dashboard-section {
     background: white;
     border-radius: 8px;
-    padding: 24px;
-    margin-bottom: 24px;
+    padding: var(--bb-gap-loose);
+    margin-bottom: var(--bb-gap-loose);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .dashboard-section h2 {
     margin: 0 0 20px 0;
-    color: #333;
-    font-size: 1.5rem;
+    color: var(--bb-ink);
+    font-size: var(--bb-text-h3-flip);
     font-weight: 600;
 }
 
 /* Add TA Form */
 .add-ta-form {
-    background: #f8f9fa;
+    background: var(--bb-ground);
     border-radius: 6px;
     padding: 20px;
-    border: 1px solid #e9ecef;
+    border: 1px solid var(--bb-ink-16);
 }
 
 .form-row {
@@ -42,15 +42,15 @@
 .form-group label {
     font-weight: 500;
     margin-bottom: 8px;
-    color: #555;
+    color: var(--bb-ink-75);
 }
 
 .form-group input,
 .form-group select {
     padding: 12px;
-    border: 1px solid #ddd;
+    border: 1px solid var(--bb-ink-16);
     border-radius: 4px;
-    font-size: 14px;
+    font-size: var(--bb-text-card-kicker);
     transition: border-color 0.2s;
 }
 
@@ -74,18 +74,6 @@
     gap: 20px;
 }
 
-.ta-card {
-    background: white;
-    border: 1px solid #e9ecef;
-    border-radius: 8px;
-    padding: 20px;
-    transition: box-shadow 0.2s;
-}
-
-.ta-card:hover {
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-}
-
 .ta-header {
     display: flex;
     justify-content: space-between;
@@ -94,9 +82,9 @@
 }
 
 .ta-name {
-    font-size: 1.1rem;
+    font-size: var(--bb-text-lede);
     font-weight: 600;
-    color: #333;
+    color: var(--bb-ink);
     margin: 0;
 }
 
@@ -105,7 +93,7 @@
     color: #1976d2;
     padding: 4px 8px;
     border-radius: 4px;
-    font-size: 0.8rem;
+    font-size: var(--bb-text-card-kicker);
     font-weight: 500;
 }
 
@@ -115,23 +103,23 @@
 
 .ta-info p {
     margin: 4px 0;
-    color: #666;
-    font-size: 0.9rem;
+    color: var(--bb-ink-70);
+    font-size: var(--bb-text-card-body);
 }
 
 /* TA Permissions */
 .ta-permissions {
     margin: 16px 0;
     padding: 16px;
-    background: #f8f9fa;
+    background: var(--bb-ground);
     border-radius: 6px;
-    border: 1px solid #e9ecef;
+    border: 1px solid var(--bb-ink-16);
 }
 
 .ta-permissions h4 {
     margin: 0 0 12px 0;
-    color: #333;
-    font-size: 0.9rem;
+    color: var(--bb-ink);
+    font-size: var(--bb-text-card-body);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -160,7 +148,7 @@
 }
 
 .permission-toggle:hover {
-    background-color: #e9ecef;
+    background-color: var(--bb-ground-alt);
 }
 
 .permission-toggle input[type="checkbox"] {
@@ -172,8 +160,8 @@
 }
 
 .toggle-label {
-    font-size: 0.9rem;
-    color: #555;
+    font-size: var(--bb-text-card-body);
+    color: var(--bb-ink-75);
     font-weight: 500;
     user-select: none;
 }
@@ -207,40 +195,13 @@
 .section-description p {
     margin: 0;
     color: #1565c0;
-    font-size: 0.9rem;
+    font-size: var(--bb-text-card-body);
     line-height: 1.4;
 }
 
 .ta-actions {
     display: flex;
     gap: 8px;
-}
-
-.btn-small {
-    padding: 6px 12px;
-    font-size: 0.8rem;
-    border-radius: 4px;
-    border: none;
-    cursor: pointer;
-    transition: background-color 0.2s;
-}
-
-.btn-small.btn-secondary {
-    background: #6c757d;
-    color: white;
-}
-
-.btn-small.btn-secondary:hover {
-    background: #5a6268;
-}
-
-.btn-small.btn-danger {
-    background: #dc3545;
-    color: white;
-}
-
-.btn-small.btn-danger:hover {
-    background: #c82333;
 }
 
 /* Course TAs List */
@@ -251,8 +212,8 @@
 }
 
 .course-ta-item {
-    background: #f8f9fa;
-    border: 1px solid #e9ecef;
+    background: var(--bb-ground);
+    border: 1px solid var(--bb-ink-16);
     border-radius: 6px;
     padding: 16px;
     display: flex;
@@ -262,14 +223,14 @@
 
 .course-ta-info h4 {
     margin: 0 0 8px 0;
-    color: #333;
-    font-size: 1rem;
+    color: var(--bb-ink);
+    font-size: var(--bb-text-nav);
 }
 
 .course-ta-info p {
     margin: 0;
-    color: #666;
-    font-size: 0.9rem;
+    color: var(--bb-ink-70);
+    font-size: var(--bb-text-card-body);
 }
 
 .course-ta-actions {
@@ -281,12 +242,12 @@
 .no-tas-message {
     text-align: center;
     padding: 40px 20px;
-    color: #666;
+    color: var(--bb-ink-70);
 }
 
 .no-tas-message h3 {
     margin: 0 0 12px 0;
-    color: #333;
+    color: var(--bb-ink);
 }
 
 .no-tas-message p {
@@ -328,16 +289,16 @@
 
 .modal-header h2 {
     margin: 0;
-    color: #333;
-    font-size: 1.25rem;
+    color: var(--bb-ink);
+    font-size: var(--bb-text-h3-group);
 }
 
 .modal-close {
     background: none;
     border: none;
-    font-size: 24px;
+    font-size: var(--bb-text-h3-flip);
     cursor: pointer;
-    color: #999;
+    color: var(--bb-ink-65);
     padding: 0;
     width: 30px;
     height: 30px;
@@ -347,7 +308,7 @@
 }
 
 .modal-close:hover {
-    color: #333;
+    color: var(--bb-ink);
 }
 
 .modal-body {
@@ -356,7 +317,7 @@
 
 .modal-body p {
     margin: 0 0 12px 0;
-    color: #666;
+    color: var(--bb-ink-70);
 }
 
 .modal-footer {
@@ -366,22 +327,6 @@
     justify-content: flex-end;
     border-top: none;
     background: none;
-}
-
-.btn-danger {
-    background: #dc3545;
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    transition: background-color 0.2s;
-}
-
-.btn-danger:hover {
-    background: #c82333;
 }
 
 /* Loading States */
@@ -398,7 +343,7 @@
     width: 20px;
     height: 20px;
     margin: -10px 0 0 -10px;
-    border: 2px solid #f3f3f3;
+    border: 2px solid var(--bb-ink-16);
     border-top: 2px solid #007bff;
     border-radius: 50%;
     animation: spin 1s linear infinite;
