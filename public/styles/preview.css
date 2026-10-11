@@ -7,12 +7,15 @@
  * — the previewer is judging that layout, and it should not move.
  */
 
+@import url('tokens.css');
+
 :root {
     --preview-banner-height: 48px;
-    --preview-bg: #3d2f6b;
-    --preview-bg-panel: #2f2452;
-    --preview-text: #f4f2ff;
-    --preview-accent: #ffd24a;
+    --preview-bg: var(--bb-steel-dark);
+    --preview-bg-panel: var(--bb-steel);
+    --preview-text: var(--bb-white);
+    --preview-accent: var(--warning-color, #ffc107);
+    --preview-accent-text: var(--bb-ink);
 }
 
 .preview-banner {
@@ -38,7 +41,7 @@
 .preview-badge {
     flex: 0 0 auto;
     background-color: var(--preview-accent);
-    color: #2b2140;
+    color: var(--preview-accent-text);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -83,13 +86,13 @@
 
 .preview-btn-exit {
     background-color: var(--preview-accent);
-    color: #2b2140;
+    color: var(--preview-accent-text);
     border-color: var(--preview-accent);
     font-weight: 600;
 }
 
 .preview-btn-exit:hover {
-    background-color: #ffdd76;
+    filter: brightness(1.1);
 }
 
 .preview-btn-danger {
