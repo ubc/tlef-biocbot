@@ -58,6 +58,13 @@
     font-weight: 600;
 }
 
+/* tabindex="-1" so modal-a11y.js can move focus here on open (screen
+   readers announce it), not because it's meant to look interactive -
+   the default focus ring reads as a stray selection box otherwise. */
+.agreement-modal-header h2:focus {
+    outline: none;
+}
+
 .agreement-modal-header .subtitle {
     margin: 8px 0 0 0;
     font-size: var(--bb-text-lede);
