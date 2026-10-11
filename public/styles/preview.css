@@ -7,12 +7,16 @@
  * — the previewer is judging that layout, and it should not move.
  */
 
+@import url('tokens.css');
+
 :root {
     --preview-banner-height: 48px;
-    --preview-bg: #3d2f6b;
-    --preview-bg-panel: #2f2452;
-    --preview-text: #f4f2ff;
-    --preview-accent: #ffd24a;
+    --preview-banner-border: 3px;
+    --preview-bg: var(--bb-steel-dark);
+    --preview-bg-panel: var(--bb-steel);
+    --preview-text: var(--bb-white);
+    --preview-accent: var(--warning-color, #ffc107);
+    --preview-accent-text: var(--bb-ink);
 }
 
 .preview-banner {
@@ -24,7 +28,8 @@
     background-color: var(--preview-bg);
     color: var(--preview-text);
     font-size: 0.875rem;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+    border-bottom: var(--preview-banner-border) solid var(--preview-accent);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
 .preview-banner-main {
@@ -38,7 +43,7 @@
 .preview-badge {
     flex: 0 0 auto;
     background-color: var(--preview-accent);
-    color: #2b2140;
+    color: var(--preview-accent-text);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -83,13 +88,13 @@
 
 .preview-btn-exit {
     background-color: var(--preview-accent);
-    color: #2b2140;
+    color: var(--preview-accent-text);
     border-color: var(--preview-accent);
     font-weight: 600;
 }
 
 .preview-btn-exit:hover {
-    background-color: #ffdd76;
+    filter: brightness(1.1);
 }
 
 .preview-btn-danger {
@@ -107,7 +112,7 @@
     display: block;
     /* The explainer makes the panel tall, so cap it against the viewport and
        let it scroll rather than pushing the controls off screen. */
-    max-height: calc(100vh - var(--preview-banner-height));
+    max-height: calc(100vh - var(--preview-banner-height) - var(--preview-banner-border));
     overflow-y: auto;
 }
 
@@ -209,7 +214,7 @@ body.preview-mode .app-container {
    preview the banner takes a slice of that, so without this the box overflows
    .main-content and it scrolls behind the chat's own scroller. */
 body.preview-mode .chat-container {
-    height: calc(100vh - 120px - var(--preview-banner-height));
+    height: calc(100vh - 120px - var(--preview-banner-height) - var(--preview-banner-border));
 }
 
 @media (max-width: 768px) {
