@@ -1,4 +1,7 @@
 /* User Agreement Modal Styles */
+
+@import url('tokens.css');
+
 .agreement-modal-overlay {
     position: fixed;
     top: 0;
@@ -16,7 +19,7 @@
 }
 
 .agreement-modal {
-    background: white;
+    background: var(--bb-white);
     border-radius: 12px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
     max-width: 600px;
@@ -24,7 +27,8 @@
     max-height: 80vh;
     overflow-y: auto;
     position: relative;
-    animation: modalSlideIn 0.3s ease-out;
+    font-family: var(--bb-font-body);
+    animation: modalSlideIn 0.3s var(--bb-ease-reveal);
 }
 
 @keyframes modalSlideIn {
@@ -39,9 +43,9 @@
 }
 
 .agreement-modal-header {
-    background: linear-gradient(135deg, #4a90e2, #357abd);
-    color: white;
-    padding: 24px;
+    background: var(--bb-steel-dark);
+    color: var(--bb-white);
+    padding: var(--bb-gap-loose);
     border-radius: 12px 12px 0 0;
     text-align: center;
     position: relative;
@@ -49,41 +53,42 @@
 
 .agreement-modal-header h2 {
     margin: 0;
-    font-size: 28px;
+    font-family: var(--bb-font-heading);
+    font-size: var(--bb-text-h2-sub);
     font-weight: 600;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .agreement-modal-header .subtitle {
     margin: 8px 0 0 0;
-    font-size: 16px;
-    opacity: 0.9;
+    font-size: var(--bb-text-lede);
+    color: var(--bb-paper-86);
     font-weight: 400;
 }
 
 .agreement-modal-body {
-    padding: 32px;
+    padding: var(--bb-gap-loose);
     line-height: 1.6;
-    color: #333;
+    color: var(--bb-ink);
 }
 
 .agreement-section {
-    margin-bottom: 24px;
+    margin-bottom: var(--bb-gap-loose);
 }
 
 .agreement-section h3 {
-    color: #2c3e50;
-    font-size: 20px;
-    margin: 0 0 12px 0;
+    color: var(--bb-steel);
+    font-family: var(--bb-font-heading);
+    font-size: var(--bb-text-h3-group);
+    margin: 0 0 var(--bb-gap-dense) 0;
     font-weight: 600;
-    border-bottom: 2px solid #e9ecef;
+    border-bottom: 1px solid var(--bb-ink-16);
     padding-bottom: 8px;
 }
 
 .agreement-section p {
     margin: 0 0 16px 0;
-    font-size: 15px;
-    color: #555;
+    font-size: var(--bb-text-card-body);
+    color: var(--bb-ink-70);
 }
 
 .agreement-section ul,
@@ -94,21 +99,21 @@
 
 .agreement-section li {
     margin: 8px 0;
-    font-size: 15px;
-    color: #555;
+    font-size: var(--bb-text-card-body);
+    color: var(--bb-ink-70);
 }
 
 .agreement-section strong {
-    color: #2c3e50;
+    color: var(--bb-ink);
     font-weight: 600;
 }
 
 .agreement-checkbox-container {
-    background: #f8f9fa;
-    border: 2px solid #e9ecef;
+    background: var(--bb-ground);
+    border: 1px solid var(--bb-ink-16);
     border-radius: 8px;
-    padding: 20px;
-    margin: 24px 0;
+    padding: var(--bb-gap-dense);
+    margin: var(--bb-gap-loose) 0;
     display: flex;
     align-items: flex-start;
     gap: 12px;
@@ -121,11 +126,12 @@
     cursor: pointer;
     flex-shrink: 0;
     margin-top: 2px;
+    accent-color: var(--bb-steel);
 }
 
 .agreement-checkbox-label {
-    font-size: 15px;
-    color: #333;
+    font-size: var(--bb-text-card-body);
+    color: var(--bb-ink);
     cursor: pointer;
     line-height: 1.5;
     margin: 0;
@@ -133,12 +139,12 @@
 }
 
 .agreement-checkbox-label strong {
-    color: #2c3e50;
+    color: var(--bb-ink);
     font-weight: 600;
 }
 
 .agreement-modal-footer {
-    padding: 24px 32px 32px 32px;
+    padding: var(--bb-gap-dense) var(--bb-gap-loose) var(--bb-gap-loose) var(--bb-gap-loose);
     display: flex;
     justify-content: center;
     gap: 16px;
@@ -148,7 +154,8 @@
     padding: 12px 32px;
     border: none;
     border-radius: 8px;
-    font-size: 16px;
+    font-family: var(--bb-font-body);
+    font-size: var(--bb-text-nav);
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -156,33 +163,33 @@
 }
 
 .agreement-btn-primary {
-    background: linear-gradient(135deg, #4a90e2, #357abd);
-    color: white;
-    box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3);
+    background: var(--bb-steel);
+    color: var(--bb-white);
+    box-shadow: 0 4px 12px rgba(44, 69, 93, 0.3);
 }
 
 .agreement-btn-primary:hover:not(:disabled) {
-    background: linear-gradient(135deg, #357abd, #2c5aa0);
+    background: var(--bb-steel-lift);
     transform: translateY(-1px);
-    box-shadow: 0 6px 16px rgba(74, 144, 226, 0.4);
+    box-shadow: 0 6px 16px rgba(44, 69, 93, 0.4);
 }
 
 .agreement-btn-primary:disabled {
-    background: #ccc;
+    opacity: 0.5;
     cursor: not-allowed;
     box-shadow: none;
     transform: none;
 }
 
 .agreement-btn-secondary {
-    background: #f8f9fa;
-    color: #6c757d;
-    border: 2px solid #e9ecef;
+    background: var(--bb-ground);
+    color: var(--bb-ink-70);
+    border: 1px solid var(--bb-ink-16);
 }
 
 .agreement-btn-secondary:hover:not(:disabled) {
-    background: #e9ecef;
-    color: #495057;
+    background: var(--bb-ground-alt);
+    color: var(--bb-ink);
 }
 
 /* Responsive Design */
@@ -191,24 +198,24 @@
         margin: 10px;
         max-height: 90vh;
     }
-    
+
     .agreement-modal-header {
         padding: 20px;
     }
-    
+
     .agreement-modal-header h2 {
         font-size: 24px;
     }
-    
+
     .agreement-modal-body {
         padding: 24px;
     }
-    
+
     .agreement-modal-footer {
         padding: 20px 24px 24px 24px;
         flex-direction: column;
     }
-    
+
     .agreement-btn {
         width: 100%;
     }
@@ -220,12 +227,12 @@
 }
 
 .agreement-checkbox:focus {
-    outline: 2px solid #4a90e2;
+    outline: 2px solid var(--bb-steel);
     outline-offset: 2px;
 }
 
 .agreement-btn:focus {
-    outline: 2px solid #4a90e2;
+    outline: 2px solid var(--bb-steel);
     outline-offset: 2px;
 }
 
