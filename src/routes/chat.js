@@ -25,6 +25,7 @@ const { resolveCourseAi, sendLlmKeyError } = require('./llmKeyMiddleware');
 const { evaluateObjectiveAnswer } = require('../services/objectiveAnswer');
 const { createId } = require('../services/id');
 const { LANES } = require('../services/llmLanes');
+const QdrantService = require('../services/qdrantService');
 
 function generateChatMessageId() {
     return createId('msg');
@@ -32,6 +33,149 @@ function generateChatMessageId() {
 
 function normalizeQdrantSearchResults(results) {
     return Array.isArray(results) ? results : [];
+}
+
+// Instructors and students refer to the same unit by whatever word their
+// course culture uses - "unit," "chapter," "week," "lecture," "module,"
+// "lesson." All of these are treated as equivalent ordinal references when
+// followed by a number. ("Slides" deliberately excluded - too easily
+// confused with a literal slide number within a single unit's deck.)
+const UNIT_WORD_PATTERN = /\b(?:units?|chapters?|weeks?|lectures?|modules?|lessons?)\b/gi;
+// A small, explicit set of phrases for "all of them" style requests, so a
+// vague broad question can still fan out across every in-scope unit even
+// though it names no specific number.
+const BROAD_REQUEST_PATTERN = /\b(?:each|every|all(?:\s+the)?)\s+(?:units?|chapters?|weeks?|lectures?|modules?|lessons?)\b|everything\s+(?:so\s+far|(?:we\s*(?:'|')?ve\s+)?covered)/i;
+
+/**
+ * Pull every number that's connected to a "unit(s)"-style reference word by
+ * actual list/range grammar - commas, "and," "or," hyphens, "to," "through" -
+ * out of a message: "unit 3", "units 1-5", "units 1 to 5",
+ * "units 1, 2, and 3", "unit 6 or 7". Only numbers reachable this way from
+ * the reference word are collected; an unrelated number later in the same
+ * sentence ("unit 4, which covers 10 topics") is not, since nothing connects
+ * it grammatically to the reference word.
+ *
+ * Range expansion is clamped to maxUnitNumber so a message like
+ * "units 1 through 999999999" can't blow up memory/CPU trying to enumerate
+ * a near-infinite range - no real course will ever have that many units.
+ *
+ * @param {string} message
+ * @param {number} maxUnitNumber - Highest unit number that could possibly be real for this course
+ * @returns {Set<number>}
+ */
+function extractUnitNumbers(message, maxUnitNumber) {
+    const numbers = new Set();
+    const addNumber = (n) => { if (n >= 1 && n <= maxUnitNumber) numbers.add(n); };
+
+    let match;
+    UNIT_WORD_PATTERN.lastIndex = 0;
+    while ((match = UNIT_WORD_PATTERN.exec(message)) !== null) {
+        const afterWord = message.slice(match.index + match[0].length);
+        const firstNumMatch = afterWord.match(/^\s*(\d+)/);
+        if (!firstNumMatch) continue;
+
+        let cursor = firstNumMatch[0].length;
+        let prevNum = parseInt(firstNumMatch[1], 10);
+        addNumber(prevNum);
+
+        // Keep consuming "<connector><number>" pairs for as long as they're
+        // there, so "5, 6, and 7" (mixed comma + word connectors) resolves
+        // fully instead of stopping after the first connector type.
+        for (;;) {
+            const rest = afterWord.slice(cursor);
+            const rangeConn = rest.match(/^\s*(?:-|–|to|through)\s*(\d+)/i);
+            if (rangeConn) {
+                const end = parseInt(rangeConn[1], 10);
+                const [lo, hi] = prevNum <= end ? [prevNum, end] : [end, prevNum];
+                for (let n = lo; n <= Math.min(hi, maxUnitNumber); n++) numbers.add(n);
+                cursor += rangeConn[0].length;
+                prevNum = end;
+                continue;
+            }
+            const listConn = rest.match(/^\s*(?:,\s*(?:and|or)?|and|or)\s*(\d+)/i);
+            if (listConn) {
+                prevNum = parseInt(listConn[1], 10);
+                addNumber(prevNum);
+                cursor += listConn[0].length;
+                continue;
+            }
+            break;
+        }
+    }
+    return numbers;
+}
+
+/**
+ * Detect which in-scope units a message is actually asking about, so retrieval
+ * can be narrowed to them instead of pooling across the entire allowed scope.
+ *
+ * A number is matched primarily against the digit in the unit's own name -
+ * unit names in this app are always auto-generated as "Unit N" (see
+ * courses.units.js), and that's the number students actually see (see
+ * student-calibration.js), so it's the authoritative label. Position in the
+ * published order is only used as a fallback for the rare lecture whose name
+ * has no digit at all - it must not be tried first, since deleting an early
+ * unit shifts later units' positions without changing their labels. A
+ * display-name substring match (word-boundary gated) is also checked, as an
+ * additional, non-exclusive way to match a unit named by topic.
+ *
+ * Only ever narrows: the result is always a subset of allowedLectureNames,
+ * so this can never surface a unit the student isn't authorized to see -
+ * matches are found against the full published order first (so "unit 4"
+ * resolves correctly even if the student's current scope doesn't start at
+ * unit 1), then filtered down to what's actually allowed. Returns null
+ * (meaning "use the full allowed scope, unchanged") when the message
+ * doesn't clearly reference any specific unit, or references one outside
+ * the allowed scope - most single-unit and vague questions.
+ *
+ * @param {string} message - The student's latest message
+ * @param {Array<{name: string, displayName?: string}>} publishedLectures - Every published lecture, in course order
+ * @param {string[]} allowedLectureNames - The names already authorized for this request (the scope boundary)
+ * @returns {string[]|null} Narrowed lecture names (subset of allowedLectureNames, in order), or null if nothing detected
+ */
+function detectRequestedUnits(message, publishedLectures, allowedLectureNames) {
+    if (!message || !Array.isArray(publishedLectures) || publishedLectures.length === 0) return null;
+    if (!Array.isArray(allowedLectureNames) || allowedLectureNames.length === 0) return null;
+
+    // The real upper bound a "unit N" reference could ever need: the
+    // highest digit actually used in any published lecture's name (covers
+    // courses with gaps from deleted units), falling back to the count.
+    const maxUnitNumber = publishedLectures.reduce((max, lecture) => {
+        const m = lecture.name && lecture.name.match(/\d+/);
+        return m ? Math.max(max, parseInt(m[0], 10)) : max;
+    }, publishedLectures.length) || publishedLectures.length;
+
+    const requestedNumbers = extractUnitNumbers(message, maxUnitNumber);
+    const lowerMessage = message.toLowerCase();
+    const matched = new Set();
+
+    publishedLectures.forEach((lecture, index) => {
+        const numMatch = lecture.name && lecture.name.match(/\d+/);
+        if (numMatch) {
+            if (requestedNumbers.has(parseInt(numMatch[0], 10))) matched.add(lecture.name);
+        } else {
+            // No digit in this lecture's own name - fall back to its
+            // position in the published order.
+            const position = index + 1;
+            if (requestedNumbers.has(position)) matched.add(lecture.name);
+        }
+        // Display-name matching: e.g. a student writing "the Mendelian
+        // inheritance unit" when that unit's displayName is "Mendelian
+        // Inheritance". Word-boundary gated (not a bare substring) so a
+        // short/common displayName like "Cells" doesn't match any message
+        // that happens to mention the word in passing, and length-gated so
+        // a 1-2 char displayName can't match on noise.
+        if (lecture.displayName && lecture.displayName.trim().length >= 4) {
+            const escaped = lecture.displayName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            if (new RegExp(`\\b${escaped}\\b`, 'i').test(lowerMessage)) {
+                matched.add(lecture.name);
+            }
+        }
+    });
+
+    if (matched.size === 0) return null;
+    const narrowed = allowedLectureNames.filter(name => matched.has(name));
+    return narrowed.length > 0 ? narrowed : null;
 }
 
 /**
@@ -1228,36 +1372,98 @@ router.post('/', async (req, res) => {
             : false;
 
         // Build lectureNames filter using published units only, ordered by lectures array
-        const publishedLectures = (course.lectures || []).filter(l => l.isPublished).map(l => l.name);
+        const publishedLectureObjs = (course.lectures || []).filter(l => l.isPublished);
+        const publishedLectures = publishedLectureObjs.map(l => l.name);
         if (!publishedLectures.includes(unitName)) {
             return res.status(400).json({ success: false, message: 'Selected unit is not published or does not exist' });
         }
 
         let lectureNames = [unitName];
         if (isAdditive) {
-            const order = (course.lectures || []).filter(l => l.isPublished).map(l => l.name);
-            const idx = order.indexOf(unitName);
-            lectureNames = idx >= 0 ? order.slice(0, idx + 1) : [unitName];
+            const idx = publishedLectures.indexOf(unitName);
+            lectureNames = idx >= 0 ? publishedLectures.slice(0, idx + 1) : [unitName];
         }
 
-        // Debug logging to verify retrieval mode and scope
-        console.log(`🔎 [CHAT_RAG] RetrievalMode=${isAdditive ? 'additive' : 'single'} | Course=${courseId} | Unit=${unitName} | LectureNames=${JSON.stringify(lectureNames)}`);
+        // Narrow to explicitly-requested units when the message names them
+        // (numbers, ranges, or a unit's display name). Matched against the
+        // full published order (so "unit 4" resolves correctly regardless of
+        // where the student's scope starts), then filtered to the scope
+        // already computed above - this can only shrink that scope, never
+        // expand it, so it can't surface a unit the student isn't authorized
+        // to see.
+        const requestedUnits = detectRequestedUnits(message, publishedLectureObjs, lectureNames);
+        // A small set of explicit "all of them" phrases ("quiz me on every
+        // unit", "summarize everything so far") also fan out, since that's
+        // the shape of the original #594 incident - a vague request with no
+        // specific unit named, but clearly asking about more than the
+        // current one.
+        const isBroadRequest = !requestedUnits && lectureNames.length > 1 && BROAD_REQUEST_PATTERN.test(message);
 
         const ragSettings = CourseModel.resolveRagSettings(course);
 
+        // Fan out only when the student actually asked about more than one
+        // unit (explicitly, or via a broad phrase) - NOT just because the
+        // current scope happens to contain several units. An ordinary
+        // single-topic question asked in a later unit under additive mode
+        // must keep using the plain pooled search across its normal scope;
+        // fanning that out too would spread its one relevant unit's slots
+        // across every other in-scope unit for no reason, and could even
+        // drop the current unit's own content if enough earlier units are
+        // also in scope.
+        let searchScope;
+        let searchTopK;
+        let fanOut;
+        if (requestedUnits) {
+            searchScope = requestedUnits;
+            // Raise K to cover every named unit (capped at the app max) so
+            // an explicit "units 1, 2, 3, 4, 5" request doesn't get
+            // truncated back down to whatever the course's configured
+            // Top-K allows.
+            searchTopK = Math.min(CourseModel.MAX_RAG_TOP_K, Math.max(ragSettings.student.topK, requestedUnits.length));
+            fanOut = searchScope.length > 1;
+        } else if (isBroadRequest) {
+            searchScope = lectureNames;
+            searchTopK = ragSettings.student.topK;
+            fanOut = true;
+        } else {
+            searchScope = lectureNames;
+            searchTopK = ragSettings.student.topK;
+            fanOut = false;
+        }
+
+        // Debug logging to verify retrieval mode and scope
+        console.log(`🔎 [CHAT_RAG] RetrievalMode=${isAdditive ? 'additive' : 'single'} | Course=${courseId} | Unit=${unitName} | LectureNames=${JSON.stringify(lectureNames)} | SearchScope=${JSON.stringify(searchScope)} | FanOut=${fanOut} | TopK=${searchTopK}${requestedUnits ? ' (narrowed by detected unit reference)' : isBroadRequest ? ' (broad request phrase)' : ''}`);
+
         // Retrieve top chunks from Qdrant.
+        // A single pooled search across multiple units lets whichever unit's
+        // chunks score highest take every slot, starving the others even when
+        // several units are equally relevant. Fan out a bounded search per
+        // unit and merge with a guaranteed per-unit floor instead (same
+        // pattern already used for the Super Course's per-course fan-out) -
+        // but only when fanOut is true (see above); otherwise this is the
+        // same plain pooled search it always was.
         // When the course de-prioritizes additional materials, search the main
         // materials (lecture notes, practice questions) first and only fall back
         // to additional materials if nothing was found there.
+        const runSearch = async (filters) => {
+            if (fanOut) {
+                const byLecture = await qdrant.searchDocumentsByLecture(
+                    message, courseId, searchScope, searchTopK, filters
+                );
+                return QdrantService.mergeBalancedLectureResults(byLecture, searchTopK);
+            }
+            return qdrant.searchDocuments(message, { courseId, lectureNames: searchScope, ...filters }, searchTopK);
+        };
+
         let searchResults;
         if (course.additionalMaterialSecondarySearch === true) {
-            searchResults = await qdrant.searchDocuments(message, { courseId, lectureNames, excludeAdditionalMaterials: true }, ragSettings.student.topK);
+            searchResults = await runSearch({ excludeAdditionalMaterials: true });
             if (!Array.isArray(searchResults) || searchResults.length === 0) {
                 console.log('🔎 [CHAT_RAG] No chunks found in main materials; falling back to additional materials');
-                searchResults = await qdrant.searchDocuments(message, { courseId, lectureNames, additionalMaterialsOnly: true }, ragSettings.student.topK);
+                searchResults = await runSearch({ additionalMaterialsOnly: true });
             }
         } else {
-            searchResults = await qdrant.searchDocuments(message, { courseId, lectureNames }, ragSettings.student.topK);
+            searchResults = await runSearch({});
         }
 
         searchResults = normalizeQdrantSearchResults(searchResults);
@@ -1329,50 +1535,77 @@ router.post('/', async (req, res) => {
             };
         }
 
-        // Build the message to send to LLM
-        let messageToSend;
-        
-        if (mode === 'protege') {
-            messageToSend = `
-CONTEXT (The correct answers):
-${contextText}
-
-INSTRUCTIONS:
-Based on the Context above, act as the student described in the System Prompt.
-The user just said: "${message}"
-Do not explain the context to the user. Ask the user to explain it to you.`;
-        } else if (req.body.isExplanationRequest) {
-            // Explain mode
-            messageToSend = `Use the provided course context to help explain the concept if needed.
-\n\nCourse context:\n${contextText}\n\nConcept/Text to explain:\n"${message}"`;
-        } else {
-            // Default/Tutor mode
-            messageToSend = `Use only the provided course context to answer. Cite which unit a fact came from.
-\n\nCourse context:\n${contextText}\n\nStudent question: ${message}`;
-        }
-
-        // If we have conversation context (continuing a chat), use structured conversation approach
+        // The prior conversation, pre-formatted as "Speaker: content" lines
+        // ending with the current message - or null on the first turn. Built
+        // once and reused by whichever mode template is active below, so the
+        // current message is never duplicated (once as the question, again
+        // as history) and so continuing a conversation no longer drops
+        // protege/explain mode's instructions back to the plain tutor
+        // wrapper (previously, any conversationContext unconditionally
+        // overwrote messageToSend with the tutor-mode template regardless of
+        // mode - see issue #594's "related bugs found while scoping").
+        let historyText = null;
         if (conversationContext && conversationContext.conversationMessages) {
             console.log('🔄 [CHAT_CONTINUE] Using structured conversation context');
-
-            // Build the conversation history as a single message
             let conversationHistory = '';
             conversationContext.conversationMessages.forEach(msg => {
                 const speaker = msg.role === 'user' ? 'Student' : 'BiocBot';
                 conversationHistory += `${speaker}: ${msg.content}\n\n`;
             });
-
-            // Add the student's new message
             conversationHistory += `Student: ${message}`;
+            historyText = conversationHistory;
+        }
 
-            // Create the full message with conversation context
-            messageToSend = `Use only the provided course context to answer. Cite which unit a fact came from.
+        // Ground the model in exactly which in-scope units actually came
+        // back with content, instead of letting it guess (or contradict a
+        // prior turn where the same unit WAS successfully retrieved - see
+        // issue #594's "within-conversation self-contradiction" finding).
+        const coveredUnits = Array.from(new Set(searchResults.map(r => r.lectureName).filter(Boolean)));
+        const missingUnits = searchScope.filter(u => !coveredUnits.includes(u));
+        const coverageNote = coveredUnits.length > 0
+            ? `The course context below only includes material from: ${coveredUnits.join(', ')}.`
+              + (missingUnits.length > 0
+                  ? ` No material was retrieved for: ${missingUnits.join(', ')} — if the student's question touches these, say so clearly by naming them, and suggest asking about them one at a time or narrowing the request. Never ask the student to upload, share, or provide course materials themselves; only an instructor can add material to the course.`
+                  : '')
+            : `No course material was retrieved for this question. Say so clearly, and suggest the student narrow or rephrase their question. Never ask the student to upload, share, or provide course materials themselves; only an instructor can add material to the course.`;
+
+        // Build the message to send to LLM
+        let messageToSend;
+
+        if (mode === 'protege') {
+            const userTurn = historyText
+                ? `Previous conversation:\n${historyText}`
+                : `The user just said: "${message}"`;
+            messageToSend = `CONTEXT (The correct answers):
+${contextText}
+
+INSTRUCTIONS:
+Based on the Context above, act as the student described in the System Prompt.
+Do not explain the context to the user. Ask the user to explain it to you.
+
+${userTurn}`;
+        } else if (req.body.isExplanationRequest) {
+            // Explain mode
+            const userTurn = historyText
+                ? `Previous conversation:\n${historyText}`
+                : `Concept/Text to explain:\n"${message}"`;
+            messageToSend = `Use the provided course context to help explain the concept if needed. ${coverageNote}
 
 Course context:
 ${contextText}
 
-Previous conversation:
-${conversationHistory}`;
+${userTurn}`;
+        } else {
+            // Default/Tutor mode
+            const userTurn = historyText
+                ? `Previous conversation:\n${historyText}`
+                : `Student question: ${message}`;
+            messageToSend = `Answer using the course context below as your primary source, and cite which unit a fact came from. ${coverageNote}
+
+Course context:
+${contextText}
+
+${userTurn}`;
         }
 
         // Retrieve custom prompts from course object or use defaults
@@ -1548,7 +1781,8 @@ ${conversationHistory}`;
             },
             retrieval: {
                 mode: isAdditive ? 'additive' : 'single',
-                lectureNames
+                lectureNames,
+                searchScope
             },
             struggleState: struggleState,
             struggleDebug: {
