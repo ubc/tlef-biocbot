@@ -102,8 +102,41 @@
    Search: visible across hub + panel views
    ============================================= */
 .settings-search {
-    position: relative;
-    margin-bottom: 20px;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    /* Matches the real page background (not a distinct highlight tint) so
+       the sticky bar blends in rather than reading as its own floating box
+       - it still has to be fully OPAQUE though, since this sits over
+       scrolled panel content while stuck and needs to actually hide it,
+       not just visually blend with the unscrolled page. */
+    background-color: var(--background-color);
+    /* padding-bottom, not margin-bottom: margin isn't reliably part of a
+       sticky element's own painted box once it's pinned, so scrolled
+       content can end up pressed right up against it with no visible
+       buffer. Padding is part of the box itself (same background-color),
+       so this small strip of "real background" stays visibly attached
+       below the search bar the whole time it's stuck, not just before
+       scrolling starts. */
+    padding-bottom: 16px;
+}
+
+/* .main-content has its own 20px padding-top, and a sticky element's
+   `top: 0` only sticks flush with that padding's inner edge - it can't
+   reach the 20px strip above it. Without this, scrolled panel content
+   (e.g. a textarea's text) is visible in that strip, peeking out above the
+   search bar while scrolling. A pseudo-element extends the same background
+   upward to cover exactly that gap, without using a negative margin on the
+   real element (which would also shift its position before scrolling even
+   starts, since sticky behaves like relative until it engages). */
+.settings-search::before {
+    content: "";
+    position: absolute;
+    top: -20px;
+    left: 0;
+    right: 0;
+    height: 20px;
+    background-color: var(--background-color);
 }
 
 .settings-search-input-wrap {
@@ -130,24 +163,42 @@
     box-sizing: border-box;
 }
 
-.settings-search-input:focus-visible {
-    outline: 3px solid var(--primary-color);
-    outline-offset: 1px;
-}
-
 .settings-search-input::-webkit-search-cancel-button {
     display: none;
 }
 
-.settings-search-clear {
+/* Replaces the bold global focus ring (style.css's site-wide
+   `outline: 3px solid #0055b7 !important`, deliberately !important'd to
+   stop focus indicators from being removed) with something calmer for
+   this input specifically - still a real, clearly visible outline (so
+   keyboard focus is never invisible), just thinner and in the app's own
+   primary-color token instead of the harsher enforced blue. Needs its own
+   !important to beat that rule at all, and the extra ".settings-search"
+   ancestor class to out-specificity ".settings-container input:focus-visible"
+   too (that one includes the "input" type selector, so a plain
+   ".settings-search-input:focus-visible" isn't specific enough on its own). */
+.settings-search .settings-search-input:focus-visible {
+    outline: 2px solid var(--primary-color) !important;
+    outline-offset: 1px;
+}
+
+/* ".settings-search" ancestor qualifier needed to out-specificity
+   style.css's ".instructor-app button" font-size rule (class+type beats
+   a plain class selector on its own). */
+.settings-search .settings-search-clear {
     position: absolute;
+    top: 50%;
     right: 8px;
-    width: 24px;
-    height: 24px;
+    transform: translateY(-50%);
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     border: none;
     background: none;
     border-radius: 50%;
-    font-size: 18px;
+    font-size: 26px;
     line-height: 1;
     color: var(--text-secondary);
     cursor: pointer;
@@ -246,6 +297,11 @@
    Panel view: side rail + active panel
    ============================================= */
 .settings-panels {
+    /* Without this, the rail and panel cards touch the search bar's bottom
+       edge directly, so the page-background-colored gap between the two
+       columns reads as a stray stripe "dripping" from the search bar
+       instead of a deliberate divider between two white cards. */
+    margin-top: 8px;
     display: flex;
     align-items: flex-start;
     gap: var(--bb-gap-loose);
@@ -255,7 +311,9 @@
     width: 212px;
     flex-shrink: 0;
     position: sticky;
-    top: 0;
+    /* Sits just below the sticky search bar (57px tall including its own
+       padding-bottom) so the two don't overlap when scrolling a panel. */
+    top: 57px;
     background-color: var(--background-light);
     border: 1px solid var(--bb-ink-16);
     border-radius: 10px;

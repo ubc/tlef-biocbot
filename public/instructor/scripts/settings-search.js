@@ -364,13 +364,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
             button.append(title, meta, desc);
             button.addEventListener('click', () => jumpToResult(entry));
+            // Hover hands the active/highlighted state over to whichever
+            // result the mouse is on, instead of leaving it stuck on
+            // whatever keyboard navigation (or the initial render) last set.
+            button.addEventListener('mouseenter', () => setActive(i));
             li.append(button);
             resultsList.append(li);
         });
 
         resultsList.hidden = false;
         searchInput.setAttribute('aria-expanded', 'true');
-        setActive(0);
+        // Leave nothing highlighted until the user actually hovers or
+        // arrow-keys onto a result, instead of auto-selecting the first one.
+        activeIndex = -1;
+        searchInput.removeAttribute('aria-activedescendant');
     }
 
     function performPendingJump() {
@@ -409,14 +416,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     searchInput.addEventListener('keydown', (event) => {
         if (resultsList.hidden) return;
-        if (event.key === 'ArrowDown') {
+        // Tab/Shift+Tab step through results the same way Arrow Down/Up do,
+        // instead of leaving the widget (the browser's default Tab
+        // behavior) while results are open.
+        if (event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey)) {
             event.preventDefault();
             if (currentResults.length === 0) return;
-            setActive((activeIndex + 1) % currentResults.length);
-        } else if (event.key === 'ArrowUp') {
+            setActive(activeIndex === -1 ? 0 : (activeIndex + 1) % currentResults.length);
+        } else if (event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey)) {
             event.preventDefault();
             if (currentResults.length === 0) return;
-            setActive((activeIndex - 1 + currentResults.length) % currentResults.length);
+            setActive(activeIndex === -1 ? currentResults.length - 1 : (activeIndex - 1 + currentResults.length) % currentResults.length);
         } else if (event.key === 'Enter') {
             event.preventDefault();
             if (activeIndex >= 0 && currentResults[activeIndex]) {
