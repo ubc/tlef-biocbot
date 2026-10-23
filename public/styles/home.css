@@ -820,6 +820,8 @@
 }
 
 .live-struggle-table-container .table-header h3 {
+  display: flex;
+  align-items: center;
   margin: 0;
   font-size: 1.4rem;
   color: var(--bb-ink);
@@ -986,6 +988,8 @@
 }
 
 .weekly-struggle-chart-container .chart-header h3 {
+  display: flex;
+  align-items: center;
   margin: 0;
   font-size: 1.4rem;
   color: var(--bb-ink);
@@ -1134,27 +1138,41 @@
 /* ===========================
    INFO ICONS & TOOLTIPS
    =========================== */
+/* Single source of truth for .info-icon - this used to be declared twice
+   (here and further below), with the second declaration's `font: inherit`
+   resetting line-height to whatever the parent heading used. Combined with
+   three of these icons sitting in a flex <h2> (centered via align-items)
+   and two sitting in a plain, non-flex <h3> (centered the old
+   vertical-align/font-metric way - see .chart-header h3 / .table-header h3
+   below, now also flex), the icon rendered at a different height depending
+   on which heading level it happened to be in. transform isn't relative to
+   the parent's font size the way vertical-align is, so the small upward
+   nudge here stays visually identical regardless of heading level. */
 .info-icon {
   display: inline-flex;
   justify-content: center;
   align-items: center;
+  flex-shrink: 0;
   width: 20px;
   height: 20px;
-  background-color: var(--bb-ground-alt);
-  color: #6c757d;
+  margin-left: 3px;
+  padding: 0;
+  border: none;
   border-radius: 50%;
-  font-size: 0.8rem;
-  font-weight: bold;
-  margin-left: 8px;
+  background: none;
+  color: #6c757d;
   cursor: help;
-  vertical-align: middle;
-  position: relative;
-  top: -2px; /* Slight vertical alignment fix */
+  transform: translateY(-2px);
 }
 
 .info-icon:hover {
   background-color: #dee2e6;
   color: #495057;
+}
+
+.info-icon .icon-inline {
+  width: 16px;
+  height: 16px;
 }
 
 /* ===========================
@@ -1298,13 +1316,6 @@
 .tooltip:focus-visible::before {
     visibility: visible;
     opacity: 1;
-}
-
-.info-icon {
-    background: none;
-    border: none;
-    font: inherit;
-    cursor: help;
 }
 
 /* ===========================
