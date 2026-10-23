@@ -118,6 +118,62 @@
         page.querySelectorAll('.bb-reveal').forEach(function (el) { el.classList.add('bb-revealed'); });
     }
 
+    // ── Stat counters (count up from 0 when scrolled into view) ─────────
+    // The markup already has the real final value (e.g. "+5.5%") so the
+    // page is correct even if this script never runs. STAT_PATTERN splits
+    // that text into a non-digit prefix ("+", "~"), the number itself
+    // (commas/decimals allowed), and a non-digit suffix ("%"), so the
+    // animation can count up while preserving the original formatting.
+    var STAT_PATTERN = /^([^\d]*)([\d,]+(?:\.\d+)?)([^\d]*)$/;
+    var statEls = Array.prototype.slice.call(page.querySelectorAll('.bb-stat-num'));
+    var stats = statEls.map(function (el) {
+        var match = STAT_PATTERN.exec(el.textContent.trim());
+        if (!match) return null;
+        var rawNumber = match[2];
+        var decimalPart = rawNumber.split('.')[1];
+        return {
+            el: el,
+            prefix: match[1],
+            suffix: match[3],
+            decimals: decimalPart ? decimalPart.length : 0,
+            target: parseFloat(rawNumber.replace(/,/g, ''))
+        };
+    }).filter(Boolean);
+
+    function formatStat(stat, value) {
+        var fixed = value.toFixed(stat.decimals);
+        var parts = fixed.split('.');
+        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        return stat.prefix + parts.join('.') + stat.suffix;
+    }
+
+    function animateStat(stat) {
+        var duration = 1200;
+        var start = null;
+        function step(timestamp) {
+            if (start === null) start = timestamp;
+            var progress = Math.min((timestamp - start) / duration, 1);
+            var eased = 1 - Math.pow(1 - progress, 3);
+            stat.el.textContent = formatStat(stat, stat.target * eased);
+            if (progress < 1) requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+    }
+
+    if (stats.length && !reducedMotion && 'IntersectionObserver' in window) {
+        var statObserver = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+                var stat = stats.find(function (s) { return s.el === entry.target; });
+                if (!stat || !entry.isIntersecting) return;
+                stat.el.textContent = formatStat(stat, 0);
+                animateStat(stat);
+                statObserver.unobserve(entry.target);
+            });
+        }, { threshold: 0, rootMargin: '0px 0px -10% 0px' });
+
+        stats.forEach(function (stat) { statObserver.observe(stat.el); });
+    }
+
     // ── Gallery lightbox ────────────────────────────────────────────────
     var lightbox = document.getElementById('bb-lightbox');
     var lightboxImg = document.getElementById('bb-lightbox-img');

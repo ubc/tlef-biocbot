@@ -305,7 +305,7 @@ html:has(#bb-page) { scroll-behavior: smooth; }
 
 .bb-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: var(--bb-gap-dense); }
 .bb-stat-card { background: var(--bb-ground); padding: 26px 22px; border: var(--bb-border-width) solid var(--bb-ink-18); }
-.bb-stat-num { display: block; font-family: var(--bb-font-heading); font-size: var(--bb-text-stat); line-height: 1; color: var(--bb-steel); }
+.bb-stat-num { display: block; font-family: var(--bb-font-heading); font-size: var(--bb-text-stat); line-height: 1; color: var(--bb-steel); font-variant-numeric: tabular-nums; }
 .bb-stat-label { display: block; margin-top: 8px; font-size: 13.5px; line-height: 1.45; color: var(--bb-ink-70); }
 
 /* ─── Gallery ──────────────────────────────────────────────────────────── */
