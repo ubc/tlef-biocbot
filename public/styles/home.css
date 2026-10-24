@@ -620,7 +620,7 @@
 .stat-card {
   padding: 20px;
   border-radius: 8px;
-  background: linear-gradient(135deg, var(--bb-ground) 0%, var(--bb-ground-alt) 100%);
+  background-color: var(--bb-ground);
   border: 1px solid var(--bb-ink-16);
   text-align: center;
   transition:
@@ -649,7 +649,7 @@
 
 .stat-card .stat-sublabel {
   font-size: 0.75rem;
-  color: #999;
+  color: var(--bb-ink-65);
   margin-top: 4px;
 }
 
@@ -709,11 +709,11 @@
 }
 
 .mode-bar-fill.tutor {
-  background: linear-gradient(90deg, #4a90e2 0%, #357abd 100%);
+  background-color: #4a90e2;
 }
 
 .mode-bar-fill.protege {
-  background: linear-gradient(90deg, #50c878 0%, #3da85a 100%);
+  background-color: #50c878;
 }
 
 .mode-count {
@@ -724,10 +724,6 @@
   color: var(--bb-ink);
 }
 
-.statistics-section {
-  border-left: 4px solid #4a90e2;
-  background: linear-gradient(135deg, #f8f9ff 0%, #f0f4ff 100%);
-}
 
 /* Responsive adjustments for new sections */
 @media (max-width: 768px) {
