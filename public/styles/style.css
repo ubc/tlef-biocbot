@@ -141,6 +141,23 @@ textarea {
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.logo-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.logo-mascot {
+    width: 32px;
+    height: 25px;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.logo-container h2 {
+    margin: 0;
+}
+
 .main-nav ul li {
     margin-bottom: 10px;
 }
