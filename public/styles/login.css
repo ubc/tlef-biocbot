@@ -117,12 +117,20 @@ body { margin: 0; }
     padding: 12px 14px;
     border: var(--bb-border-width) solid var(--bb-ink-20);
     border-radius: var(--bb-radius);
-    background: var(--bb-white);
+    /* background-color, not background shorthand - the latter resets
+       background-image too, silently dropping the global select chevron
+       (#643). */
+    background-color: var(--bb-white);
     color: var(--bb-ink);
     font-family: var(--bb-font-body);
     font-size: 16px;
     transition: border-color 0.2s ease;
     box-sizing: border-box;
+}
+
+/* Shared padding above is too tight for the global select chevron (#643). */
+.form-group select {
+    padding-right: 2.25rem;
 }
 
 .form-group input:focus,

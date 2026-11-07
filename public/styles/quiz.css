@@ -59,9 +59,13 @@
     border: 1px solid var(--border-color, #e0e0e0);
     border-radius: 6px;
     font-size: 0.9rem;
-    background: var(--card-bg, #ffffff);
+    /* background-color, not background shorthand - the latter resets
+       background-image too, silently dropping the global select chevron
+       (#643). */
+    background-color: var(--card-bg, #ffffff);
     color: var(--text-primary, #333);
     cursor: pointer;
+    padding-right: 34px;
 }
 
 .filter-group select:focus {

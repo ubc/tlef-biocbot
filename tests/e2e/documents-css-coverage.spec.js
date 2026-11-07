@@ -431,6 +431,12 @@ test.describe('documents.css harness coverage', () => {
         await page.locator('#question-modal').evaluate((element) => element.classList.add('show'));
         await page.locator('#question-type').focus();
         await expect(page.locator('#question-type')).toHaveCSS('border-color', 'rgb(0, 123, 255)');
+        // Regression check for #644/#643: .question-form select's own padding
+        // shorthand must leave room for the global select chevron. These are
+        // in a modal hidden on page load, so a plain computed-style sweep
+        // would miss them unless the modal is opened first (as above).
+        await expect(page.locator('#question-type')).toHaveCSS('padding-right', '34px');
+        await expect(page.locator('#struggle-topic-select')).toHaveCSS('padding-right', '34px');
 
         await expect(page.locator('.struggle-topic-panel summary')).toHaveCSS('display', 'flex');
         await expect(page.locator('.struggle-topic-scope-btn.active')).toHaveCSS('border-color', 'rgb(74, 111, 165)');

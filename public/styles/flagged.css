@@ -58,18 +58,13 @@
     padding: 0.5rem 0.75rem;
     border: 1px solid #d1d5db;
     border-radius: 6px;
-    background: white;
+    /* background-color, not the background shorthand - the latter resets
+       background-image too, silently dropping the global select chevron
+       (#643). Same reasoning for the explicit padding-right below instead
+       of folding it back into the padding shorthand. */
+    background-color: white;
     font-size: 0.875rem;
     min-width: 150px;
-    /* Native select arrows sit flush against the border in some browsers -
-       swap in a custom chevron with deliberate spacing from the edge instead
-       (same treatment as Student Hub's status filter, #639). */
-    appearance: none;
-    -webkit-appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 10px center;
-    background-size: 16px;
     padding-right: 34px;
 }
 
@@ -680,7 +675,10 @@
     padding: 0.375rem 0.625rem;
     border: 1px solid #d1d5db;
     border-radius: 6px;
-    background: white;
+    /* background-color, not background shorthand - see .filter-group select
+       above (#643). */
+    background-color: white;
+    padding-right: 34px;
     font-size: 0.8rem;
     appearance: none;
     -webkit-appearance: none;
