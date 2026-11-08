@@ -118,12 +118,9 @@ async function loadAssessmentQuestions() {
                     // Update the display for this lecture
                     updateQuestionsDisplay(lectureName);
                 } else {
-                    // No questions found - explicitly set threshold to 0 for this unit
-                    const weekId = lectureName.toLowerCase().replace(/\s+/g, '-');
-                    const thresholdInput = document.getElementById(`pass-threshold-${weekId}`);
-                    if (thresholdInput) {
-                        thresholdInput.value = 0;
-                    }
+                    // No questions found - explicitly cap/clear the threshold
+                    // (max, value, and the visible "out of N" text) for this unit.
+                    syncThresholdCap(lectureName, 0);
                 }
             } else {
                 console.warn(`⚠️ [MONGODB] Failed to load assessment questions for ${lectureName}: ${response.status} ${response.statusText}`);
@@ -155,9 +152,9 @@ function forceUpdateThresholdsForZeroQuestions() {
         const domQuestions = questionsContainer ? questionsContainer.querySelectorAll('.question-item').length : 0;
         const objectQuestions = assessmentQuestions[lectureName] ? assessmentQuestions[lectureName].length : 0;
         const totalQuestions = Math.max(domQuestions, objectQuestions);
-        
+
         if (totalQuestions === 0) {
-            thresholdInput.value = 0;
+            syncThresholdCap(lectureName, 0);
         }
     });
 }
@@ -375,6 +372,28 @@ function setupThresholdInputListeners() {
         
         // Add input event listener for real-time updates
         input.addEventListener('input', handleThresholdInputChange);
+
+        // Custom -/+ buttons (bigger, consistently stylable targets than the
+        // native spin-button arrows) just move the same input's value and
+        // dispatch the same events a native stepper click would, so they
+        // reuse the change-listener above instead of duplicating its save
+        // logic.
+        const stepper = input.closest('.pass-threshold-stepper');
+        stepper?.querySelectorAll('.pass-threshold-step').forEach(button => {
+            button.addEventListener('click', () => {
+                const step = parseInt(button.dataset.step, 10);
+                const min = parseInt(input.min, 10) || 0;
+                const max = parseInt(input.max, 10) || 0;
+                const current = parseInt(input.value, 10) || 0;
+                const next = Math.min(max, Math.max(min, current + step));
+                if (next === current) return;
+                input.value = next;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                updateThresholdStepperButtons(input);
+            });
+        });
+        updateThresholdStepperButtons(input);
     });
 }
 
@@ -484,6 +503,23 @@ function openQuestionModal(week) {
 }
 
 /**
+ * Open the question creation modal pre-filled from a flashcard's front/back,
+ * so converting a card into a question doesn't require retyping it. Defaults
+ * to short-answer since that's the only question type a front/back card maps
+ * onto directly - the instructor can still switch types before saving.
+ * @param {string} week - Week identifier
+ * @param {string} front - Flashcard front text
+ * @param {string} back - Flashcard back text
+ */
+function openQuestionModalFromFlashcard(week, front, back) {
+    openQuestionModal(week);
+    document.getElementById('question-type').value = 'short-answer';
+    updateQuestionForm(); // clears #question-text as a side effect of the type change - must run before filling it in
+    document.getElementById('question-text').value = front;
+    document.getElementById('sa-answer').value = back;
+}
+
+/**
  * Close the question creation modal
  */
 function closeQuestionModal() {
@@ -531,14 +567,13 @@ function resetQuestionForm() {
     // Clear radio buttons
     const radioButtons = document.querySelectorAll('input[type="radio"]');
     radioButtons.forEach(radio => radio.checked = false);
-    
-    // Clear MCQ inputs
-    const mcqInputs = document.querySelectorAll('.mcq-input');
-    mcqInputs.forEach(input => input.value = '');
-    
+
+    // Collapse multiple-choice options back to a single empty option (A)
+    resetMcqOptions(document.getElementById('mcq-options-list'));
+
     // Clear short answer
     document.getElementById('sa-answer').value = '';
-    
+
     // Reset AI generation tracking
     aiGenerationCount = 0;
     lastGeneratedContent = null;
@@ -571,14 +606,10 @@ function clearAllFormFields() {
     // Clear True/False answers
     const tfRadios = document.querySelectorAll('input[name="tf-answer"]');
     tfRadios.forEach(radio => radio.checked = false);
-    
-    // Clear Multiple Choice answers
-    const mcqInputs = document.querySelectorAll('.mcq-input');
-    mcqInputs.forEach(input => input.value = '');
-    
-    const mcqRadios = document.querySelectorAll('input[name="mcq-correct"]');
-    mcqRadios.forEach(radio => radio.checked = false);
-    
+
+    // Collapse multiple-choice options back to a single empty option (A)
+    resetMcqOptions(document.getElementById('mcq-options-list'));
+
     // Clear Short Answer
     const saAnswer = document.getElementById('sa-answer');
     if (saAnswer) {
@@ -620,8 +651,6 @@ function updateQuestionForm() {
         document.getElementById('tf-answer-section').style.display = 'block';
     } else if (questionType === 'multiple-choice') {
         document.getElementById('mcq-answer-section').style.display = 'block';
-        // Add event listeners for MCQ inputs
-        setupMCQValidation();
     } else if (questionType === 'short-answer') {
         document.getElementById('sa-answer-section').style.display = 'block';
     }
@@ -634,35 +663,6 @@ function updateQuestionForm() {
     console.log(`🔍 [UPDATE_FORM] AI button found during update: ${!!aiButtonDebug}`);
     
     checkAIGenerationInModal();
-}
-
-/**
- * Setup validation for multiple choice inputs
- */
-function setupMCQValidation() {
-    const mcqInputs = document.querySelectorAll('.mcq-input');
-    const radioButtons = document.querySelectorAll('input[name="mcq-correct"]');
-    
-    // Clear all radio buttons initially
-    radioButtons.forEach(radio => {
-        radio.checked = false;
-        radio.disabled = true;
-    });
-    
-    // Add event listeners to inputs
-    mcqInputs.forEach(input => {
-        input.addEventListener('input', function() {
-            const option = this.dataset.option;
-            const radioButton = document.querySelector(`input[name="mcq-correct"][value="${option}"]`);
-            
-            if (this.value.trim()) {
-                radioButton.disabled = false;
-            } else {
-                radioButton.disabled = true;
-                radioButton.checked = false;
-            }
-        });
-    });
 }
 
 /**
@@ -924,15 +924,15 @@ async function reloadQuestionsForUnit(unitName) {
  */
 function updateQuestionsDisplay(week) {
     const containerId = `assessment-questions-${week.toLowerCase().replace(/\s+/g, '-')}`;
-    
+
     const questionsContainer = document.getElementById(containerId);
     if (!questionsContainer) {
         console.error(`Container not found for week: ${week}, ID: ${containerId}`);
         return;
     }
-    
+
     const questions = assessmentQuestions[week] || [];
-    
+
     if (questions.length === 0) {
         questionsContainer.innerHTML = `
             <div class="no-questions-message">
@@ -941,7 +941,7 @@ function updateQuestionsDisplay(week) {
         `;
         return;
     }
-    
+
     let html = '';
     questions.forEach((question, index) => {
         const questionType = question.questionType || question.type;
@@ -951,6 +951,7 @@ function updateQuestionsDisplay(week) {
                     <span class="question-type-badge ${questionType}">${getQuestionTypeLabel(questionType)}</span>
                     <span class="question-number">Question ${index + 1}</span>
                     <div class="question-action-buttons">
+                        <button class="convert-to-flashcard-btn" onclick="convertQuestionToFlashcard('${week}', '${question.questionId || question.id}')" title="Create a flashcard for this unit using this question's text and answer">Convert to Flashcard</button>
                         <button class="edit-question-btn" onclick="openQuestionLearningObjectiveModal('${week}', '${question.questionId || question.id}')" title="Edit learning objective">${Icons.pencil}</button>
                         <button class="delete-question-btn" onclick="deleteQuestion('${week}', '${question.questionId || question.id}')" title="Delete question">×</button>
                     </div>
@@ -963,32 +964,67 @@ function updateQuestionsDisplay(week) {
             </div>
         `;
     });
-    
     questionsContainer.innerHTML = html;
-    
-    // Update pass threshold max value
+
+    // Keep the pass-threshold stepper's cap in sync with the actual question
+    // count - must run for the 0-question case too (#524 follow-up), or
+    // deleting the last question (or loading a unit that never had any)
+    // leaves a stale max/value from whatever the count used to be, letting
+    // an instructor require more correct answers than there are questions.
+    syncThresholdCap(week, questions.length);
+}
+
+/**
+ * Sync a unit's pass-threshold input (max, clamped value, and the visible
+ * "out of N total questions" help text) to the given question count. The
+ * native max attribute alone silently caps the stepper with no visible
+ * explanation - showing the count in the help text is what makes a capped
+ * stepper read as "at the limit" instead of "stuck"/broken.
+ */
+function syncThresholdCap(week, totalQuestions) {
     const weekId = week.toLowerCase().replace(/\s+/g, '-');
     const thresholdInput = document.getElementById(`pass-threshold-${weekId}`);
-    
-    if (thresholdInput) {
-        thresholdInput.max = questions.length;
-        // If there are no questions, always set threshold to 0
-        if (questions.length === 0) {
-            thresholdInput.value = 0;
-        } else {
-            // If threshold exceeds question count, adjust it
-            if (parseInt(thresholdInput.value) > questions.length) {
-                thresholdInput.value = questions.length;
-            }
-            // If threshold hasn't been set (is empty or invalid), default to 0
-            if (thresholdInput.value === '' || thresholdInput.value === null || thresholdInput.value === undefined) {
-                thresholdInput.value = 0;
-            }
-        }
+    const thresholdHelp = document.getElementById(`threshold-help-${weekId}`);
+
+    if (thresholdHelp) {
+        thresholdHelp.textContent = `out of ${totalQuestions} total question${totalQuestions === 1 ? '' : 's'}`;
     }
-    
+
+    if (!thresholdInput) return;
+
+    thresholdInput.max = totalQuestions;
+    if (totalQuestions === 0) {
+        thresholdInput.value = 0;
+        updateThresholdStepperButtons(thresholdInput);
+        return;
+    }
+    // If threshold exceeds question count, adjust it
+    if (parseInt(thresholdInput.value) > totalQuestions) {
+        thresholdInput.value = totalQuestions;
+    }
+    // If threshold hasn't been set (is empty or invalid), default to 0
+    if (thresholdInput.value === '' || thresholdInput.value === null || thresholdInput.value === undefined) {
+        thresholdInput.value = 0;
+    }
+    updateThresholdStepperButtons(thresholdInput);
     // Event listeners for threshold input are handled by setupThresholdInputListeners()
     // No need to add them here to avoid duplicates
+}
+
+/**
+ * Disable the -/+ stepper buttons once the input is at its min/max, so
+ * "stuck" reads as "at the limit" instead of "not responding to clicks".
+ */
+function updateThresholdStepperButtons(thresholdInput) {
+    const stepper = thresholdInput.closest('.pass-threshold-stepper');
+    if (!stepper) return;
+    const min = parseInt(thresholdInput.min, 10) || 0;
+    const max = parseInt(thresholdInput.max, 10) || 0;
+    const current = parseInt(thresholdInput.value, 10) || 0;
+    stepper.querySelectorAll('.pass-threshold-step').forEach(button => {
+        const step = parseInt(button.dataset.step, 10);
+        button.disabled = step < 0 ? current <= min : current >= max;
+    });
 }
 
 /**
@@ -1025,7 +1061,15 @@ function getQuestionTypeLabel(type) {
  * @param {object} question - Question object
  * @returns {string} HTML string
  */
-function getQuestionAnswerDisplay(question) {
+/**
+ * Resolve a question's correct answer to plain, human-readable text,
+ * regardless of question type's underlying storage shape (boolean for
+ * true-false, option key/index for multiple-choice, raw string for
+ * short-answer). Shared by the answer preview and flashcard conversion.
+ * @param {object} question - Question object
+ * @returns {string} Plain-text correct answer
+ */
+function getPlainTextAnswer(question) {
     const questionType = question.questionType || question.type;
     const answer = Object.prototype.hasOwnProperty.call(question, 'correctAnswer')
         ? question.correctAnswer
@@ -1033,7 +1077,26 @@ function getQuestionAnswerDisplay(question) {
 
     if (questionType === 'true-false') {
         const isTrue = answer === true || String(answer).toLowerCase() === 'true';
-        return `<p class="answer-preview"><strong>Answer:</strong> ${isTrue ? 'True' : 'False'}</p>`;
+        return isTrue ? 'True' : 'False';
+    } else if (questionType === 'multiple-choice') {
+        const entries = Array.isArray(question.options)
+            ? question.options.map((value, index) => [String.fromCharCode(65 + index), value])
+            : Object.entries(question.options || {});
+        const correctEntry = entries.find(([key], index) =>
+            typeof answer === 'number' ? index === answer : key === answer);
+        return correctEntry ? correctEntry[1] : '';
+    }
+    return answer || '';
+}
+
+function getQuestionAnswerDisplay(question) {
+    const questionType = question.questionType || question.type;
+    const answer = Object.prototype.hasOwnProperty.call(question, 'correctAnswer')
+        ? question.correctAnswer
+        : question.answer;
+
+    if (questionType === 'true-false') {
+        return `<p class="answer-preview"><strong>Answer:</strong> ${getPlainTextAnswer(question)}</p>`;
     } else if (questionType === 'multiple-choice') {
         let optionsHtml = '';
         const entries = Array.isArray(question.options)
@@ -1045,9 +1108,45 @@ function getQuestionAnswerDisplay(question) {
         });
         return `<div class="mcq-preview">${optionsHtml}</div>`;
     } else if (questionType === 'short-answer') {
-        return `<p class="answer-preview"><strong>Expected:</strong> ${answer}</p>`;
+        return `<p class="answer-preview"><strong>Expected:</strong> ${getPlainTextAnswer(question)}</p>`;
     }
     return '';
+}
+
+/**
+ * Convert an existing question into a flashcard for the same unit. Creates
+ * the unit's flashcard deck on demand if one doesn't exist yet (decks are
+ * otherwise only created via AI generation).
+ * @param {string} week - Week identifier
+ * @param {string} questionId - Question identifier
+ */
+async function convertQuestionToFlashcard(week, questionId) {
+    const question = getStoredQuestion(week, questionId);
+    if (!question) return;
+
+    const front = question.question;
+    const back = getPlainTextAnswer(question);
+    if (!front || !back) {
+        showNotification('This question needs an answer before it can become a flashcard.', 'warning');
+        return;
+    }
+
+    try {
+        const courseId = await getCurrentCourseId();
+        const response = await fetch('/api/flashcards/instructor/from-question', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ courseId, lectureName: week, front, back })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.message || 'Unable to convert question');
+
+        flashcardDecksByUnit.set(week, result.data);
+        renderInstructorFlashcardSection(week);
+        showNotification('Added as a flashcard.', 'success');
+    } catch (error) {
+        showNotification(error.message, 'error');
+    }
 }
 
 function openQuestionLearningObjectiveModal(week, questionId) {

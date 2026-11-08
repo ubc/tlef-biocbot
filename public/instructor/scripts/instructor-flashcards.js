@@ -4,6 +4,11 @@
 
 let flashcardDecksByUnit = new Map();
 
+// Set for the duration of a drag (dragstart -> dragend) so dragover handlers
+// on other rows know which row is being moved. Same pattern as
+// mcq-options-editor.js's drag-to-reorder.
+let flashcardDraggedRow = null;
+
 function flashcardUnitId(unitName) {
     return String(unitName || '').toLowerCase().replace(/\s+/g, '-');
 }
@@ -112,81 +117,120 @@ function renderInstructorFlashcardSection(unitName) {
             ${isEditableDraft ? `
                 <button type="button" class="secondary-button" onclick="addManualFlashcard('${unitName}')">Add Card</button>
                 <button type="button" class="secondary-button" onclick="saveFlashcardDraft('${unitName}')">Save Draft</button>
-                <button type="button" class="flashcard-publish-btn" onclick="publishFlashcardDeck('${unitName}', this)">Publish to Students</button>
             ` : ''}
-            ${deck.isPublished ? `<button type="button" class="flashcard-unpublish-btn" onclick="unpublishFlashcardDeck('${unitName}', this)">Unpublish</button>` : ''}
+            ${(isEditableDraft || deck.isPublished) ? `
+                <div class="publish-toggle">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="flashcard-publish-${unitId}" ${deck.isPublished ? 'checked' : ''} aria-label="Publish this flashcard deck to students" onchange="toggleFlashcardPublish('${unitName}', this)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <span class="toggle-label">Published</span>
+                </div>
+            ` : ''}
         </div>
     `;
-    initializeInstructorFlashcardPreviews(editor);
+    flashcardEditorRows(editor).forEach(wireFlashcardEditorRowDrag);
 }
 
 function renderFlashcardEditorRow(card, index, readOnly) {
     const sourceData = encodeURIComponent(JSON.stringify(card.source || null));
     return `
-        <article class="flashcard-editor-row" data-card-id="${flashcardEscapeHtml(card.cardId || '')}" data-source="${sourceData}">
+        <article class="flashcard-editor-row" data-card-id="${flashcardEscapeHtml(card.cardId || '')}" data-source="${sourceData}" ${readOnly ? '' : 'draggable="true"'}>
             <div class="flashcard-editor-row-heading">
-                <strong>Card ${index + 1}</strong>
-                ${readOnly ? '' : '<button type="button" class="flashcard-remove-btn" onclick="removeFlashcardEditorRow(this)">Remove</button>'}
+                <span class="flashcard-editor-row-title">
+                    ${readOnly ? '' : `
+                    <span class="flashcard-drag-handle" aria-hidden="true">
+                        <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden="true">
+                            <circle cx="2" cy="2" r="1.5"></circle><circle cx="8" cy="2" r="1.5"></circle>
+                            <circle cx="2" cy="8" r="1.5"></circle><circle cx="8" cy="8" r="1.5"></circle>
+                            <circle cx="2" cy="14" r="1.5"></circle><circle cx="8" cy="14" r="1.5"></circle>
+                        </svg>
+                    </span>`}
+                    <strong>Card ${index + 1}</strong>
+                </span>
+                ${readOnly ? '' : `
+                <span class="flashcard-editor-row-actions">
+                    <button type="button" class="flashcard-convert-btn" onclick="convertFlashcardToQuestion(this)" title="Create an assessment question pre-filled from this card's term and definition">Convert to Question</button>
+                    <button type="button" class="flashcard-remove-btn" onclick="removeFlashcardEditorRow(this)" title="Remove this card">${Icons.trash}</button>
+                </span>`}
             </div>
-            <label>Front
+            <label>Term
                 <textarea class="flashcard-front-input" rows="2" maxlength="300" ${readOnly ? 'readonly' : ''}>${flashcardEscapeHtml(card.front)}</textarea>
             </label>
-            <div class="flashcard-preview-group">
-                <span class="flashcard-preview-label">Student preview · Front</span>
-                <div class="flashcard-rendered-preview" data-flashcard-preview="front" aria-label="Rendered preview of card front"></div>
-            </div>
-            <label>Back
+            <label>Definition
                 <textarea class="flashcard-back-input" rows="3" maxlength="1200" ${readOnly ? 'readonly' : ''}>${flashcardEscapeHtml(card.back)}</textarea>
             </label>
-            <div class="flashcard-preview-group">
-                <span class="flashcard-preview-label">Student preview · Back</span>
-                <div class="flashcard-rendered-preview" data-flashcard-preview="back" aria-label="Rendered preview of card back"></div>
-            </div>
             <p class="flashcard-source">Source: ${flashcardEscapeHtml(flashcardSourceLabel(card.source))}</p>
         </article>
     `;
 }
 
-/**
- * Render one editable card side exactly as it will appear to students.
- *
- * @param {Element} row Instructor card editor row
- * @param {'front'|'back'} side Card side to render
- * @returns {void}
- */
-function renderInstructorFlashcardPreview(row, side) {
-    const input = row.querySelector(`.flashcard-${side}-input`);
-    const preview = row.querySelector(`[data-flashcard-preview="${side}"]`);
-    if (!input || !preview) return;
-
-    const value = input.value || '';
-    if (typeof RichText === 'undefined') {
-        preview.textContent = value;
-        return;
-    }
-    RichText.render(preview, value);
+function flashcardEditorRows(editor) {
+    return Array.from(editor.querySelectorAll('.flashcard-editor-row'));
 }
 
 /**
- * Initialize and keep live previews in sync with their raw textareas.
- *
- * @param {Element} root Editor container or newly inserted row
- * @returns {void}
+ * Renumber "Card N" headings in document order - the only thing a reorder
+ * needs to fix up locally. Card order itself is picked up automatically on
+ * the next save, since collectFlashcardDraftCards() reads rows in DOM order.
  */
-function initializeInstructorFlashcardPreviews(root) {
-    const rows = root.matches?.('.flashcard-editor-row')
-        ? [root]
-        : Array.from(root.querySelectorAll('.flashcard-editor-row'));
+function relabelFlashcardEditorRows(editor) {
+    flashcardEditorRows(editor).forEach((row, index) => {
+        const heading = row.querySelector('.flashcard-editor-row-heading strong');
+        if (heading) heading.textContent = `Card ${index + 1}`;
+    });
+}
 
-    rows.forEach(row => {
-        renderInstructorFlashcardPreview(row, 'front');
-        renderInstructorFlashcardPreview(row, 'back');
-        row.querySelectorAll('.flashcard-front-input, .flashcard-back-input').forEach(input => {
-            input.addEventListener('input', () => {
-                const side = input.classList.contains('flashcard-front-input') ? 'front' : 'back';
-                renderInstructorFlashcardPreview(row, side);
-            });
-        });
+/**
+ * Wire drag-to-reorder on one card row. Same interaction as
+ * mcq-options-editor.js: draggable anywhere on the row except the text
+ * areas/buttons, live-reorders as it passes another row's midpoint, and
+ * re-numbers "Card N" headings as it goes.
+ */
+function wireFlashcardEditorRowDrag(row) {
+    const editor = row.closest('.flashcard-editor-list');
+    if (!editor) return;
+
+    row.addEventListener('dragstart', (event) => {
+        if (event.target.closest('.flashcard-front-input, .flashcard-back-input, .flashcard-remove-btn, .flashcard-convert-btn')) {
+            event.preventDefault();
+            return;
+        }
+        flashcardDraggedRow = row;
+        event.dataTransfer.effectAllowed = 'move';
+        // Firefox requires setData to actually start a drag.
+        event.dataTransfer.setData('text/plain', '');
+        row.classList.add('flashcard-editor-row-dragging');
+    });
+
+    row.addEventListener('dragend', () => {
+        row.classList.remove('flashcard-editor-row-dragging');
+        flashcardDraggedRow = null;
+    });
+
+    row.addEventListener('dragover', (event) => {
+        if (!flashcardDraggedRow) return;
+        event.preventDefault(); // required for drop to fire at all
+        event.dataTransfer.dropEffect = 'move';
+        if (flashcardDraggedRow === row) return;
+
+        const rect = row.getBoundingClientRect();
+        const dropAfter = event.clientY > rect.top + rect.height / 2;
+        if (dropAfter && row.nextElementSibling !== flashcardDraggedRow) {
+            row.insertAdjacentElement('afterend', flashcardDraggedRow);
+            relabelFlashcardEditorRows(editor);
+        } else if (!dropAfter && row.previousElementSibling !== flashcardDraggedRow) {
+            row.insertAdjacentElement('beforebegin', flashcardDraggedRow);
+            relabelFlashcardEditorRows(editor);
+        }
+    });
+
+    row.addEventListener('drop', (event) => {
+        if (!flashcardDraggedRow) return;
+        event.preventDefault();
+        // dragover above already moved the row into place live; drop just
+        // finalizes where it already is.
+        relabelFlashcardEditorRows(editor);
     });
 }
 
@@ -273,8 +317,21 @@ function addManualFlashcard(unitName) {
     }
     editor.insertAdjacentHTML('beforeend', renderFlashcardEditorRow({ front: '', back: '', source: null }, count, false));
     const row = editor.lastElementChild;
-    if (row) initializeInstructorFlashcardPreviews(row);
+    if (row) wireFlashcardEditorRowDrag(row);
     row?.querySelector('.flashcard-front-input')?.focus();
+}
+
+function convertFlashcardToQuestion(button) {
+    const section = button.closest('.flashcards-section');
+    const unitName = section?.dataset.flashcardUnit;
+    const row = button.closest('.flashcard-editor-row');
+    const front = row?.querySelector('.flashcard-front-input')?.value.trim();
+    const back = row?.querySelector('.flashcard-back-input')?.value.trim();
+    if (!unitName || !front || !back) {
+        showNotification('Add both a front and back to this card before converting it.', 'warning');
+        return;
+    }
+    openQuestionModalFromFlashcard(unitName, front, back);
 }
 
 async function removeFlashcardEditorRow(button) {
@@ -296,6 +353,24 @@ async function removeFlashcardEditorRow(button) {
     } catch (error) {
         renderInstructorFlashcardSection(unitName);
         showNotification(error.message || 'Unable to remove flashcard.', 'error');
+    }
+}
+
+/**
+ * Single Published toggle standing in for the old separate Publish/Unpublish
+ * buttons. Decides which action a click means from the deck's own state
+ * rather than the checkbox's native checked value, so clicking while already
+ * published but with newer unsaved draft edits ("Draft changes") still
+ * republishes that draft instead of unpublishing - same as the old
+ * "Publish to Students" button did in that state, just as one control.
+ */
+function toggleFlashcardPublish(unitName, checkbox) {
+    const deck = flashcardDecksByUnit.get(unitName);
+    if (!deck) return;
+    if (deck.hasDraft || !deck.isPublished) {
+        publishFlashcardDeck(unitName, checkbox);
+    } else {
+        unpublishFlashcardDeck(unitName, checkbox);
     }
 }
 

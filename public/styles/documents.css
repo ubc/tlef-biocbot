@@ -1563,26 +1563,14 @@
     accent-color: var(--primary-color);
 }
 
-.flashcard-generate-btn,
-.flashcard-publish-btn,
-.flashcard-unpublish-btn {
+.flashcard-generate-btn {
     border: 0;
     border-radius: 6px;
     padding: 0.65rem 0.9rem;
     font-weight: 600;
     cursor: pointer;
-}
-
-.flashcard-generate-btn,
-.flashcard-publish-btn {
     background: var(--primary-color);
     color: white;
-}
-
-.flashcard-unpublish-btn {
-    background: #fff1f2;
-    color: #be123c;
-    border: 1px solid #fecdd3;
 }
 
 .flashcard-section-message.warning {
@@ -1618,15 +1606,58 @@
     background: white;
 }
 
+.flashcard-editor-row[draggable="true"] {
+    cursor: grab;
+}
+
+.flashcard-editor-row[draggable="true"]:active {
+    cursor: grabbing;
+}
+
 .flashcard-editor-row-heading {
     justify-content: space-between;
     margin-bottom: 0.75rem;
 }
 
+.flashcard-editor-row-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.flashcard-editor-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Grip icon - purely a visual cue that the row is draggable; the whole
+   .flashcard-editor-row (minus its textareas/remove button) is the actual
+   drag source, not this icon specifically. Same pattern as
+   .mcq-option-drag-handle in the question-modal option editor. */
+.flashcard-drag-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 20px;
+    color: #9ca3af;
+}
+
+.flashcard-editor-row:hover .flashcard-drag-handle {
+    color: #495057;
+}
+
+/* The row currently being dragged - dimmed while the other rows live-shift
+   around it to preview where it'll land. */
+.flashcard-editor-row-dragging {
+    opacity: 0.4;
+}
+
 .flashcard-editor-row label {
     display: block;
     margin-top: 0.6rem;
-    font-size: 0.8rem;
+    font-size: 0.95rem;
     font-weight: 700;
     color: #475569;
 }
@@ -1639,6 +1670,7 @@
     border: 1px solid #cbd5e1;
     border-radius: 6px;
     font: inherit;
+    font-size: 1.05rem;
     resize: vertical;
 }
 
@@ -1646,45 +1678,49 @@
     background: #f8fafc;
 }
 
-.flashcard-preview-group {
-    margin-top: 0.5rem;
-}
-
-.flashcard-preview-label {
-    display: block;
-    margin-bottom: 0.25rem;
-    color: #64748b;
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-}
-
-.flashcard-rendered-preview {
-    min-height: 2.75rem;
-    box-sizing: border-box;
-    padding: 0.75rem;
-    overflow-wrap: anywhere;
-    color: #1e293b;
-    background: #f8fafc;
-    border: 1px dashed #94a3b8;
-    border-radius: 6px;
-    font-size: 1rem;
-    line-height: 1.5;
-}
-
-.flashcard-rendered-preview:empty::before {
-    content: 'Nothing to preview';
-    color: #94a3b8;
-    font-style: italic;
-}
-
+/* Bare icon button - no border/box, just the icon itself. */
 .flashcard-remove-btn {
-    border: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    flex-shrink: 0;
+    border: none;
     background: transparent;
-    color: #b91c1c;
+    color: #dc3545;
     cursor: pointer;
+    line-height: 1;
+    transition: color 0.2s ease;
+}
+
+.flashcard-remove-btn .icon-inline {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.flashcard-remove-btn:hover {
+    color: #b91c1c;
+}
+
+/* Same pill look as .convert-to-flashcard-btn on the question list, so the
+   two conversion actions read as the same control either direction. */
+.flashcard-convert-btn {
+    border: 1px solid var(--bb-steel);
+    background: rgba(44, 69, 93, 0.08);
+    color: var(--bb-steel);
+    border-radius: 12px;
+    padding: 0.15rem 0.6rem;
+    font-size: 0.75rem;
     font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.flashcard-convert-btn:hover {
+    background: var(--bb-steel-hover-light);
 }
 
 .flashcard-editor-actions {
@@ -1694,6 +1730,7 @@
 .threshold-setting {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.5rem;
     margin-bottom: 1.5rem;
     padding: 0.75rem;
@@ -1701,12 +1738,82 @@
     border-radius: 6px;
 }
 
-.threshold-input {
-    width: 60px;
-    padding: 0.25rem 0.5rem;
+.threshold-add-question-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: auto;
+    padding: 0.4rem 0.75rem;
+    border: none;
+    border-radius: 6px;
+    background: var(--bb-steel);
+    color: white;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.threshold-add-question-btn .btn-icon {
+    margin-right: 0;
+    font-size: 0.9rem;
+    line-height: 1;
+}
+
+.threshold-add-question-btn:hover {
+    background: var(--bb-steel-dark);
+}
+
+/* Note: this is deliberately NOT named .threshold-input - that class
+   already belongs to the unrelated "Mode Threshold" percentage-slider
+   wrapper div above (#mode-threshold), whose display:flex was leaking
+   onto this number input and throwing off its own layout/vertical
+   alignment next to the label and help text. */
+.pass-threshold-stepper {
+    display: inline-flex;
+    align-items: stretch;
     border: 1px solid #ccc;
-    border-radius: 4px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #fff;
+}
+
+.pass-threshold-step {
+    width: 36px;
+    border: none;
+    background: #f1f3f5;
+    color: var(--primary-color);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.pass-threshold-step:hover {
+    background: #e2e6ea;
+}
+
+.pass-threshold-step:disabled {
+    color: #adb5bd;
+    cursor: not-allowed;
+    background: #f1f3f5;
+}
+
+.pass-threshold-input {
+    width: 50px;
+    padding: 0.25rem 0.25rem;
+    border: none;
+    border-left: 1px solid #ccc;
+    border-right: 1px solid #ccc;
     text-align: center;
+    /* Native spin buttons are replaced by .pass-threshold-step above. */
+    -moz-appearance: textfield;
+}
+
+.pass-threshold-input::-webkit-inner-spin-button,
+.pass-threshold-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
 }
 
 .threshold-help {
@@ -1780,35 +1887,69 @@
     margin-left: auto;
 }
 
-.edit-question-btn,
-.delete-question-btn {
-    color: white;
-    border: none;
-    border-radius: 50%;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+.convert-to-flashcard-btn {
+    border: 1px solid var(--bb-steel);
+    background: rgba(44, 69, 93, 0.08);
+    color: var(--bb-steel);
+    border-radius: 12px;
+    padding: 0.15rem 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 600;
     cursor: pointer;
-    font-size: 14px;
     transition: background-color 0.2s ease;
 }
 
+.convert-to-flashcard-btn:hover {
+    background: var(--bb-steel-hover-light);
+}
+
+/* Bordered icon buttons, matching .unit-rename-btn's pattern elsewhere in
+   Course Upload (plain background, colored icon/border, light tint on
+   hover) instead of a filled color circle. The global `button { padding:
+   8px 16px }` in style.css otherwise wins (nothing here overrode padding
+   specifically), stretching these into 32x24 ovals and squeezing the
+   icon's flex box down to 0 width - rendering the edit button as a blank
+   filled oval with no visible icon. */
+.edit-question-btn,
+.delete-question-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    flex-shrink: 0;
+    border: 1px solid #c7d0db;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.edit-question-btn .icon-inline {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
 .edit-question-btn {
-    background: #0d6efd;
+    color: var(--primary-color);
 }
 
 .edit-question-btn:hover {
-    background: #0b5ed7;
+    background: rgba(74, 111, 165, 0.08);
+    border-color: var(--primary-color);
 }
 
 .delete-question-btn {
-    background: #dc3545;
+    color: #dc3545;
 }
 
 .delete-question-btn:hover {
-    background: #c82333;
+    background: rgba(220, 53, 69, 0.08);
+    border-color: #dc3545;
 }
 
 .question-content {
@@ -1993,6 +2134,19 @@
     font-size: 1rem;
 }
 
+/* Native select arrows sit flush against the border in some browsers -
+   swap in a custom chevron with deliberate spacing from the edge instead,
+   same pattern used elsewhere in the app (#643). */
+.question-form select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 16px;
+    padding-right: 36px;
+}
+
 .question-form select:focus,
 .question-form textarea:focus,
 .question-form input[type="text"]:focus {
@@ -2016,12 +2170,38 @@
     cursor: pointer;
     color: #26384f;
     font-weight: 600;
+    /* Hide the native <details> marker (a browser-default triangle, easy to
+       miss/inconsistent across browsers) in favor of the explicit chevron
+       below. */
+    list-style: none;
+}
+
+.struggle-topic-panel summary::-webkit-details-marker {
+    display: none;
+}
+
+.struggle-topic-summary-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
 }
 
 .struggle-topic-panel summary small {
     color: #667085;
     font-size: 0.82rem;
     font-weight: 500;
+}
+
+/* Explicit open/close affordance - rotates to point up once expanded, same
+   chevron glyph used for select dropdowns elsewhere in the app. */
+.struggle-topic-chevron {
+    flex-shrink: 0;
+    color: #667085;
+    transition: transform 0.2s ease;
+}
+
+.struggle-topic-panel[open] .struggle-topic-chevron {
+    transform: rotate(180deg);
 }
 
 .struggle-topic-generate-row {
@@ -2120,6 +2300,48 @@ fieldset.radio-group-fieldset {
     margin: 0;
 }
 
+/* True/False "Correct Answer" picker: label then its radio, inline, both
+   options side by side and centered in the modal. Separate from
+   .radio-group/.radio-option above, which the MCQ "Correct" label next to
+   each option row still uses as its own compact inline layout - this isn't
+   a replacement for those, just a different picker for a different place. */
+.tf-options {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    margin-top: 0.5rem;
+}
+
+/* Specificity needs to beat ".question-form label { display: block }" below,
+   which also matches .tf-option (it's a <label>) and would otherwise win and
+   silently break the alignment this rule sets up. */
+.tf-options .tf-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.tf-option:hover {
+    background: #f8f9fa;
+}
+
+.tf-option input[type="radio"] {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--primary-color);
+    cursor: pointer;
+}
+
+.tf-option-label {
+    font-weight: 500;
+    color: #333;
+}
+
 .mcq-options {
     display: flex;
     flex-direction: column;
@@ -2136,6 +2358,11 @@ fieldset.radio-group-fieldset {
     border-radius: 6px;
     background: #f8f9fa;
     min-width: 0;
+    cursor: grab;
+}
+
+.mcq-option:active {
+    cursor: grabbing;
 }
 
 .mcq-option .mcq-input {
@@ -2153,6 +2380,92 @@ fieldset.radio-group-fieldset {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+}
+
+/* Remove button for a dynamically-added option row. Hidden (not removed)
+   below the minimum option count, via JS, so the row's layout stays put
+   instead of the input jumping wider when there's nothing to remove. */
+.mcq-option-remove {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: #6f7780;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.mcq-option-remove:hover {
+    background: #e1e5e9;
+    color: #b91c1c;
+}
+
+/* Grip icon - purely a visual cue that the row is draggable; the whole
+   .mcq-option row (minus its input/radio/remove controls) is the actual
+   drag source, not this icon specifically. */
+.mcq-option-drag-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 20px;
+    height: 100%;
+    color: #9ca3af;
+}
+
+.mcq-option:hover .mcq-option-drag-handle {
+    color: #495057;
+}
+
+/* The row currently being dragged - dimmed while the other rows live-shift
+   around it to preview where it'll land. */
+.mcq-option-dragging {
+    opacity: 0.4;
+}
+
+/* Hint + explicit add control below the option rows - Enter-to-add (in the
+   module's doc comment) isn't discoverable on its own, so both the hint
+   text and a clickable alternative are always visible. */
+.mcq-options-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.mcq-options-hint {
+    margin: 0;
+    color: #495057;
+    font-size: 0.85rem;
+}
+
+.mcq-option-add {
+    flex-shrink: 0;
+    padding: 0.4rem 0.75rem;
+    border: 1px solid #c7d0db;
+    border-radius: 4px;
+    background: #fff;
+    color: var(--primary-color);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.mcq-option-add:hover:not(:disabled) {
+    background: rgba(74, 111, 165, 0.08);
+    border-color: var(--primary-color);
+}
+
+.mcq-option-add:disabled {
+    color: #9ca3af;
+    background: #f3f4f6;
+    border-color: #e1e5e9;
+    cursor: not-allowed;
 }
 
 /* AI Generation Modal Styling */
