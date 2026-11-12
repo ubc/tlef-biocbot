@@ -12,6 +12,11 @@ jobs:
     name: Unit (jest)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # packages: read lets the install fetch the private @ubc packages this
+    # repository has been given access to on GitHub Packages.
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - name: Checkout
@@ -21,12 +26,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          # The agents framework (@ubc/genai-toolkit-agents-*) is on GitHub
+          # Packages. Without this its tests are skipped.
+          registry-url: https://npm.pkg.github.com
+          scope: '@ubc'
 
       - name: Install dependencies
         # package-lock.json is gitignored in this repo (see playwright.yml), so we
         # use `npm install` rather than `npm ci`. The unit job needs no Mongo,
         # Qdrant, server, or browsers — it just runs jest against src/.
         run: npm install
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run unit tests with coverage
         run: npm run test:unit:coverage

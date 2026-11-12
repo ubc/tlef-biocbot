@@ -177,6 +177,83 @@ function appendRichContentFormattingRules(prompt) {
     return `${text}\n\n${missingRules.join('\n\n')}`;
 }
 
+/**
+ * The agent chat path (src/services/agentChat.js) splits one student-chat model
+ * call into a planning step and a writing step. The instructor's editable
+ * prompts (base, tutor, protege, explain, directive) still drive both steps;
+ * the text below only says what each step is for and which JSON to return, so
+ * it is appended after the editable prompts the same way the rich-content rules
+ * are, and an instructor's wording is never replaced.
+ *
+ * Each rule starts with a fixed marker so it is appended exactly once, even if
+ * an instructor pastes it into their own prompt.
+ */
+
+// PRD section 7.4, first finding: without this, gpt-5.6-luna sometimes wrote
+// `\?` for `\)?`, in both the planning and the writing step. It does not tell
+// the model to double backslashes, which made it over-escape (decision 18).
+const MATH_DELIMITER_RULE = `MATH DELIMITERS: If you write math between \\( and \\), close every \\( with \\) before any punctuation that follows it. Write \\( x^2 \\)? and never \\( x^2 ?`;
+
+const AGENT_PLANNER_RULES = {
+    tutor: `PLANNING STEP: You are not writing the reply the student sees. A second step writes it from your notes, and it cannot see the course material, so put every fact the reply needs into your notes.
+
+You receive JSON with the student's "message", the conversation "history", and "toolResults":
+- "course-context" has the course material retrieved for this message ("contextText") and which units it covers ("coverageNote"). Use it as your primary source.
+- "directive-state", when "active" is true, has instructions for teaching a student who is struggling. Pass them on in "style".
+
+Decide what the reply should do, following the mode instructions above, and respond with only a JSON object:
+{"approach": "what the reply should do, in one or two sentences", "keyPoints": [{"point": "a fact or idea the reply should use", "unit": "the unit it came from, or general knowledge"}], "coverage": "what to tell the student about missing or limited course material, or an empty string", "style": "how the reply should be written", "nextQuestion": "a question for the student to end on, or an empty string"}`,
+
+    explain: `PLANNING STEP: You are not writing the reply the student sees. A second step writes it from your notes, and it cannot see the course material, so put every fact the reply needs into your notes.
+
+You receive JSON with the "message" to explain, the conversation "history", and "toolResults". "course-context" has the course material retrieved for this message ("contextText") and which units it covers ("coverageNote"). Use it to explain, if it helps.
+
+Decide how to explain it simply, following the mode instructions above, and respond with only a JSON object:
+{"approach": "what the explanation should do, in one or two sentences", "keyPoints": [{"point": "a fact, idea or analogy the reply should use", "unit": "the unit it came from, or general knowledge"}], "coverage": "what to tell the student about missing or limited course material, or an empty string", "style": "how the reply should be written", "nextQuestion": "a question for the student to end on, or an empty string"}`,
+
+    protege: `PLANNING STEP: You are not writing the reply. A second step writes it, playing the confused student described above, and it must never see the correct answers. So your notes must never state, paraphrase or hint at a correct answer the student has not already given.
+
+You receive JSON with the student's "message", the conversation "history", and "toolResults". "course-context" has the course material ("contextText"): it is the correct answers. Use it only to judge what the student has explained so far.
+
+Respond with only a JSON object:
+{"verdict": "correct, partly correct, incorrect, no explanation yet, or off topic", "whatTheyGotRight": "what the student explained correctly, in their own terms, or an empty string", "confusionToVoice": "what the confused student should still be unsure about, phrased as their confusion, without the answer", "nextQuestion": "the follow-up question to ask the student, without the answer"}`
+};
+
+const AGENT_WRITER_RULES = {
+    tutor: `WRITING STEP: A planning step has already read the course material and decided what to say. Its notes are in "agentResults.tutor" of the JSON you receive, with the student's "message" and the conversation "history". Write the reply the student sees, following the mode instructions above and the notes. Use only facts from the notes, and cite the unit each fact came from, as the notes give it. Follow the notes' "style", and pass on their "coverage" if it is not empty.
+
+Respond with only a JSON object: {"reply": "the reply the student sees"}`,
+
+    explain: `WRITING STEP: A planning step has already read the course material and decided how to explain it. Its notes are in "agentResults.tutor" of the JSON you receive, with the "message" to explain and the conversation "history". Write the explanation the student sees, following the mode instructions above and the notes. Use only facts from the notes, and pass on their "coverage" if it is not empty.
+
+Respond with only a JSON object: {"reply": "the reply the student sees"}`,
+
+    protege: `WRITING STEP: You are the confused student described above. A planning step has judged the student's explanation, and its notes are in "agentResults.tutor" of the JSON you receive, with the student's "message" and the conversation "history". Write your next message to the student: stay in character, voice the confusion and ask the follow-up question from the notes, and never explain the concept yourself.
+
+Respond with only a JSON object: {"reply": "your message to the student"}`
+};
+
+const AGENT_CONTINUATION_INSTRUCTIONS = `CONTINUATION: Your previous reply was cut off. "continuation.tail" in the JSON you receive is how it ended. Respond with only a JSON object {"reply": "the rest of the reply"}, starting exactly where the tail ends, without repeating any of it.`;
+
+const AGENT_SUMMARY_CHECK_PROMPT = `You are a classifier. Decide whether the student's "message" in the JSON you receive attempts to summarize, recap, or explain the previous conversation. Respond with only a JSON object: {"isSummaryAttempt": true or false}`;
+
+const AGENT_ERROR_RECOVERY_INSTRUCTIONS = `You help a step in a chat pipeline recover after its output was rejected. The JSON you receive has the student's "message" and "recovery": which step failed ("agentId"), the attempt number, the failure, and the JSON schema its output must match ("outputSchema"). Decide whether trying again could work, and say in one or two sentences what the step should do differently, such as returning only a JSON object that matches the schema. Respond with only a JSON object: {"retry": true or false, "adjustment": "what to do differently"}`;
+
+/**
+ * Append a fixed agent-path rule to a prompt, once.
+ * @param {string} prompt - A rendered prompt, default or course-customised
+ * @param {...string} rules - Rules to append if the prompt does not already hold them
+ * @returns {string}
+ */
+function appendAgentRules(prompt, ...rules) {
+    let text = String(prompt || '');
+    for (const rule of rules) {
+        const marker = rule.slice(0, rule.indexOf(':') + 1);
+        if (!text.includes(marker)) text = `${text}\n\n${rule}`;
+    }
+    return text;
+}
+
 const FLASHCARD_GENERATION_PROMPT = `Generate {{cardCount}} university-level study flashcards for {{lectureName}}.
 
 Use the learning objectives as the main guide for deciding which concepts are most important. Prefer concepts, processes, relationships, common misconceptions, and definitions that students need to understand. Avoid trivia and duplicate or near-duplicate cards.
@@ -793,6 +870,13 @@ module.exports = {
     FLASHCARD_GENERATION_PROMPT,
     RICH_CONTENT_FORMATTING_RULES,
     appendRichContentFormattingRules,
+    MATH_DELIMITER_RULE,
+    AGENT_PLANNER_RULES,
+    AGENT_WRITER_RULES,
+    AGENT_CONTINUATION_INSTRUCTIONS,
+    AGENT_SUMMARY_CHECK_PROMPT,
+    AGENT_ERROR_RECOVERY_INSTRUCTIONS,
+    appendAgentRules,
     DEFAULT_MENTAL_HEALTH_DETECTION_PROMPT,
     createQuestionGenerationSystemPrompt,
     QUESTION_GENERATION_PROMPT_TEMPLATE,

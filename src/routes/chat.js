@@ -20,6 +20,7 @@ const TrackerService = require('../services/tracker');
 const User = require('../models/User');
 const MentalHealthFlag = require('../models/MentalHealthFlag');
 const previewSession = require('../services/previewSession');
+const agentChat = require('../services/agentChat');
 const gridfs = require('../services/gridfs');
 const { resolveCourseAi, sendLlmKeyError } = require('./llmKeyMiddleware');
 const { evaluateObjectiveAnswer } = require('../services/objectiveAnswer');
@@ -1180,6 +1181,540 @@ router.get('/source-documents/:documentId/download', async (req, res) => {
  * POST /api/chat
  * Send a message to the LLM and get a response
  */
+/**
+ * Start the mental-health check without waiting for it. Shared by the old
+ * chat path and the agent path; it moves onto the agents framework in 2b.
+ */
+function startMentalHealthCheck({ req, llmService, course, db, message, conversationContext, courseId, unitName }) {
+    // Fire-and-forget: parallel mental health detection LLM call
+    // Only send trimmed context: most recent bot message + 2 most recent student messages
+    // Never runs for a preview: a sentence typed while testing the bot must
+    // not create a mental-health flag or page anyone. The student-facing
+    // safety response still comes through the mode prompts, so the
+    // previewer sees what a student would see.
+    const appLLMForMH = previewSession.isPreviewRequest(req) ? null : llmService;
+    if (appLLMForMH && req.user) {
+        (async () => {
+            try {
+                const detectionPrompt = course.mentalHealthDetectionPrompt || prompts.DEFAULT_MENTAL_HEALTH_DETECTION_PROMPT;
+                const convMessages = (conversationContext && conversationContext.conversationMessages) || [];
+                // convMessages from frontend already includes the current message,
+                // so only append it if the history is empty (first message in chat)
+                const allMessages = convMessages.length > 0
+                    ? convMessages
+                    : [{ role: 'user', content: message }];
+
+                // Trim to last 2 student messages + last bot message
+                const recentStudentMsgs = allMessages.filter(m => m.role === 'user').slice(-2);
+                const recentBotMsg = [...allMessages].reverse().find(m => m.role === 'assistant');
+                const trimmedHistory = [];
+                if (recentBotMsg) trimmedHistory.push(recentBotMsg);
+                trimmedHistory.push(...recentStudentMsgs);
+
+                const result = await appLLMForMH.analyzeMentalHealth(trimmedHistory, detectionPrompt);
+
+                if (result.concernLevel !== 'no concern') {
+                    await MentalHealthFlag.createMentalHealthFlag(db, {
+                        studentId: req.user.userId,
+                        studentName: req.user.displayName || req.user.username || 'Unknown',
+                        courseId,
+                        unitName,
+                        message,
+                        conversationContext: trimmedHistory,
+                        concernLevel: result.concernLevel,
+                        llmReason: result.reason
+                    });
+                }
+            } catch (err) {
+                console.error('Mental health detection error (non-blocking):', err);
+            }
+        })();
+    }
+}
+
+/**
+ * Work out which units a student message may search, or null when the
+ * selected unit is not published.
+ */
+function resolveRetrievalScope(course, unitName, message) {
+    // Determine retrieval mode: Course override ? Default : False (default)
+    const isAdditive = course.isAdditiveRetrieval !== undefined && course.isAdditiveRetrieval !== null
+        ? !!course.isAdditiveRetrieval 
+        : false;
+
+    // Build lectureNames filter using published units only, ordered by lectures array
+    const publishedLectureObjs = (course.lectures || []).filter(l => l.isPublished);
+    const publishedLectures = publishedLectureObjs.map(l => l.name);
+    if (!publishedLectures.includes(unitName)) {
+        return null;
+    }
+
+    let lectureNames = [unitName];
+    if (isAdditive) {
+        const idx = publishedLectures.indexOf(unitName);
+        lectureNames = idx >= 0 ? publishedLectures.slice(0, idx + 1) : [unitName];
+    }
+
+    // Narrow to explicitly-requested units when the message names them
+    // (numbers, ranges, or a unit's display name). Matched against the
+    // full published order (so "unit 4" resolves correctly regardless of
+    // where the student's scope starts), then filtered to the scope
+    // already computed above - this can only shrink that scope, never
+    // expand it, so it can't surface a unit the student isn't authorized
+    // to see.
+    const requestedUnits = detectRequestedUnits(message, publishedLectureObjs, lectureNames, unitName);
+    // A small set of explicit "all of them" phrases ("quiz me on every
+    // unit", "summarize everything so far") also fan out, since that's
+    // the shape of the original #594 incident - a vague request with no
+    // specific unit named, but clearly asking about more than the
+    // current one.
+    const isBroadRequest = !requestedUnits && lectureNames.length > 1 && BROAD_REQUEST_PATTERN.test(message);
+
+    const ragSettings = CourseModel.resolveRagSettings(course);
+
+    // Fan out only when the student actually asked about more than one
+    // unit (explicitly, or via a broad phrase) - NOT just because the
+    // current scope happens to contain several units. An ordinary
+    // single-topic question asked in a later unit under additive mode
+    // must keep using the plain pooled search across its normal scope;
+    // fanning that out too would spread its one relevant unit's slots
+    // across every other in-scope unit for no reason, and could even
+    // drop the current unit's own content if enough earlier units are
+    // also in scope.
+    let searchScope;
+    let searchTopK;
+    let fanOut;
+    if (requestedUnits) {
+        searchScope = requestedUnits;
+        // Raise K to cover every named unit (capped at the app max) so
+        // an explicit "units 1, 2, 3, 4, 5" request doesn't get
+        // truncated back down to whatever the course's configured
+        // Top-K allows.
+        searchTopK = Math.min(CourseModel.MAX_RAG_TOP_K, Math.max(ragSettings.student.topK, requestedUnits.length));
+        fanOut = searchScope.length > 1;
+    } else if (isBroadRequest) {
+        searchScope = lectureNames;
+        // Same reasoning as the explicit-request branch above: a broad
+        // "quiz me on every unit" request fans out across every unit in
+        // scope, so K needs to cover all of them too, or most units get
+        // cut by the course's (often much smaller) default Top-K.
+        searchTopK = Math.min(CourseModel.MAX_RAG_TOP_K, Math.max(ragSettings.student.topK, searchScope.length));
+        fanOut = true;
+    } else {
+        searchScope = lectureNames;
+        searchTopK = ragSettings.student.topK;
+        fanOut = false;
+    }
+
+    return { isAdditive, publishedLectures, lectureNames, requestedUnits, isBroadRequest, searchScope, searchTopK, fanOut };
+}
+
+/**
+ * Search the course material for a student message, and say where it came
+ * from. Retrieval stays in BiocBot; the agent path reaches it through a tool.
+ */
+async function retrieveChatContext({ qdrant, course, courseId, unitName, message, scope }) {
+    const { isAdditive, lectureNames, requestedUnits, isBroadRequest, searchScope, searchTopK, fanOut } = scope;
+    // Debug logging to verify retrieval mode and scope
+    console.log(`🔎 [CHAT_RAG] RetrievalMode=${isAdditive ? 'additive' : 'single'} | Course=${courseId} | Unit=${unitName} | LectureNames=${JSON.stringify(lectureNames)} | SearchScope=${JSON.stringify(searchScope)} | FanOut=${fanOut} | TopK=${searchTopK}${requestedUnits ? ' (narrowed by detected unit reference)' : isBroadRequest ? ' (broad request phrase)' : ''}`);
+
+    // Retrieve top chunks from Qdrant.
+    // A single pooled search across multiple units lets whichever unit's
+    // chunks score highest take every slot, starving the others even when
+    // several units are equally relevant. Fan out a bounded search per
+    // unit and merge with a guaranteed per-unit floor instead (same
+    // pattern already used for the Super Course's per-course fan-out) -
+    // but only when fanOut is true (see above); otherwise this is the
+    // same plain pooled search it always was.
+    // When the course de-prioritizes additional materials, search the main
+    // materials (lecture notes, practice questions) first and only fall back
+    // to additional materials if nothing was found there.
+    const runSearch = async (filters) => {
+        if (fanOut) {
+            const byLecture = await qdrant.searchDocumentsByLecture(
+                message, courseId, searchScope, searchTopK, filters
+            );
+            return QdrantService.mergeBalancedLectureResults(byLecture, searchTopK);
+        }
+        return qdrant.searchDocuments(message, { courseId, lectureNames: searchScope, ...filters }, searchTopK);
+    };
+
+    let searchResults;
+    if (course.additionalMaterialSecondarySearch === true) {
+        searchResults = await runSearch({ excludeAdditionalMaterials: true });
+        if (!Array.isArray(searchResults) || searchResults.length === 0) {
+            console.log('🔎 [CHAT_RAG] No chunks found in main materials; falling back to additional materials');
+            searchResults = await runSearch({ additionalMaterialsOnly: true });
+        }
+    } else {
+        searchResults = await runSearch({});
+    }
+
+    searchResults = normalizeQdrantSearchResults(searchResults);
+
+    // Log summary of results by lecture to validate scope
+    try {
+        const lecturesHit = Array.from(new Set((searchResults || []).map(r => r.lectureName)));
+        console.log(`📚 [CHAT_RAG] Retrieved ${searchResults.length} chunks from lectures: ${lecturesHit.join(', ')}`);
+        // Group by document to see which files contributed
+        const byDoc = {};
+        for (const r of (searchResults || [])) {
+            const docId = r.documentId || 'unknown-doc';
+            if (!byDoc[docId]) {
+                byDoc[docId] = {
+                    fileName: r.fileName || 'unknown-filename',
+                    lectures: new Set(),
+                    count: 0,
+                    maxScore: 0
+                };
+            }
+            byDoc[docId].count += 1;
+            byDoc[docId].lectures.add(r.lectureName);
+            if (typeof r.score === 'number' && r.score > byDoc[docId].maxScore) {
+                byDoc[docId].maxScore = r.score;
+            }
+        }
+        const docKeys = Object.keys(byDoc);
+        console.log(`📄 [CHAT_RAG] Documents contributing (${docKeys.length}):`);
+        for (const k of docKeys) {
+            const info = byDoc[k];
+            const lecturesList = Array.from(info.lectures).join(', ');
+            const scoreStr = info.maxScore ? info.maxScore.toFixed(3) : 'n/a';
+            console.log(`   - ${info.fileName} (id=${k}) | lectures=[${lecturesList}] | chunks=${info.count} | maxScore=${scoreStr}`);
+        }
+    } catch (_) {}
+
+    // Build concise context window with citations
+    const citations = searchResults.map(r => ({
+        lectureName: r.lectureName,
+        fileName: r.fileName,
+        score: r.score
+    }));
+    const contextText = searchResults
+        .map(r => `From ${r.lectureName} (${r.fileName}):\n${r.chunkText}`)
+        .join('\n\n---\n\n');
+
+    // Determine source attribution based on retrieved chunks
+    console.log('🔍 [SOURCE_DEBUG] Retrieved chunks for source analysis:', searchResults.map(r => ({
+        fileName: r.fileName,
+        documentType: r.documentType,
+        type: r.type,
+        lectureName: r.lectureName
+    })));
+
+    let sourceAttribution;
+    try {
+        const sourceDownloadsEnabled = !!(course.quizSettings && course.quizSettings.allowSourceAttributionDownloads);
+        sourceAttribution = await determineSourceAttribution(searchResults, unitName, sourceDownloadsEnabled);
+        console.log('🔍 [SOURCE_DEBUG] Determined source attribution:', sourceAttribution);
+    } catch (error) {
+        console.error('🔍 [SOURCE_DEBUG] Error in source attribution:', error);
+        sourceAttribution = {
+            source: 'GPT',
+            description: 'Generated by AI (error determining source)',
+            unitName: null,
+            documentType: null,
+            downloadsEnabled: false,
+            documents: []
+        };
+    }
+
+    // Ground the model in exactly which in-scope units actually came
+    // back with content, instead of letting it guess (or contradict a
+    // prior turn where the same unit WAS successfully retrieved - see
+    // issue #594's "within-conversation self-contradiction" finding).
+    //
+    // missingUnits is only computed for requestedUnits/isBroadRequest:
+    // on the ordinary pooled path, searchScope is just the student's
+    // normal additive scope (e.g. every unit up to their current one),
+    // most of which was never asked about and was always going to lose
+    // out to the current unit's own content at a small Top-K. Reporting
+    // all of that as "no material" (e.g. "additive mode, student in
+    // Unit 8, K=3" reporting Units 1-7 as having no content) is actively
+    // misleading - those units simply weren't part of this question.
+    const coveredUnits = Array.from(new Set(searchResults.map(r => r.lectureName).filter(Boolean)));
+    const missingUnits = (requestedUnits || isBroadRequest)
+        ? searchScope.filter(u => !coveredUnits.includes(u))
+        : [];
+    const missingUnitsSentence = missingUnits.length === 0
+        ? ''
+        : requestedUnits
+            // The student named these units directly, so a genuine gap is
+            // worth surfacing plainly.
+            ? ` No material was retrieved for: ${missingUnits.join(', ')} — if the student's question touches these, say so clearly by naming them, and suggest asking about them one at a time or narrowing the request. Never ask the student to upload, share, or provide course materials themselves; only an instructor can add material to the course.`
+            // Broad requests already raise Top-K to cover the whole scope,
+            // so anything still missing is a capacity cut, not a real
+            // content gap - phrase it that way rather than "no material".
+            : ` ${missingUnits.join(', ')} were not included in this answer due to space — if the student's question touches these, say so clearly by naming them, and suggest asking about them one at a time or narrowing the request. Never ask the student to upload, share, or provide course materials themselves; only an instructor can add material to the course.`;
+    const coverageNote = coveredUnits.length > 0
+        ? `The course context below only includes material from: ${coveredUnits.join(', ')}.` + missingUnitsSentence
+        : `No course material was retrieved for this question. Say so clearly, and suggest the student narrow or rephrase their question. Never ask the student to upload, share, or provide course materials themselves; only an instructor can add material to the course.`;
+
+    return { searchResults, citations, contextText, sourceAttribution, coverageNote };
+}
+
+/** The course's student-chat prompts, falling back to the defaults. */
+function resolveCoursePrompts(course) {
+    // Retrieve custom prompts from course object or use defaults
+    let basePrompt = prompts.DEFAULT_PROMPTS.base;
+    let protegePrompt = prompts.DEFAULT_PROMPTS.protege;
+    let tutorPrompt = prompts.DEFAULT_PROMPTS.tutor;
+    let explainPrompt = prompts.DEFAULT_PROMPTS.explain;
+    let directivePrompt = prompts.DEFAULT_PROMPTS.directive;
+
+    // Check if course has custom prompts
+    if (course.prompts) {
+        console.log('📝 [CHAT_API] Using course-specific prompts');
+        if (course.prompts.base) basePrompt = course.prompts.base;
+        if (course.prompts.protege) protegePrompt = course.prompts.protege;
+        if (course.prompts.tutor) tutorPrompt = course.prompts.tutor;
+        if (course.prompts.explain) explainPrompt = course.prompts.explain;
+        if (course.prompts.directive) directivePrompt = course.prompts.directive;
+    } else {
+        console.log('[CHAT_API] Using default prompts');
+    }
+
+    return { base: basePrompt, protege: protegePrompt, tutor: tutorPrompt, explain: explainPrompt, directive: directivePrompt };
+}
+
+/**
+ * Add the in-scope units' learning objectives to the base prompt.
+ */
+async function appendLearningObjectives(db, courseId, lectureNames, basePrompt) {
+    // Inject the unit's learning objectives directly into the prompt.
+    // We read them deterministically per in-scope unit (single unit, or the
+    // additive set when additive retrieval is on) so the objectives always
+    // match the content the bot can actually retrieve — no keyword/vector
+    // matching. They are appended to basePrompt so every mode (protege/"bot"
+    // and tutor/explain/"student") sees them.
+    try {
+        const objectiveSections = [];
+        for (const ln of lectureNames) {
+            const objectives = await CourseModel.getLearningObjectives(db, courseId, ln);
+            if (!objectives || objectives.length === 0) continue;
+
+            // Shuffle so the model is not positionally biased toward the
+            // first-listed objective; the instruction below also tells it to
+            // treat them as an equally-weighted set.
+            const shuffled = [...objectives].sort(() => Math.random() - 0.5);
+            const list = shuffled.map((o, i) => `${i + 1}. ${o}`).join('\n');
+            objectiveSections.push(`Learning objectives for ${ln}:\n${list}`);
+        }
+
+        if (objectiveSections.length > 0) {
+            basePrompt += `\n\nLEARNING OBJECTIVES (the complete set of goals for the in-scope unit(s); treat every objective as equally important — do not fixate on or default to a single one, and cover the breadth of topics they span):\n\n${objectiveSections.join('\n\n')}`;
+            console.log(`🎯 [CHAT_API] Injected learning objectives for unit(s): ${lectureNames.join(', ')}`);
+        } else {
+            console.log('🎯 [CHAT_API] No learning objectives found for in-scope unit(s)');
+        }
+    } catch (err) {
+        console.error('🎯 [CHAT_API] Error injecting learning objectives:', err);
+        // Non-fatal: continue without injected objectives.
+    }
+
+    return basePrompt;
+}
+
+/** Send the chat route's error response for an error that isn't a key error. */
+function sendChatError(res, error) {
+    // Provide user-friendly error messages
+    let errorMessage = 'Sorry, I encountered an error processing your message.';
+    let statusCode = 500;
+
+    if (error.message.includes('OLLAMA_ENDPOINT')) {
+        errorMessage = 'Ollama service is not available. Please check if Ollama is running.';
+        statusCode = 503;
+    } else if (error.message.includes('API key')) {
+        errorMessage = 'Authentication error. Please check your API configuration.';
+        statusCode = 401;
+    } else if (error.message.includes('endpoint')) {
+        errorMessage = 'Service endpoint is not reachable. Please check your configuration.';
+        statusCode = 503;
+    }
+
+    res.status(statusCode).json({
+        success: false,
+        message: errorMessage,
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+        timestamp: new Date().toISOString()
+    });
+}
+
+/**
+ * POST /api/chat on the agents framework. It returns the same response shape
+ * as the old handler, so student.js doesn't change (PRD decision 28).
+ */
+async function handleAgentChat({ req, res, db, course, llmService, qdrant, approvedStruggleTopics, agentMode }) {
+    const { message, unitName } = req.body;
+    console.log(`🤖 [AGENT_CHAT] Running ${agentMode} mode on the agents framework`);
+
+    // Checked before the run, so an unpublished unit writes no struggle state.
+    const scope = resolveRetrievalScope(course, unitName, message);
+    if (!scope) {
+        return res.status(400).json({ success: false, message: 'Selected unit is not published or does not exist' });
+    }
+
+    // A browser that asks for text/event-stream gets each step's progress as it
+    // happens, then the usual response body in a final "result" event, with
+    // the status it would have had. Anything else gets plain JSON, as today.
+    const progress = startProgressStream(req, res);
+    const out = progress ? progress.responder : res;
+    try {
+        return await runAgentChat({ req, res: out, db, course, llmService, qdrant, approvedStruggleTopics, agentMode, scope, onProgress: progress && progress.send });
+    } catch (error) {
+        if (!progress) throw error;
+        if (sendLlmKeyError(out, error)) return;
+        console.error('❌ Error in chat endpoint:', error);
+        sendChatError(out, error);
+    }
+}
+
+/**
+ * Starts a server-sent event stream for a chat request that asks for one.
+ * @returns {{ send: Function, responder: { status: Function, json: Function } } | null}
+ */
+function startProgressStream(req, res) {
+    if (!String(req.headers.accept || '').includes('text/event-stream')) return null;
+    res.status(200).set({
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        // Stops nginx from holding the events until the response ends.
+        'X-Accel-Buffering': 'no'
+    });
+    res.flushHeaders();
+    const write = (event, data) => {
+        // A student who navigates away closes the stream; the run still finishes.
+        if (!res.writableEnded && !res.destroyed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    // Anything that would have called res.status().json() sends the result event instead.
+    const responder = {
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) {
+            write('result', { status: this.statusCode, body });
+            res.end();
+            return this;
+        }
+    };
+    return { send: update => write('progress', update), responder };
+}
+
+async function runAgentChat({ req, res, db, course, llmService, qdrant, approvedStruggleTopics, agentMode, scope, onProgress }) {
+    const { message, mode, unitName, courseId, conversationContext } = req.body;
+    let struggleState = null;
+    let identifiedTopic = null;
+    let directiveModeActive = false;
+    const applyStruggleUpdate = (updateResult, topic) => {
+        if (updateResult.success && !updateResult.skipped) {
+            struggleState = updateResult.state;
+            identifiedTopic = topic;
+            directiveModeActive = !!(struggleState && struggleState.isActive);
+        }
+    };
+
+    // An explanation with a topic skips the model, and only an approved topic
+    // updates the struggle state (old handler, same rule).
+    const skipsTracker = !!(req.body.isExplanationRequest && req.body.topic);
+    if (skipsTracker && req.user) {
+        const explanationTopic = String(req.body.topic || '').trim();
+        const matchedApprovedTopic = approvedStruggleTopics.find(
+            topic => topic.toLowerCase() === explanationTopic.toLowerCase()
+        );
+        if (matchedApprovedTopic) {
+            try {
+                const updateResult = await User.updateUserStruggleState(db, req.user.userId, {
+                    topic: matchedApprovedTopic,
+                    isStruggling: true,
+                    reason: 'User requested explanation'
+                }, courseId);
+                applyStruggleUpdate(updateResult, matchedApprovedTopic);
+            } catch (trackerError) {
+                console.error('❌ [AGENT_CHAT] Error updating struggle state:', trackerError);
+            }
+        }
+    }
+
+    // Unchanged until 2b moves it onto the framework.
+    startMentalHealthCheck({ req, llmService, course, db, message, conversationContext, courseId, unitName });
+
+    const coursePrompts = resolveCoursePrompts(course);
+    coursePrompts.base = await appendLearningObjectives(db, courseId, scope.lectureNames, coursePrompts.base);
+
+    let retrieved = null;
+    const outcome = await agentChat.runStudentChat({
+        mode: agentMode,
+        message,
+        history: conversationContext && conversationContext.conversationMessages,
+        llm: llmService,
+        coursePrompts,
+        runTracker: !skipsTracker && !!req.user,
+        trackerContext: { courseId, unitName, approvedTopics: approvedStruggleTopics },
+        checkSummaryAttempt: !!req.body.checkSummaryAttempt,
+        preview: previewSession.isPreviewRequest(req),
+        identifiers: { courseId, unitName, ...(req.user ? { userId: req.user.userId } : {}) },
+        retrieve: async () => {
+            retrieved = await retrieveChatContext({ qdrant, course, courseId, unitName, message, scope });
+            return { contextText: retrieved.contextText, coverageNote: retrieved.coverageNote };
+        },
+        recordStruggle: async analysis => {
+            const updateResult = await User.updateUserStruggleState(db, req.user.userId, analysis, courseId);
+            applyStruggleUpdate(updateResult, analysis.topic);
+        },
+        directiveState: () => ({ active: directiveModeActive, topic: identifiedTopic }),
+        onProgress
+    });
+
+    const { run } = outcome;
+    if (run.usedFallback) {
+        // An error, as today: a saved reply would count toward the chat summary
+        // and go into its transcript (decision 28).
+        if (outcome.accessError && sendLlmKeyError(res, outcome.accessError)) return;
+        const cause = outcome.failureCause instanceof Error
+            ? outcome.failureCause
+            : new Error(Object.values(run.failures).map(failure => failure.message).join('; ') || 'The reply could not be written');
+        console.error('❌ [AGENT_CHAT] The reply could not be written:', run.failures);
+        return sendChatError(res, cause);
+    }
+
+    const searchResults = retrieved ? retrieved.searchResults : [];
+    const replyCall = outcome.replyCall || {};
+    res.json({
+        success: true,
+        messageId: generateChatMessageId(),
+        message: outcome.reply,
+        model: replyCall.model,
+        usage: replyCall.usage,
+        timestamp: new Date().toISOString(),
+        mode: mode || 'default',
+        citations: retrieved ? retrieved.citations : [],
+        sourceAttribution: retrieved ? retrieved.sourceAttribution : undefined,
+        debug: {
+            searchResultsCount: searchResults.length,
+            avgScore: searchResults.length > 0 ? searchResults.reduce((sum, result) => sum + (result.score || 0), 0) / searchResults.length : 0,
+            maxScore: searchResults.length > 0 ? Math.max(...searchResults.map(result => result.score || 0)) : 0,
+            documentTypes: searchResults.map(r => ({ fileName: r.fileName, documentType: r.documentType, type: r.type, score: r.score })),
+            agentRunId: run.runId
+        },
+        retrieval: {
+            mode: scope.isAdditive ? 'additive' : 'single',
+            lectureNames: scope.lectureNames,
+            searchScope: scope.searchScope
+        },
+        struggleState,
+        struggleDebug: {
+            userExists: !!req.user,
+            userId: req.user ? req.user.userId : null,
+            trackerInitialized: !skipsTracker && !!req.user,
+            directiveModeActive,
+            identifiedTopic
+        }
+    });
+}
+
+/**
+ * POST /api/chat
+ */
 router.post('/', async (req, res) => {
     try {
         console.log('🔥 [CHAT_ROUTE_HIT] Processing POST /api/chat');
@@ -1276,6 +1811,12 @@ router.post('/', async (req, res) => {
         const approvedStruggleTopics = CourseModel.normalizeTopicList(course.approvedStruggleTopics || []);
         console.log(`🧭 [CHAT_TOPIC_MAP] Approved topics loaded: ${approvedStruggleTopics.length}`);
 
+        // The agents framework path (PRD Rung 2a), off unless AGENT_CHAT_MODES names this mode.
+        const agentMode = agentChat.resolveAgentMode(req.body);
+        if (agentChat.isAgentChatEnabled(agentMode)) {
+            return await handleAgentChat({ req, res, db, course, llmService, qdrant, approvedStruggleTopics, agentMode });
+        }
+
         // STRUGGLE DETECTION & TRACKING
         let struggleState = null;
         let directiveModeActive = false;
@@ -1364,225 +1905,16 @@ router.post('/', async (req, res) => {
         }
 
 
-        // Fire-and-forget: parallel mental health detection LLM call
-        // Only send trimmed context: most recent bot message + 2 most recent student messages
-        // Never runs for a preview: a sentence typed while testing the bot must
-        // not create a mental-health flag or page anyone. The student-facing
-        // safety response still comes through the mode prompts, so the
-        // previewer sees what a student would see.
-        const appLLMForMH = previewSession.isPreviewRequest(req) ? null : llmService;
-        if (appLLMForMH && req.user) {
-            (async () => {
-                try {
-                    const detectionPrompt = course.mentalHealthDetectionPrompt || prompts.DEFAULT_MENTAL_HEALTH_DETECTION_PROMPT;
-                    const convMessages = (conversationContext && conversationContext.conversationMessages) || [];
-                    // convMessages from frontend already includes the current message,
-                    // so only append it if the history is empty (first message in chat)
-                    const allMessages = convMessages.length > 0
-                        ? convMessages
-                        : [{ role: 'user', content: message }];
-
-                    // Trim to last 2 student messages + last bot message
-                    const recentStudentMsgs = allMessages.filter(m => m.role === 'user').slice(-2);
-                    const recentBotMsg = [...allMessages].reverse().find(m => m.role === 'assistant');
-                    const trimmedHistory = [];
-                    if (recentBotMsg) trimmedHistory.push(recentBotMsg);
-                    trimmedHistory.push(...recentStudentMsgs);
-
-                    const result = await appLLMForMH.analyzeMentalHealth(trimmedHistory, detectionPrompt);
-
-                    if (result.concernLevel !== 'no concern') {
-                        await MentalHealthFlag.createMentalHealthFlag(db, {
-                            studentId: req.user.userId,
-                            studentName: req.user.displayName || req.user.username || 'Unknown',
-                            courseId,
-                            unitName,
-                            message,
-                            conversationContext: trimmedHistory,
-                            concernLevel: result.concernLevel,
-                            llmReason: result.reason
-                        });
-                    }
-                } catch (err) {
-                    console.error('Mental health detection error (non-blocking):', err);
-                }
-            })();
-        }
+        startMentalHealthCheck({ req, llmService, course, db, message, conversationContext, courseId, unitName });
 
         // Course is already loaded above for topic mapping; reuse it here for retrieval config.
-
-        // Determine retrieval mode: Course override ? Default : False (default)
-        const isAdditive = course.isAdditiveRetrieval !== undefined && course.isAdditiveRetrieval !== null
-            ? !!course.isAdditiveRetrieval 
-            : false;
-
-        // Build lectureNames filter using published units only, ordered by lectures array
-        const publishedLectureObjs = (course.lectures || []).filter(l => l.isPublished);
-        const publishedLectures = publishedLectureObjs.map(l => l.name);
-        if (!publishedLectures.includes(unitName)) {
+        const scope = resolveRetrievalScope(course, unitName, message);
+        if (!scope) {
             return res.status(400).json({ success: false, message: 'Selected unit is not published or does not exist' });
         }
-
-        let lectureNames = [unitName];
-        if (isAdditive) {
-            const idx = publishedLectures.indexOf(unitName);
-            lectureNames = idx >= 0 ? publishedLectures.slice(0, idx + 1) : [unitName];
-        }
-
-        // Narrow to explicitly-requested units when the message names them
-        // (numbers, ranges, or a unit's display name). Matched against the
-        // full published order (so "unit 4" resolves correctly regardless of
-        // where the student's scope starts), then filtered to the scope
-        // already computed above - this can only shrink that scope, never
-        // expand it, so it can't surface a unit the student isn't authorized
-        // to see.
-        const requestedUnits = detectRequestedUnits(message, publishedLectureObjs, lectureNames, unitName);
-        // A small set of explicit "all of them" phrases ("quiz me on every
-        // unit", "summarize everything so far") also fan out, since that's
-        // the shape of the original #594 incident - a vague request with no
-        // specific unit named, but clearly asking about more than the
-        // current one.
-        const isBroadRequest = !requestedUnits && lectureNames.length > 1 && BROAD_REQUEST_PATTERN.test(message);
-
-        const ragSettings = CourseModel.resolveRagSettings(course);
-
-        // Fan out only when the student actually asked about more than one
-        // unit (explicitly, or via a broad phrase) - NOT just because the
-        // current scope happens to contain several units. An ordinary
-        // single-topic question asked in a later unit under additive mode
-        // must keep using the plain pooled search across its normal scope;
-        // fanning that out too would spread its one relevant unit's slots
-        // across every other in-scope unit for no reason, and could even
-        // drop the current unit's own content if enough earlier units are
-        // also in scope.
-        let searchScope;
-        let searchTopK;
-        let fanOut;
-        if (requestedUnits) {
-            searchScope = requestedUnits;
-            // Raise K to cover every named unit (capped at the app max) so
-            // an explicit "units 1, 2, 3, 4, 5" request doesn't get
-            // truncated back down to whatever the course's configured
-            // Top-K allows.
-            searchTopK = Math.min(CourseModel.MAX_RAG_TOP_K, Math.max(ragSettings.student.topK, requestedUnits.length));
-            fanOut = searchScope.length > 1;
-        } else if (isBroadRequest) {
-            searchScope = lectureNames;
-            // Same reasoning as the explicit-request branch above: a broad
-            // "quiz me on every unit" request fans out across every unit in
-            // scope, so K needs to cover all of them too, or most units get
-            // cut by the course's (often much smaller) default Top-K.
-            searchTopK = Math.min(CourseModel.MAX_RAG_TOP_K, Math.max(ragSettings.student.topK, searchScope.length));
-            fanOut = true;
-        } else {
-            searchScope = lectureNames;
-            searchTopK = ragSettings.student.topK;
-            fanOut = false;
-        }
-
-        // Debug logging to verify retrieval mode and scope
-        console.log(`🔎 [CHAT_RAG] RetrievalMode=${isAdditive ? 'additive' : 'single'} | Course=${courseId} | Unit=${unitName} | LectureNames=${JSON.stringify(lectureNames)} | SearchScope=${JSON.stringify(searchScope)} | FanOut=${fanOut} | TopK=${searchTopK}${requestedUnits ? ' (narrowed by detected unit reference)' : isBroadRequest ? ' (broad request phrase)' : ''}`);
-
-        // Retrieve top chunks from Qdrant.
-        // A single pooled search across multiple units lets whichever unit's
-        // chunks score highest take every slot, starving the others even when
-        // several units are equally relevant. Fan out a bounded search per
-        // unit and merge with a guaranteed per-unit floor instead (same
-        // pattern already used for the Super Course's per-course fan-out) -
-        // but only when fanOut is true (see above); otherwise this is the
-        // same plain pooled search it always was.
-        // When the course de-prioritizes additional materials, search the main
-        // materials (lecture notes, practice questions) first and only fall back
-        // to additional materials if nothing was found there.
-        const runSearch = async (filters) => {
-            if (fanOut) {
-                const byLecture = await qdrant.searchDocumentsByLecture(
-                    message, courseId, searchScope, searchTopK, filters
-                );
-                return QdrantService.mergeBalancedLectureResults(byLecture, searchTopK);
-            }
-            return qdrant.searchDocuments(message, { courseId, lectureNames: searchScope, ...filters }, searchTopK);
-        };
-
-        let searchResults;
-        if (course.additionalMaterialSecondarySearch === true) {
-            searchResults = await runSearch({ excludeAdditionalMaterials: true });
-            if (!Array.isArray(searchResults) || searchResults.length === 0) {
-                console.log('🔎 [CHAT_RAG] No chunks found in main materials; falling back to additional materials');
-                searchResults = await runSearch({ additionalMaterialsOnly: true });
-            }
-        } else {
-            searchResults = await runSearch({});
-        }
-
-        searchResults = normalizeQdrantSearchResults(searchResults);
-
-        // Log summary of results by lecture to validate scope
-        try {
-            const lecturesHit = Array.from(new Set((searchResults || []).map(r => r.lectureName)));
-            console.log(`📚 [CHAT_RAG] Retrieved ${searchResults.length} chunks from lectures: ${lecturesHit.join(', ')}`);
-            // Group by document to see which files contributed
-            const byDoc = {};
-            for (const r of (searchResults || [])) {
-                const docId = r.documentId || 'unknown-doc';
-                if (!byDoc[docId]) {
-                    byDoc[docId] = {
-                        fileName: r.fileName || 'unknown-filename',
-                        lectures: new Set(),
-                        count: 0,
-                        maxScore: 0
-                    };
-                }
-                byDoc[docId].count += 1;
-                byDoc[docId].lectures.add(r.lectureName);
-                if (typeof r.score === 'number' && r.score > byDoc[docId].maxScore) {
-                    byDoc[docId].maxScore = r.score;
-                }
-            }
-            const docKeys = Object.keys(byDoc);
-            console.log(`📄 [CHAT_RAG] Documents contributing (${docKeys.length}):`);
-            for (const k of docKeys) {
-                const info = byDoc[k];
-                const lecturesList = Array.from(info.lectures).join(', ');
-                const scoreStr = info.maxScore ? info.maxScore.toFixed(3) : 'n/a';
-                console.log(`   - ${info.fileName} (id=${k}) | lectures=[${lecturesList}] | chunks=${info.count} | maxScore=${scoreStr}`);
-            }
-        } catch (_) {}
-
-        // Build concise context window with citations
-        const citations = searchResults.map(r => ({
-            lectureName: r.lectureName,
-            fileName: r.fileName,
-            score: r.score
-        }));
-        const contextText = searchResults
-            .map(r => `From ${r.lectureName} (${r.fileName}):\n${r.chunkText}`)
-            .join('\n\n---\n\n');
-
-        // Determine source attribution based on retrieved chunks
-        console.log('🔍 [SOURCE_DEBUG] Retrieved chunks for source analysis:', searchResults.map(r => ({
-            fileName: r.fileName,
-            documentType: r.documentType,
-            type: r.type,
-            lectureName: r.lectureName
-        })));
-
-        let sourceAttribution;
-        try {
-            const sourceDownloadsEnabled = !!(course.quizSettings && course.quizSettings.allowSourceAttributionDownloads);
-            sourceAttribution = await determineSourceAttribution(searchResults, unitName, sourceDownloadsEnabled);
-            console.log('🔍 [SOURCE_DEBUG] Determined source attribution:', sourceAttribution);
-        } catch (error) {
-            console.error('🔍 [SOURCE_DEBUG] Error in source attribution:', error);
-            sourceAttribution = {
-                source: 'GPT',
-                description: 'Generated by AI (error determining source)',
-                unitName: null,
-                documentType: null,
-                downloadsEnabled: false,
-                documents: []
-            };
-        }
+        const { isAdditive, lectureNames, searchScope } = scope;
+        const { searchResults, citations, contextText, sourceAttribution, coverageNote } =
+            await retrieveChatContext({ qdrant, course, courseId, unitName, message, scope });
 
         // The prior conversation, pre-formatted as "Speaker: content" lines
         // ending with the current message - or null on the first turn. Built
@@ -1604,37 +1936,6 @@ router.post('/', async (req, res) => {
             conversationHistory += `Student: ${message}`;
             historyText = conversationHistory;
         }
-
-        // Ground the model in exactly which in-scope units actually came
-        // back with content, instead of letting it guess (or contradict a
-        // prior turn where the same unit WAS successfully retrieved - see
-        // issue #594's "within-conversation self-contradiction" finding).
-        //
-        // missingUnits is only computed for requestedUnits/isBroadRequest:
-        // on the ordinary pooled path, searchScope is just the student's
-        // normal additive scope (e.g. every unit up to their current one),
-        // most of which was never asked about and was always going to lose
-        // out to the current unit's own content at a small Top-K. Reporting
-        // all of that as "no material" (e.g. "additive mode, student in
-        // Unit 8, K=3" reporting Units 1-7 as having no content) is actively
-        // misleading - those units simply weren't part of this question.
-        const coveredUnits = Array.from(new Set(searchResults.map(r => r.lectureName).filter(Boolean)));
-        const missingUnits = (requestedUnits || isBroadRequest)
-            ? searchScope.filter(u => !coveredUnits.includes(u))
-            : [];
-        const missingUnitsSentence = missingUnits.length === 0
-            ? ''
-            : requestedUnits
-                // The student named these units directly, so a genuine gap is
-                // worth surfacing plainly.
-                ? ` No material was retrieved for: ${missingUnits.join(', ')} — if the student's question touches these, say so clearly by naming them, and suggest asking about them one at a time or narrowing the request. Never ask the student to upload, share, or provide course materials themselves; only an instructor can add material to the course.`
-                // Broad requests already raise Top-K to cover the whole scope,
-                // so anything still missing is a capacity cut, not a real
-                // content gap - phrase it that way rather than "no material".
-                : ` ${missingUnits.join(', ')} were not included in this answer due to space — if the student's question touches these, say so clearly by naming them, and suggest asking about them one at a time or narrowing the request. Never ask the student to upload, share, or provide course materials themselves; only an instructor can add material to the course.`;
-        const coverageNote = coveredUnits.length > 0
-            ? `The course context below only includes material from: ${coveredUnits.join(', ')}.` + missingUnitsSentence
-            : `No course material was retrieved for this question. Say so clearly, and suggest the student narrow or rephrase their question. Never ask the student to upload, share, or provide course materials themselves; only an instructor can add material to the course.`;
 
         // Build the message to send to LLM
         let messageToSend;
@@ -1676,23 +1977,13 @@ ${userTurn}`;
         }
 
         // Retrieve custom prompts from course object or use defaults
-        let basePrompt = prompts.DEFAULT_PROMPTS.base;
-        let protegePrompt = prompts.DEFAULT_PROMPTS.protege;
-        let tutorPrompt = prompts.DEFAULT_PROMPTS.tutor;
-        let explainPrompt = prompts.DEFAULT_PROMPTS.explain;
-        let directivePrompt = prompts.DEFAULT_PROMPTS.directive;
-
-        // Check if course has custom prompts
-        if (course.prompts) {
-            console.log('📝 [CHAT_API] Using course-specific prompts');
-            if (course.prompts.base) basePrompt = course.prompts.base;
-            if (course.prompts.protege) protegePrompt = course.prompts.protege;
-            if (course.prompts.tutor) tutorPrompt = course.prompts.tutor;
-            if (course.prompts.explain) explainPrompt = course.prompts.explain;
-            if (course.prompts.directive) directivePrompt = course.prompts.directive;
-        } else {
-            console.log('[CHAT_API] Using default prompts');
-        }
+        let {
+            base: basePrompt,
+            protege: protegePrompt,
+            tutor: tutorPrompt,
+            explain: explainPrompt,
+            directive: directivePrompt
+        } = resolveCoursePrompts(course);
 
         // Apply Directive Mode adjustments if active
         // Apply Directive Mode adjustments if active
@@ -1707,36 +1998,7 @@ ${userTurn}`;
             console.log(' [CHAT_API] Appended Directive Mode instructions (Header + Strategy) to TUTOR prompt');
         }
 
-        // Inject the unit's learning objectives directly into the prompt.
-        // We read them deterministically per in-scope unit (single unit, or the
-        // additive set when additive retrieval is on) so the objectives always
-        // match the content the bot can actually retrieve — no keyword/vector
-        // matching. They are appended to basePrompt so every mode (protege/"bot"
-        // and tutor/explain/"student") sees them.
-        try {
-            const objectiveSections = [];
-            for (const ln of lectureNames) {
-                const objectives = await CourseModel.getLearningObjectives(db, courseId, ln);
-                if (!objectives || objectives.length === 0) continue;
-
-                // Shuffle so the model is not positionally biased toward the
-                // first-listed objective; the instruction below also tells it to
-                // treat them as an equally-weighted set.
-                const shuffled = [...objectives].sort(() => Math.random() - 0.5);
-                const list = shuffled.map((o, i) => `${i + 1}. ${o}`).join('\n');
-                objectiveSections.push(`Learning objectives for ${ln}:\n${list}`);
-            }
-
-            if (objectiveSections.length > 0) {
-                basePrompt += `\n\nLEARNING OBJECTIVES (the complete set of goals for the in-scope unit(s); treat every objective as equally important — do not fixate on or default to a single one, and cover the breadth of topics they span):\n\n${objectiveSections.join('\n\n')}`;
-                console.log(`🎯 [CHAT_API] Injected learning objectives for unit(s): ${lectureNames.join(', ')}`);
-            } else {
-                console.log('🎯 [CHAT_API] No learning objectives found for in-scope unit(s)');
-            }
-        } catch (err) {
-            console.error('🎯 [CHAT_API] Error injecting learning objectives:', err);
-            // Non-fatal: continue without injected objectives.
-        }
+        basePrompt = await appendLearningObjectives(db, courseId, lectureNames, basePrompt);
 
         // Check for summary attempt via LLM if requested
         let shouldAppendReprompt = false;
@@ -1869,27 +2131,7 @@ ${userTurn}`;
         if (sendLlmKeyError(res, error)) return;
         console.error('❌ Error in chat endpoint:', error);
 
-        // Provide user-friendly error messages
-        let errorMessage = 'Sorry, I encountered an error processing your message.';
-        let statusCode = 500;
-
-        if (error.message.includes('OLLAMA_ENDPOINT')) {
-            errorMessage = 'Ollama service is not available. Please check if Ollama is running.';
-            statusCode = 503;
-        } else if (error.message.includes('API key')) {
-            errorMessage = 'Authentication error. Please check your API configuration.';
-            statusCode = 401;
-        } else if (error.message.includes('endpoint')) {
-            errorMessage = 'Service endpoint is not reachable. Please check your configuration.';
-            statusCode = 503;
-        }
-
-        res.status(statusCode).json({
-            success: false,
-            message: errorMessage,
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
-            timestamp: new Date().toISOString()
-        });
+        sendChatError(res, error);
     }
 });
 

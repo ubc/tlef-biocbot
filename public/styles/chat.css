@@ -866,6 +866,13 @@
     margin-right: 0;
 }
 
+.typing-indicator .typing-status {
+    margin-left: 12px;
+    font-size: 0.9em;
+    font-style: italic;
+    color: #5f5f5f;
+}
+
 @keyframes typing-animation {
 
     0%,

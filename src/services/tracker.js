@@ -11,6 +11,70 @@ class TrackerService {
     }
 
     /**
+     * The instructions for the struggle check, without the student's message.
+     * The old chat path appends the message to this; the agent path sends this
+     * as the tracker agent's system prompt and the message as JSON.
+     * @param {string} courseId
+     * @param {string} unitName
+     * @param {Array<string>} approvedTopics - Already-cleaned approved topics
+     * @returns {string}
+     */
+    static buildAnalysisPrompt(courseId, unitName, approvedTopics = []) {
+        return `You are analyzing student struggle in a biochemistry chat.
+
+Context: Course ${courseId}, Unit ${unitName}
+Approved Course Topics:
+${approvedTopics.length > 0 ? approvedTopics.map((topic, index) => `${index + 1}. ${topic}`).join('\n') : 'No approved topics configured'}
+
+Tasks:
+1. Detect if the student is struggling (confusion, frustration, or explicit lack of understanding).
+2. Identify the raw topic from the student's language.
+3. Map that raw topic to the closest approved topic using semantic similarity.
+4. If no approved topic is a reasonable semantic match, use "unmapped".
+5. Return JSON only.
+
+Output JSON schema:
+{
+  "isStruggling": boolean,
+  "rawTopic": "string",
+  "mappedTopic": "string (must be one approved topic or 'unmapped')",
+  "matchConfidence": "number 0-1",
+  "reason": "string"
+}
+
+Rules:
+- Never invent a mapped topic outside the approved list.
+- If semantic match confidence is below 0.55, use "unmapped".
+- If message is not a struggle, mappedTopic should still be "unmapped" unless there is a clear mapped struggle topic.`;
+    }
+
+    /**
+     * Turn the model's parsed answer into the analysis the route uses: a topic
+     * counts only if it is on the approved list with enough confidence.
+     * @param {Object} result - The parsed JSON from the model
+     * @param {Array<string>} approvedTopics - Already-cleaned approved topics
+     * @returns {Object} { topic, rawTopic, isMapped, matchConfidence, isStruggling, reason }
+     */
+    static normalizeAnalysis(result, approvedTopics = []) {
+        const mappedTopic = typeof result.mappedTopic === 'string' ? result.mappedTopic.trim() : '';
+        const approvedTopicMap = new Map(
+            approvedTopics.map((topic) => [topic.toLowerCase(), topic])
+        );
+        const matchedApprovedTopic = approvedTopicMap.get(mappedTopic.toLowerCase()) || '';
+        const matchConfidence = typeof result.matchConfidence === 'number' ? result.matchConfidence : 0;
+        const isMapped = !!matchedApprovedTopic && matchConfidence >= 0.55;
+
+        return {
+            topic: isMapped ? matchedApprovedTopic : 'unmapped',
+            rawTopic: result.rawTopic || '',
+            isMapped,
+            matchConfidence,
+            isStruggling: result.isStruggling || false,
+            reason: result.reason || ''
+        };
+    }
+
+    /**
      * Analyze a student message for struggle and topic
      * @param {string} message - The student's message
      * @param {string} courseId - Course context
@@ -73,23 +137,7 @@ Rules:
             const content = (jsonStart !== -1 && jsonEnd > 0) ? rawContent.substring(jsonStart, jsonEnd) : rawContent;
             const result = JSON.parse(content);
             
-            const mappedTopic = typeof result.mappedTopic === 'string' ? result.mappedTopic.trim() : '';
-            const approvedTopicMap = new Map(
-                cleanApprovedTopics.map((topic) => [topic.toLowerCase(), topic])
-            );
-            const normalizedMappedTopic = mappedTopic.toLowerCase();
-            const matchedApprovedTopic = approvedTopicMap.get(normalizedMappedTopic) || '';
-            const matchConfidence = typeof result.matchConfidence === 'number' ? result.matchConfidence : 0;
-            const isMapped = !!matchedApprovedTopic && matchConfidence >= 0.55;
-
-            return {
-                topic: isMapped ? matchedApprovedTopic : 'unmapped',
-                rawTopic: result.rawTopic || '',
-                isMapped,
-                matchConfidence,
-                isStruggling: result.isStruggling || false,
-                reason: result.reason || ''
-            };
+            return TrackerService.normalizeAnalysis(result, cleanApprovedTopics);
 
         } catch (error) {
             console.error('❌ [TRACKER] Error analyzing message:', error);

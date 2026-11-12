@@ -391,7 +391,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             const fetchOptions = {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    // The agent path streams progress when asked; the old
+                    // path ignores this and answers with JSON as before.
+                    'Accept': 'text/event-stream, application/json'
                 },
                 body: JSON.stringify(requestBody)
             };
@@ -402,14 +405,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             const response = await fetch('/api/chat', fetchOptions);
 
-
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+            let status = response.status;
+            let data;
+            // A response with no headers (a test's fake fetch) reads as JSON.
+            if ((response.headers?.get?.('Content-Type') || '').includes('text/event-stream')) {
+                const result = await readChatProgressStream(response, update => setTypingStatus(update && update.status));
+                status = result.status;
+                data = result.body || {};
+            } else {
+                data = await response.json();
             }
 
-            const data = await response.json();
+            if (status < 200 || status >= 300) {
+                throw new Error(data.message || `HTTP error! status: ${status}`);
+            }
 
             if (!data.success) {
                 throw new Error(data.message || 'Failed to get response from LLM');
@@ -1257,6 +1266,69 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (sendButton) sendButton.disabled = true;
 
         // Scroll to bottom
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    /**
+     * Read a chat response sent as server-sent events: "progress" events while
+     * the agents run, then one "result" event with the response's status and
+     * body.
+     * @param {Response} response
+     * @param {(update: { step: string, label: string, status: string }) => void} onProgress
+     * @returns {Promise<{ status: number, body: Object }>}
+     */
+    async function readChatProgressStream(response, onProgress) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let result = null;
+        const handleFrame = frame => {
+            let event = 'message';
+            let data = '';
+            frame.split('\n').forEach(line => {
+                if (line.startsWith('event:')) event = line.slice(6).trim();
+                else if (line.startsWith('data:')) data += line.slice(5).trim();
+            });
+            if (!data) return;
+            const payload = JSON.parse(data);
+            if (event === 'progress') {
+                try { onProgress(payload); } catch (error) { console.warn('Could not show chat progress:', error); }
+            } else if (event === 'result') {
+                result = payload;
+            }
+        };
+        for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let boundary;
+            while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+                handleFrame(buffer.slice(0, boundary));
+                buffer = buffer.slice(boundary + 2);
+            }
+        }
+        if (buffer.trim()) handleFrame(buffer);
+        if (!result) throw new Error('The chat response ended before the reply arrived.');
+        return result;
+    }
+
+    /**
+     * Show what BiocBot is doing beside the typing dots, such as "BiocBot is
+     * finding relevant course materials".
+     * @param {string} text
+     */
+    function setTypingStatus(text) {
+        const typingIndicator = document.getElementById('typing-indicator');
+        if (!typingIndicator || !text) return;
+        let statusEl = typingIndicator.querySelector('.typing-status');
+        if (!statusEl) {
+            statusEl = document.createElement('div');
+            statusEl.classList.add('typing-status');
+            statusEl.setAttribute('role', 'status');
+            statusEl.setAttribute('aria-live', 'polite');
+            typingIndicator.appendChild(statusEl);
+        }
+        statusEl.textContent = text;
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
