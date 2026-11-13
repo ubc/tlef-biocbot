@@ -2687,8 +2687,8 @@ function renderApprovedGlobalTopics(topics, courseId) {
     // Build editable chips
     const chips = cleanTopics.map((topicEntry, index) => {
         const unitBadge = topicEntry.unitId
-            ? `<span class="topic-unit-badge mapped">${escapeHtml(topicEntry.unitId)}</span>`
-            : '<span class="topic-unit-badge unassigned">Unassigned</span>';
+            ? `<button type="button" class="topic-unit-badge-btn mapped" title="Click to reassign this topic's unit">${escapeHtml(topicEntry.unitId)}</button>`
+            : '<button type="button" class="topic-unit-badge-btn unassigned" title="Click to assign this topic to a unit">Unassigned</button>';
 
         return `
         <span class="approved-topic-chip" data-index="${index}" data-topic="${escapeHtml(topicEntry.topic)}">
@@ -2726,6 +2726,14 @@ function renderApprovedGlobalTopics(topics, courseId) {
             <span class="approved-topics-hint">Double-click a topic to edit it</span>
         </div>
     `;
+
+    container.querySelectorAll('.topic-unit-badge-btn').forEach((badgeBtn) => {
+        badgeBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const topic = badgeBtn.closest('.approved-topic-chip')?.dataset.topic;
+            if (topic) openTopicUnitAssignmentModal(topic);
+        });
+    });
 
     const newTopicUnitSelect = container.querySelector('#new-topic-unit-select');
     if (newTopicUnitSelect) {
@@ -3110,9 +3118,7 @@ function ensureTopicUnitAssignmentModal() {
             </div>
             <div class="topic-unit-modal-body">
                 <p class="topic-unit-modal-topic" id="topic-unit-modal-topic"></p>
-                <label for="topic-unit-select">Unit</label>
-                <select id="topic-unit-select" class="topic-unit-select"></select>
-                <p class="topic-unit-modal-hint">This uses the stable unit name, such as Unit 1, not the renamed display title.</p>
+                <select id="topic-unit-select" class="topic-unit-select" aria-label="Unit"></select>
             </div>
             <div class="topic-unit-modal-actions">
                 <button type="button" class="approved-topic-add-btn secondary" id="topic-unit-cancel-btn">Cancel</button>
