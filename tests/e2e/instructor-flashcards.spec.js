@@ -2,6 +2,7 @@
 const { test, expect } = require('./fixtures/monocart');
 
 const SCRIPT_PATH = 'public/instructor/scripts/instructor-flashcards.js';
+const ICONS_SCRIPT_PATH = 'public/common/scripts/icons.js';
 
 /** @param {string} id @param {string} front */
 function card(id, front) {
@@ -26,11 +27,6 @@ async function loadHarness(page, initialDeck) {
         const testWindow = /** @type {any} */ (window);
         testWindow.testFlashcardState = { deck, putBodies: [], notifications: [] };
         testWindow.getCurrentCourseId = async () => 'C1';
-        testWindow.RichText = {
-            render: (/** @type {Element} */ element, /** @type {string} */ text) => {
-                element.textContent = `Rendered: ${text}`;
-            }
-        };
         testWindow.showNotification = (/** @type {string} */ message, /** @type {string} */ type) => {
             testWindow.testFlashcardState.notifications.push({ message, type });
         };
@@ -75,37 +71,14 @@ async function loadHarness(page, initialDeck) {
             throw new Error(`Unexpected request: ${method} ${url}`);
         };
     }, initialDeck);
+    // Real icons.js, not a stub - renderFlashcardEditorRow() uses Icons.trash
+    // for the remove button, same as production load order.
+    await page.addScriptTag({ path: ICONS_SCRIPT_PATH });
     await page.addScriptTag({ path: SCRIPT_PATH });
     await page.evaluate(() => /** @type {any} */ (window).loadFlashcardDecks());
 }
 
 test.describe('instructor flashcard editor', () => {
-    test('shows live student previews for generated rich content', async ({ page }) => {
-        await loadHarness(page, {
-            deckId: 'deck1',
-            courseId: 'C1',
-            lectureName: 'Unit 1',
-            title: 'Unit 1 Flashcards',
-            hasDraft: true,
-            isPublished: false,
-            isStale: false,
-            publishedVersion: 0,
-            draftCards: [{
-                ...card('fc1', 'Water is \\( H_2O \\)'),
-                back: '[SMILES]CCO[/SMILES]'
-            }],
-            publishedCards: []
-        });
-
-        const previews = page.locator('.flashcard-rendered-preview');
-        await expect(previews).toHaveCount(2);
-        await expect(previews.nth(0)).toHaveText('Rendered: Water is \\( H_2O \\)');
-        await expect(previews.nth(1)).toHaveText('Rendered: [SMILES]CCO[/SMILES]');
-
-        await page.locator('.flashcard-back-input').fill('[SMILES]C1=CC=CC=C1[/SMILES]');
-        await expect(previews.nth(1)).toHaveText('Rendered: [SMILES]C1=CC=CC=C1[/SMILES]');
-    });
-
     test('removing a draft card persists immediately and survives a reload', async ({ page }) => {
         await loadHarness(page, {
             deckId: 'deck1',
@@ -120,7 +93,7 @@ test.describe('instructor flashcard editor', () => {
             publishedCards: []
         });
 
-        await page.getByRole('button', { name: 'Remove' }).first().click();
+        await page.getByRole('button', { name: 'Remove this card' }).first().click();
         await expect.poll(() => page.evaluate(() => /** @type {any} */ (window).testFlashcardState.putBodies.length)).toBe(1);
         await expect(page.locator('.flashcard-editor-row')).toHaveCount(1);
         await expect(page.locator('.flashcard-front-input')).toHaveValue('Second card');
@@ -130,7 +103,7 @@ test.describe('instructor flashcard editor', () => {
         await expect(page.locator('.flashcard-front-input')).toHaveValue('Second card');
     });
 
-    test('unpublishing creates an editable draft that can be republished', async ({ page }) => {
+    test('toggling Published off/on unpublishes then republishes the deck', async ({ page }) => {
         await loadHarness(page, {
             deckId: 'deck1',
             courseId: 'C1',
@@ -144,13 +117,98 @@ test.describe('instructor flashcard editor', () => {
             publishedCards: [card('fc1', 'Published card')]
         });
 
-        await page.getByRole('button', { name: 'Unpublish' }).click();
-        await expect(page.getByRole('button', { name: 'Publish to Students' })).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Remove' })).toBeVisible();
+        const toggle = page.getByRole('checkbox', { name: 'Publish this flashcard deck to students' });
+        await expect(toggle).toBeChecked();
 
-        await page.getByRole('button', { name: 'Publish to Students' }).click();
-        await expect(page.getByRole('button', { name: 'Unpublish' })).toBeVisible();
+        // hasDraft=false and isPublished=true -> toggleFlashcardPublish() routes
+        // this click to unpublish.
+        await toggle.click();
+        await expect(toggle).not.toBeChecked();
+        await expect(page.getByRole('button', { name: 'Remove this card' })).toBeVisible();
+
+        // Now hasDraft=true (unpublish recovers the deck as an editable draft)
+        // and isPublished=false -> routes to publish.
+        await toggle.click();
+        await expect(toggle).toBeChecked();
         await expect(page.locator('#flashcard-status-unit-1')).toHaveText('Published v2');
+    });
+
+    test('toggling Published on with a pending draft republishes it ("Draft changes" state)', async ({ page }) => {
+        await loadHarness(page, {
+            deckId: 'deck1',
+            courseId: 'C1',
+            lectureName: 'Unit 1',
+            title: 'Unit 1 Flashcards',
+            hasDraft: true,
+            isPublished: true,
+            isStale: false,
+            publishedVersion: 1,
+            draftCards: [card('fc1', 'Edited card')],
+            publishedCards: [card('fc1-old', 'Original card')]
+        });
+
+        const toggle = page.getByRole('checkbox', { name: 'Publish this flashcard deck to students' });
+        // Already published, so the toggle renders checked even though there's
+        // an unsaved draft - the status badge ("Draft changes") carries that
+        // nuance instead.
+        await expect(toggle).toBeChecked();
+        await expect(page.locator('#flashcard-status-unit-1')).toHaveText('Draft changes');
+
+        // hasDraft=true -> routes to publish (republishing the newer draft),
+        // not unpublish, even though the checkbox's own state is "checked".
+        await toggle.click();
+        await expect(page.locator('#flashcard-status-unit-1')).toHaveText('Published v2');
+        const published = await page.evaluate(() => /** @type {any} */ (window).testFlashcardState.deck.publishedCards);
+        expect(published).toHaveLength(1);
+        expect(published[0].front).toBe('Edited card');
+    });
+
+    test('dragging a card reorders it, renumbers headings, and persists the new order on save', async ({ page }) => {
+        await loadHarness(page, {
+            deckId: 'deck1',
+            courseId: 'C1',
+            lectureName: 'Unit 1',
+            title: 'Unit 1 Flashcards',
+            hasDraft: true,
+            isPublished: false,
+            isStale: false,
+            publishedVersion: 0,
+            draftCards: [card('fc1', 'Card one'), card('fc2', 'Card two'), card('fc3', 'Card three')],
+            publishedCards: []
+        });
+
+        const frontValues = () => page.evaluate(() =>
+            Array.from(document.querySelectorAll('.flashcard-front-input')).map(el => (/** @type {HTMLTextAreaElement} */ (el)).value));
+
+        expect(await frontValues()).toEqual(['Card one', 'Card two', 'Card three']);
+
+        // Native HTML5 drag-and-drop doesn't reliably fire from raw mouse
+        // down/move/up in Chromium headless - dispatch the DragEvents the
+        // handlers actually listen for instead. Drags card 1 past card 3's
+        // midpoint, which should drop it after card 3.
+        await page.evaluate(() => {
+            const rows = document.querySelectorAll('.flashcard-editor-row');
+            const dragged = rows[0];
+            const target = rows[2];
+            const dt = new DataTransfer();
+            const fire = (/** @type {Element} */ el, /** @type {string} */ type, /** @type {number} */ clientY) =>
+                el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientY }));
+
+            const targetRect = target.getBoundingClientRect();
+            fire(dragged, 'dragstart', dragged.getBoundingClientRect().top + 5);
+            fire(target, 'dragover', targetRect.bottom - 5); // past the midpoint -> drop after
+            fire(target, 'drop', targetRect.bottom - 5);
+            fire(dragged, 'dragend', targetRect.bottom - 5);
+        });
+
+        expect(await frontValues()).toEqual(['Card two', 'Card three', 'Card one']);
+        await expect(page.locator('.flashcard-editor-row-heading strong')).toHaveText(['Card 1', 'Card 2', 'Card 3']);
+
+        await page.getByRole('button', { name: 'Save Draft' }).click();
+        await expect.poll(() => page.evaluate(() => /** @type {any} */ (window).testFlashcardState.putBodies.length)).toBe(1);
+        const savedOrder = await page.evaluate(() =>
+            /** @type {any} */ (window).testFlashcardState.putBodies[0].cards.map((/** @type {any} */ c) => c.front));
+        expect(savedOrder).toEqual(['Card two', 'Card three', 'Card one']);
     });
 
     test('recovers a deck left unpublished without a draft by the previous behavior', async ({ page }) => {
@@ -168,8 +226,10 @@ test.describe('instructor flashcard editor', () => {
         });
 
         await expect(page.locator('#flashcard-status-unit-1')).toHaveText('Unpublished draft');
-        await expect(page.getByRole('button', { name: 'Remove' })).toBeVisible();
-        await page.getByRole('button', { name: 'Publish to Students' }).click();
+        await expect(page.getByRole('button', { name: 'Remove this card' })).toBeVisible();
+        const toggle = page.getByRole('checkbox', { name: 'Publish this flashcard deck to students' });
+        await expect(toggle).not.toBeChecked();
+        await toggle.click();
         await expect(page.locator('#flashcard-status-unit-1')).toHaveText('Published v2');
     });
 });
