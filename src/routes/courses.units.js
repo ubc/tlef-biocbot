@@ -9,6 +9,11 @@ const DocumentModel = require('../models/Document');
 const { deleteDocumentFromAllCollections } = require('../services/embeddingIndexService');
 const qdrantMaintenance = require('../services/qdrantMaintenance');
 const { hasCourseManagementAccess } = require('./courses.shared');
+const { createId } = require('../services/id');
+
+function deepClone(value) {
+    return JSON.parse(JSON.stringify(value));
+}
 
 /**
  * POST /api/courses/:courseId/units
@@ -121,6 +126,148 @@ router.post('/:courseId/units', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Internal server error while adding new unit'
+        });
+    }
+});
+
+/**
+ * POST /api/courses/:courseId/units/:unitName/duplicate
+ * Create a new unit seeded from an existing unit's learning objectives,
+ * pass threshold, and assessment questions (#693). Documents/materials are
+ * deliberately NOT copied - they're real uploaded file bytes with a matching
+ * Qdrant vector index, not "settings", and duplicating them would require
+ * re-embedding. Assessment questions get fresh questionIds so the two units
+ * don't share identifiers.
+ */
+router.post('/:courseId/units/:unitName/duplicate', async (req, res) => {
+    try {
+        const { courseId, unitName } = req.params;
+        // insertAfterUnitName: name of the unit the duplicate should be placed
+        // directly after, '' to place it first, or omitted to place it last.
+        const { instructorId, insertAfterUnitName } = req.body;
+
+        if (!instructorId) {
+            return res.status(400).json({
+                success: false,
+                message: 'instructorId is required'
+            });
+        }
+
+        const db = req.app.locals.db;
+        if (!db) {
+            return res.status(503).json({
+                success: false,
+                message: 'Database connection not available'
+            });
+        }
+
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Authentication required' });
+        }
+
+        if (user.role === 'instructor' && instructorId !== user.userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have permission to modify this course'
+            });
+        }
+
+        const { hasPermission } = require('../services/permissions');
+        const hasAccess = await hasPermission(db, user, courseId, 'materials');
+        if (!hasAccess) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have permission to modify this course'
+            });
+        }
+
+        const collection = db.collection('courses');
+        const course = await collection.findOne({ courseId });
+
+        if (!course) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        const existingUnits = course.lectures || [];
+        const sourceUnit = existingUnits.find(lecture => lecture.name === unitName);
+        if (!sourceUnit) {
+            return res.status(404).json({
+                success: false,
+                message: `Unit "${unitName}" not found`
+            });
+        }
+
+        // The unit's "name" field doubles as its display label whenever no
+        // custom displayName is set (see formatUnitLabel), so instructors see
+        // this exact string. It also has to stay unique - lectures.name is
+        // how every other route looks a unit up - so append a counter if
+        // "Duplicate of X" is already taken (e.g. duplicating the same unit
+        // twice, or duplicating a duplicate).
+        const existingNames = new Set(existingUnits.map(lecture => lecture?.name));
+        const baseNewName = `Duplicate of ${unitName}`;
+        let newUnitName = baseNewName;
+        let suffix = 2;
+        while (existingNames.has(newUnitName)) {
+            newUnitName = `${baseNewName} (${suffix})`;
+            suffix += 1;
+        }
+
+        const now = new Date();
+        const duplicatedQuestions = deepClone(sourceUnit.assessmentQuestions || []).map(question => ({
+            ...question,
+            questionId: createId('q')
+        }));
+        const newUnit = {
+            name: newUnitName,
+            isPublished: false,
+            learningObjectives: deepClone(sourceUnit.learningObjectives || []),
+            passThreshold: typeof sourceUnit.passThreshold === 'number' ? sourceUnit.passThreshold : 2,
+            createdAt: now,
+            updatedAt: now,
+            documents: [],
+            assessmentQuestions: duplicatedQuestions
+        };
+
+        // Work out where in the array the duplicate should land. '' means
+        // "first"; a unit name means "right after that unit"; anything else
+        // (including omitted) falls back to the end.
+        let insertIndex = existingUnits.length;
+        if (insertAfterUnitName === '') {
+            insertIndex = 0;
+        } else if (typeof insertAfterUnitName === 'string' && insertAfterUnitName) {
+            const afterIndex = existingUnits.findIndex(lecture => lecture.name === insertAfterUnitName);
+            if (afterIndex !== -1) insertIndex = afterIndex + 1;
+        }
+
+        const newTotalUnits = existingUnits.length + 1;
+        await collection.updateOne(
+            { courseId },
+            {
+                $push: { lectures: { $each: [newUnit], $position: insertIndex } },
+                $set: { 'courseStructure.totalUnits': newTotalUnits, updatedAt: now }
+            }
+        );
+
+        console.log(`Duplicated ${unitName} into ${newUnitName} for course ${courseId} at index ${insertIndex}`);
+
+        res.json({
+            success: true,
+            message: `${newUnitName} created from ${unitName}`,
+            data: {
+                unit: newUnit,
+                totalUnits: newTotalUnits
+            }
+        });
+
+    } catch (error) {
+        console.error('Error duplicating unit:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while duplicating unit'
         });
     }
 });
