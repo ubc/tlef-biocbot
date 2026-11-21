@@ -24,6 +24,9 @@ const appState = {
 let courseIdCache = null;
 let courseIdPromise = null;
 let redirectInProgress = false;
+
+// Batch resolve (#692): flagIds currently checked for a batch approve/dismiss action.
+const selectedFlagIds = new Set();
 const SUPER_COURSE_FLAG_COURSE_ID = 'SUPER_COURSE';
 
 // superchatId -> bucket name, for labeling super-course flags by their bucket.
@@ -563,6 +566,20 @@ function initializeEventListeners() {
     if (refreshButton) {
         refreshButton.addEventListener('click', handleRefresh);
     }
+
+    // Batch resolve controls (#692)
+    const selectAllFlags = document.getElementById('batch-select-all-flags');
+    if (selectAllFlags) {
+        selectAllFlags.addEventListener('change', () => handleSelectAllFlagsChange(selectAllFlags.checked));
+    }
+    const batchApproveBtn = document.getElementById('batch-approve-flags');
+    if (batchApproveBtn) {
+        batchApproveBtn.addEventListener('click', batchApproveSelectedFlags);
+    }
+    const batchCancelBtn = document.getElementById('batch-cancel-selection');
+    if (batchCancelBtn) {
+        batchCancelBtn.addEventListener('click', cancelFlagSelection);
+    }
 }
 
 function addKeyboardPickerActivation(selectElement) {
@@ -821,6 +838,111 @@ function renderFlaggedContent() {
         const flagElement = createFlagElement(flag);
         flaggedList.appendChild(flagElement);
     });
+
+    updateBatchControlsUI();
+}
+
+/**
+ * Batch resolve (#692): selection + "select all" + Approve/Dismiss Selected.
+ */
+function toggleFlagSelection(flagId, checked) {
+    if (checked) {
+        selectedFlagIds.add(flagId);
+    } else {
+        selectedFlagIds.delete(flagId);
+    }
+    updateBatchControlsUI();
+}
+
+function getVisibleSelectedFlagIds() {
+    return Array.from(document.querySelectorAll('.flag-select-checkbox:checked'))
+        .map(checkbox => checkbox.dataset.flagId);
+}
+
+function updateBatchControlsUI() {
+    const checkboxes = Array.from(document.querySelectorAll('.flag-select-checkbox'));
+    const checkedCount = checkboxes.filter(checkbox => checkbox.checked).length;
+
+    const countEl = document.getElementById('batch-selection-count');
+    if (countEl) countEl.textContent = `${checkedCount} selected`;
+
+    const approveBtn = document.getElementById('batch-approve-flags');
+    const cancelBtn = document.getElementById('batch-cancel-selection');
+    if (approveBtn) approveBtn.disabled = checkedCount === 0;
+    if (cancelBtn) cancelBtn.disabled = checkedCount === 0;
+
+    const selectAll = document.getElementById('batch-select-all-flags');
+    if (selectAll) {
+        selectAll.checked = checkboxes.length > 0 && checkedCount === checkboxes.length;
+        selectAll.indeterminate = checkedCount > 0 && checkedCount < checkboxes.length;
+    }
+}
+
+function handleSelectAllFlagsChange(checked) {
+    document.querySelectorAll('.flag-select-checkbox').forEach(checkbox => {
+        checkbox.checked = checked;
+        if (checked) {
+            selectedFlagIds.add(checkbox.dataset.flagId);
+        } else {
+            selectedFlagIds.delete(checkbox.dataset.flagId);
+        }
+    });
+    updateBatchControlsUI();
+}
+
+// Clears the current batch selection without touching any flag (#692: the
+// "Cancel" button next to Approve Selected is just a clear-selection action,
+// not a batch dismiss - dismissing stays a per-flag action on each card).
+function cancelFlagSelection() {
+    selectedFlagIds.clear();
+    document.querySelectorAll('.flag-select-checkbox').forEach(checkbox => {
+        checkbox.checked = false;
+    });
+    updateBatchControlsUI();
+}
+
+// Approves and resolves every selected flag (no reply message is sent -
+// that's still only available per-flag via Approve & Reply).
+async function batchApproveSelectedFlags() {
+    const flagIds = getVisibleSelectedFlagIds();
+    if (flagIds.length === 0) return;
+
+    const confirmed = confirm(`Approve ${flagIds.length} selected flag${flagIds.length === 1 ? '' : 's'}?`);
+    if (!confirmed) return;
+
+    const approveBtn = document.getElementById('batch-approve-flags');
+    const cancelBtn = document.getElementById('batch-cancel-selection');
+    if (approveBtn) approveBtn.disabled = true;
+    if (cancelBtn) cancelBtn.disabled = true;
+
+    const instructorId = getCurrentInstructorId();
+
+    const results = await Promise.allSettled(flagIds.map(flagId =>
+        fetch(`/api/flags/${flagId}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'resolved', instructorId })
+        }).then(response => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json();
+        })
+    ));
+
+    const succeeded = results.filter(result => result.status === 'fulfilled').length;
+    const failed = results.length - succeeded;
+
+    flagIds.forEach(flagId => selectedFlagIds.delete(flagId));
+
+    if (failed === 0) {
+        showSuccessMessage(`${succeeded} flag${succeeded === 1 ? '' : 's'} approved.`);
+    } else if (succeeded === 0) {
+        showErrorMessage('Failed to approve the selected flags. Please try again.');
+    } else {
+        showErrorMessage(`${succeeded} approved, ${failed} failed. Please retry the failed ones.`);
+    }
+
+    loadFlagStats();
+    await loadFlaggedContent();
 }
 
 /**
@@ -862,6 +984,10 @@ function createFlagElement(flag) {
     let headerHtml = `
         <div class="flag-card-header">
             <div class="flag-header-left">
+                <input type="checkbox" class="flag-select-checkbox" data-flag-id="${flag.flagId}"
+                       aria-label="Select this flag for a batch action"
+                       ${selectedFlagIds.has(flag.flagId) ? 'checked' : ''}
+                       onchange="toggleFlagSelection('${flag.flagId}', this.checked)">
                 <span class="flag-type-badge ${flag.flagReason}">${flagReasonDisplay}</span>
                 <span class="flag-priority-badge ${flag.priority || 'medium'}">priority: ${flag.priority || 'medium'}</span>
             </div>
