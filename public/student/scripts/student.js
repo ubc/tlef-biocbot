@@ -1193,7 +1193,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // Only show "I understand X now" button when directive mode is active for this response
                 const showStruggleReset = response.struggleDebug?.directiveModeActive ? lastActiveStruggleTopic : null;
-                addMessage(response.message, 'bot', true, false, response.sourceAttribution, false, showStruggleReset, detectedTopic, response.messageId);
+                addMessage(response.message, 'bot', true, false, response.sourceAttribution, false, showStruggleReset, detectedTopic, response.messageId, null, { animate: true });
                 if (typeof maybeShowChatSurvey === 'function') {
                     maybeShowChatSurvey();
                 }
@@ -1281,6 +1281,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Initialize Chat Limit Modal
     initializeChatLimitModal();
+
+    // Floating "scroll to latest message" button, shown once a student
+    // scrolls away from the bottom of the chat history.
+    const chatMessagesEl = document.getElementById('chat-messages');
+    const scrollToBottomBtn = document.getElementById('scroll-to-bottom-btn');
+    if (chatMessagesEl && scrollToBottomBtn && typeof window.initChatScrollAffordance === 'function') {
+        window.chatScrollAffordance = window.initChatScrollAffordance(chatMessagesEl, scrollToBottomBtn);
+    }
 
     // Expose functions to global scope for helper actions
     window.sendMessageToLLM = sendMessageToLLM;

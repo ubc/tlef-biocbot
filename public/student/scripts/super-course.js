@@ -21,6 +21,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const form = document.getElementById('chat-form');
     const input = document.getElementById('chat-input');
     const messages = document.getElementById('chat-messages');
+    const scrollToBottomBtn = document.getElementById('scroll-to-bottom-btn');
+    const chatScrollAffordance = (scrollToBottomBtn && typeof window.initChatScrollAffordance === 'function')
+        ? window.initChatScrollAffordance(messages, scrollToBottomBtn)
+        : null;
     const sendButton = document.getElementById('send-button');
     const newChatButton = document.getElementById('new-super-course-chat');
     const levelSelect = document.getElementById('answer-level');
@@ -192,7 +196,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             typing.remove();
             addMessage(result.message || '', 'bot', {
                 sourceAttribution: result.sourceAttribution,
-                citations: result.citations
+                citations: result.citations,
+                animate: true
             });
             conversationMessages.push({ role: 'assistant', content: result.message || '' });
         } catch (error) {
@@ -276,6 +281,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         message.appendChild(contentWrap);
         messages.appendChild(message);
         messages.scrollTop = messages.scrollHeight;
+
+        // Reveal a freshly-arrived bot answer word-by-word instead of all at once.
+        if (sender === 'bot' && options.animate && typeof window.typeOutText === 'function') {
+            window.typeOutText(text, content, {
+                onStep: () => {
+                    if (!chatScrollAffordance || chatScrollAffordance.isNearBottom()) {
+                        messages.scrollTop = messages.scrollHeight;
+                    }
+                }
+            });
+        }
 
         if (!options.skipAutoSave && !options.isPending && !options.isError) {
             autoSaveMessage(content, sender, {
