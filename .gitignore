@@ -5,6 +5,7 @@
 /node_modules
 /playwright-report
 /playwright-report-a11y
+/playwright-report-screen-reader
 /monocart-report
 /coverage-reports
 /test-results
