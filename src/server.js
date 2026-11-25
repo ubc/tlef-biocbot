@@ -54,7 +54,7 @@ const { createEventReportRoute } = require('./routes/events');
 const { getEvents, serverName } = require('./services/events');
 const { startListeners } = require('./listeners');
 const { getGamification } = require('./services/gamification');
-const { createGamificationRoutes } = require('./routes/gamification');
+const { createGamificationRoutes, createGamificationOffRoutes } = require('./routes/gamification');
 const { createHealthRouter } = require('./routes/health');
 const { createCanvasLmsRouter } = require('./routes/canvasLms');
 const { createLmsGradesRouter } = require('./routes/lmsGrades');
@@ -483,6 +483,12 @@ function setupProtectedRoutes() {
         res.sendFile(path.join(__dirname, '../public/student/flashcards.html'));
     });
 
+    // A student's badges and points (src/routes/gamification.js). Its nav link
+    // shows only where the course has gamification on.
+    app.get('/student/achievements', authMiddleware.requireStudentOrPreview, (req, res) => {
+        res.sendFile(path.join(__dirname, '../public/student/achievements.html'));
+    });
+
     // Student Super Course chat page
     // Super Course spans courses beyond the one being previewed, so it stays
     // outside the preview sandbox; the nav item is hidden in preview too.
@@ -565,6 +571,13 @@ function setupProtectedRoutes() {
 
     app.get('/instructor/settings', authMiddleware.requireInstructorOrTA, redirectTATo('/ta/settings'), (req, res) => {
         res.sendFile(path.join(__dirname, '../public/instructor/settings.html'));
+    });
+
+    // A course's gamification switch and rules (src/routes/gamification.js).
+    // TAs see them read-only. Its nav link shows only while the server runs
+    // gamification.
+    app.get('/instructor/gamification', authMiddleware.requireInstructorOrTA, (req, res) => {
+        res.sendFile(path.join(__dirname, '../public/instructor/gamification.html'));
     });
 
     app.get('/instructor/home', authMiddleware.requireInstructorOrTA, redirectTATo('/ta'), (req, res) => {
@@ -726,8 +739,13 @@ function setupAPIRoutes() {
     if (gamificationRoutes) {
         app.use('/api/gamification', authMiddleware.requireAuth, authMiddleware.populateUser, gamificationRoutes);
         console.log('🏅 [GAMIFICATION] Its routes are at /api/gamification.');
-    } else if (getGamification()) {
-        console.warn('⚠️ [GAMIFICATION] Counting, but @ubc/genai-toolkit-gamification-server is not installed, so there are no routes.');
+    } else {
+        if (getGamification()) {
+            console.warn('⚠️ [GAMIFICATION] Counting, but @ubc/genai-toolkit-gamification-server is not installed, so there are no routes.');
+        }
+        // Pages ask whether a course has gamification (its nav link); they get
+        // a plain "not running" rather than a 404.
+        app.use('/api/gamification', authMiddleware.requireAuth, createGamificationOffRoutes());
     }
 
     // Preview control plane. Deliberately mounted without a role gate: calls

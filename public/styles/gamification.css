@@ -1,0 +1,72 @@
+/*
+ * The gamification pages (/instructor/gamification, /student/achievements).
+ * The toolkit's elements bring their own styles; these set the page around
+ * them, and BiocBot's colours through the --ubc-g-* properties.
+ */
+.gamification-page {
+    --ubc-g-accent: #0b5394;
+    --ubc-g-accent-hover: #083d6e;
+    max-width: 64rem;
+}
+
+.gamification-page > h1 {
+    margin-bottom: 0.5rem;
+}
+
+.gamification-intro {
+    max-width: 48rem;
+    margin: 0 0 1.5rem;
+    color: #3d4450;
+}
+
+.gamification-notice {
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+}
+
+.gamification-switch {
+    /* Holds its visually hidden status region, so it can't stretch the page. */
+    position: relative;
+    margin: 0 0 2rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid #d0d7de;
+    border-radius: 0.5rem;
+    background: #ffffff;
+}
+
+.gamification-switch h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1.25rem;
+}
+
+.gamification-check {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+}
+
+.gamification-check input {
+    width: 1.25rem;
+    height: 1.25rem;
+    margin: 0;
+}
+
+.gamification-check label {
+    font-weight: 600;
+}
+
+.gamification-check[hidden] {
+    display: none;
+}
+
+.gamification-muted {
+    margin: 0.5rem 0 0;
+    color: #57606a;
+}
+
+.gamification-page ubc-rule-builder h2,
+.gamification-page ubc-badge-shelf h2 {
+    font-size: 1.25rem;
+}

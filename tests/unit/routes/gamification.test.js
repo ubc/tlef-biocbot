@@ -33,6 +33,7 @@ function courses() {
             instructorId: instructor.userId,
             instructors: [instructor.userId],
             tas: [ta.userId],
+            gamification: { enabled: true },
             studentEnrollment: { [student.userId]: { enrolled: true } }
         },
         {
@@ -40,6 +41,7 @@ function courses() {
             status: 'active',
             instructorId: otherInstructor.userId,
             instructors: [otherInstructor.userId],
+            gamification: { enabled: true },
             studentEnrollment: { [otherStudent.userId]: { enrolled: true } }
         },
         {
@@ -47,6 +49,15 @@ function courses() {
             status: 'inactive',
             instructorId: instructor.userId,
             instructors: [instructor.userId],
+            studentEnrollment: { [student.userId]: { enrolled: true } }
+        },
+        {
+            // Active, but gamification was never turned on.
+            courseId: 'C4',
+            status: 'active',
+            instructorId: instructor.userId,
+            instructors: [instructor.userId],
+            tas: [ta.userId],
             studentEnrollment: { [student.userId]: { enrolled: true } }
         }
     ];
@@ -65,8 +76,11 @@ const FIRST_CHAT = Object.freeze({
 describeWithToolkit('/api/gamification', () => {
     let gamification;
     let logger;
+    let db;
 
     beforeEach(() => {
+        gamificationService.forgetCourseSwitches();
+        db = memoryDb({ courses: courses() });
         const { core } = gamificationService.loadGamificationToolkit();
         const toolkit = eventsService.loadToolkit();
         const dictionary = eventsService.buildDictionary(toolkit);
@@ -75,14 +89,15 @@ describeWithToolkit('/api/gamification', () => {
             store: core.createMemoryStore(),
             logger: { error: jest.fn() }
         });
-        logger = { error: jest.fn() };
+        logger = { error: jest.fn(), warn: jest.fn() };
     });
 
     /** The routes as server.js mounts them, with `user` signed in. */
-    function app(user) {
+    function app(user, locals = {}) {
         const routes = createGamificationRoutes({ gamification, logger });
         const server = express();
-        server.locals.db = memoryDb({ courses: courses() });
+        server.locals.db = db;
+        Object.assign(server.locals, locals);
         server.use((req, res, next) => {
             if (user) req.user = { ...user };
             next();
@@ -192,8 +207,78 @@ describeWithToolkit('/api/gamification', () => {
         expect((await request(app(admin)).post('/api/gamification/courses/C2/rules').send(FIRST_CHAT)).status).toBe(201);
     });
 
+    describe("each course's switch", () => {
+        test('is off until an instructor turns it on, and a student has nothing to see until then', async () => {
+            const before = await request(app(student)).get('/api/gamification/courses/C4/enabled');
+            expect(before.status).toBe(200);
+            expect(before.body).toEqual({ running: true, enabled: false, canChange: false });
+            expect((await request(app(student)).get('/api/gamification/courses/C4/me')).status).toBe(403);
+
+            const on = await request(app(instructor)).put('/api/gamification/courses/C4/enabled').send({ enabled: true });
+            expect(on.status).toBe(200);
+            expect(on.body).toEqual({ running: true, enabled: true, canChange: true });
+            expect((await db.collection('courses').findOne({ courseId: 'C4' })).gamification).toMatchObject({ enabled: true, updatedBy: instructor.userId });
+
+            expect((await request(app(student)).get('/api/gamification/courses/C4/enabled')).body).toEqual({ running: true, enabled: true, canChange: false });
+            expect((await request(app(student)).get('/api/gamification/courses/C4/me')).status).toBe(200);
+        });
+
+        test('lets instructors set up rules before turning it on', async () => {
+            expect((await request(app(instructor)).post('/api/gamification/courses/C4/rules').send(FIRST_CHAT)).status).toBe(201);
+            expect((await request(app(ta)).get('/api/gamification/courses/C4/rules')).status).toBe(200);
+        });
+
+        test('is changed only by the course\'s instructors, with a real true or false', async () => {
+            for (const user of [student, ta, otherInstructor, preview]) {
+                expect((await request(app(user)).put('/api/gamification/courses/C4/enabled').send({ enabled: true })).status).toBe(403);
+            }
+            expect((await request(app(instructor)).put('/api/gamification/courses/C4/enabled').send({ enabled: 'yes' })).status).toBe(400);
+            expect((await db.collection('courses').findOne({ courseId: 'C4' })).gamification).toBeUndefined();
+        });
+
+        test('is read only by people in the course', async () => {
+            expect((await request(app(otherStudent)).get('/api/gamification/courses/C4/enabled')).status).toBe(403);
+            expect((await request(app(otherInstructor)).get('/api/gamification/courses/C4/enabled')).status).toBe(403);
+            expect((await request(app(ta)).get('/api/gamification/courses/C4/enabled')).body).toEqual({ running: true, enabled: false, canChange: false });
+        });
+    });
+
+    describe('"describe it"', () => {
+        const description = { description: 'a badge for the first chat about a unit' };
+
+        test("drafts with the course's own AI model", async () => {
+            const sendMessage = jest.fn(async () => ({ content: JSON.stringify({ template: 'badge.first-time@1', values: { metric: 'chat.session.started' } }) }));
+            const llmRegistry = { forCourse: jest.fn(async () => ({ llm: { sendMessage } })) };
+            const res = await request(app(instructor, { llmRegistry })).post('/api/gamification/courses/C1/rules/draft').send(description);
+            expect(res.status).toBe(200);
+            expect(res.body).toMatchObject({ ok: true, source: 'model' });
+            expect(llmRegistry.forCourse).toHaveBeenCalledWith(db, 'C1');
+            expect(sendMessage.mock.calls[0][1]).toMatchObject({ lane: 'backend', systemPrompt: expect.any(String) });
+            expect((await request(app(instructor, { llmRegistry })).get('/api/gamification/courses/C1/config')).body.drafter).toEqual({ kind: 'model', model: null });
+        });
+
+        test('uses the built-in drafter where the course has no usable model', async () => {
+            const llmRegistry = { forCourse: jest.fn(async () => { throw new Error('No API key for this course'); }) };
+            const res = await request(app(instructor, { llmRegistry })).post('/api/gamification/courses/C1/rules/draft').send(description);
+            expect(res.body).toMatchObject({ ok: true, source: 'stand-in' });
+            expect((await request(app(instructor)).get('/api/gamification/courses/C1/config')).body.drafter).toEqual({ kind: 'stand-in' });
+        });
+    });
+
     test('no route takes a student id', async () => {
         expect((await request(app(instructor)).get(`/api/gamification/courses/C1/students/${student.userId}`)).status).toBe(404);
+    });
+});
+
+describe('createGamificationOffRoutes', () => {
+    test('answers "not running" for any course, so pages add no link and log no 404', async () => {
+        const { createGamificationOffRoutes } = require('../../../src/routes/gamification');
+        const server = express();
+        server.use('/api/gamification', createGamificationOffRoutes());
+        const res = await request(server).get('/api/gamification/courses/C1/enabled');
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ running: false, enabled: false, canChange: false });
+        expect((await request(server).get('/api/gamification/courses/C1/me')).status).toBe(404);
     });
 });
 
@@ -201,5 +286,26 @@ describe('createGamificationRoutes', () => {
     test('makes nothing without gamification, or without the server package', () => {
         expect(createGamificationRoutes({ gamification: null, toolkit: {} })).toBeNull();
         expect(createGamificationRoutes({ gamification: {}, toolkit: null })).toBeNull();
+    });
+});
+
+describe('/vendor/gamification-ui.js', () => {
+    const vendorRoutes = require('../../../src/routes/vendor');
+    const uiInstalled = (() => {
+        try {
+            return require.resolve('@ubc/genai-toolkit-gamification-ui/gamification-ui.global.js');
+        } catch (error) {
+            return null;
+        }
+    })();
+
+    (uiInstalled ? test : test.skip)('serves the toolkit\'s web components as a classic script, from the installed package', async () => {
+        const server = express();
+        server.use('/vendor', vendorRoutes);
+        const res = await request(server).get('/vendor/gamification-ui.js');
+        expect(res.status).toBe(200);
+        expect(res.headers['content-type']).toMatch(/javascript/);
+        expect(res.text).toBe(require('fs').readFileSync(uiInstalled, 'utf8'));
+        expect(res.text).toContain('UbcGamificationUi');
     });
 });

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gamification | BiocBot</title>
+    <link rel="icon" type="image/x-icon" href="../assets/images/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../assets/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../assets/images/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../assets/images/apple-touch-icon.png">
+    <link rel="manifest" href="../assets/images/site.webmanifest">
+    <link rel="stylesheet" href="../styles/style.css">
+    <link rel="stylesheet" href="../styles/gamification.css">
+</head>
+<body class="instructor-app">
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <header class="sidebar">
+            <div class="logo-container">
+                <div class="logo-brand">
+                    <img src="../assets/images/biocbot-mascot-light.png" alt="" aria-hidden="true" class="logo-mascot">
+                    <h2>BiocBot</h2>
+                </div>
+            </div>
+            <nav class="main-nav">
+                <ul>
+                    <!-- Instructor Navigation -->
+                    <li id="instructor-home-nav"><a href="/instructor/home">Home</a></li>
+                    <li id="instructor-chat-nav"><a href="/instructor/chat">Super Chat</a></li>
+                    <li id="instructor-notes-nav"><a href="/instructor/notes">Super Chat Notes</a></li>
+                    <li id="instructor-documents-nav"><a href="/instructor/documents">Course Upload</a></li>
+                    <li id="instructor-flagged-nav"><a href="/instructor/flagged">Flagged Content</a></li>
+                    <li id="nav-student-hub-li"><a href="/instructor/student-hub">Student Hub</a></li>
+                    <li id="instructor-downloads-nav" style="display: none;"><a href="/instructor/downloads">Download Chats</a></li>
+                    <li id="instructor-ta-hub-nav"><a href="/instructor/ta-hub">TA Hub</a></li>
+
+                    
+                    <!-- TA Navigation -->
+                    <li id="ta-dashboard-nav" style="display: none;"><a href="/ta">Dashboard</a></li>
+                    <li id="ta-courses-nav" style="display: none;"><a href="#" id="ta-my-courses-link">Course Upload</a></li>
+                    <li id="ta-support-nav" style="display: none;"><a href="#" id="ta-student-support-link">Student Flag</a></li>
+
+                </ul>
+            </nav>
+            <div class="account-block">
+                <button type="button" class="account-row" id="account-menu-trigger" aria-haspopup="true" aria-expanded="false" aria-controls="account-menu">
+                    <span class="user-avatar" id="user-avatar">I</span>
+                    <span class="account-row-text">
+                        <span class="user-name" id="user-display-name">User Name</span>
+                        <span class="user-role" id="user-role">User Role</span>
+                    </span>
+                    <svg class="account-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </button>
+                <div class="account-menu" id="account-menu" hidden>
+                    <div class="account-menu-email" id="account-menu-email"></div>
+                    <a href="/instructor/settings" class="account-menu-item">
+                        <svg class="account-menu-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                        Settings
+                    </a>
+                    <div class="account-menu-divider" aria-hidden="true"></div>
+                    <a href="#" id="logout-btn" class="account-menu-item">
+                        <svg class="account-menu-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                        Log out
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="main-content gamification-page">
+            <h1 id="main" tabindex="-1">Gamification</h1>
+            <p class="gamification-intro">Badges, points and streaks for what students do in BiocBot: chatting about a unit, switching chat modes, answering practice questions. Each student sees only their own, and can hide them. Struggle and wellbeing signals are never used, and nothing here changes grades.</p>
+            <p id="gamification-unavailable" class="gamification-notice" tabindex="-1" hidden></p>
+
+            <section id="gamification-switch-section" class="gamification-switch" hidden>
+                <h2 id="turn-it-on" tabindex="-1">Turn it on</h2>
+                <div class="gamification-check">
+                    <input type="checkbox" id="gamification-enabled">
+                    <label for="gamification-enabled">Count badges and points in this course</label>
+                </div>
+                <p id="gamification-switch-state" class="gamification-muted"></p>
+                <!-- Announces what the switch did. In the page before any message (house rule). -->
+                <div id="gamification-switch-status" role="status" class="visually-hidden"></div>
+            </section>
+
+            <!-- The rule builder (@ubc/genai-toolkit-gamification-ui, src/routes/vendor.js). TAs get it read-only. -->
+            <ubc-rule-builder id="gamification-builder" api="/api/gamification" heading-level="2" hidden></ubc-rule-builder>
+        </main>
+    </div>
+
+    <script src="../common/scripts/icons.js"></script>
+    <!-- The page's events: the pub/sub toolkit's browser bus (UbcPubsub, src/routes/vendor.js) where it is installed -->
+    <script src="../vendor/pubsub.js"></script>
+    <script src="../common/scripts/biocbot-events.js"></script>
+    <script src="../common/scripts/auth.js"></script>
+    <script src="../common/scripts/notifications.js"></script>
+    <script src="../vendor/gamification-ui.js"></script>
+    <script src="scripts/instructor-gamification.js"></script>
+</body>
+</html>

@@ -25,7 +25,9 @@ async function requestChatReply(requestBody, { signal = null, onStatus }) {
             body: JSON.stringify(requestBody),
             ...(signal ? { signal } : {})
         });
-        return { status: response.status, data: await response.json() };
+        const data = await response.json();
+        if (response.ok) announceReply();
+        return { status: response.status, data };
     }
 
     const result = await UbcAgentsChat.sendChatMessage('/api/chat', {
@@ -39,5 +41,15 @@ async function requestChatReply(requestBody, { signal = null, onStatus }) {
         if (result.failure.code === 'aborted') throw new DOMException(result.failure.message, 'AbortError');
         throw new Error(result.failure.message);
     }
+    if (result.status >= 200 && result.status < 300) announceReply();
     return { status: result.status, data: result.body || {} };
+}
+
+/**
+ * Tells the page BiocBot answered (`chat.reply.received` on the page's events,
+ * biocbot-events.js), so the award toast looks for anything the message earned
+ * (student-gamification.js). Nothing listens where gamification is off.
+ */
+function announceReply() {
+    if (typeof BiocbotEvents !== 'undefined') BiocbotEvents.publish('chat.reply.received');
 }

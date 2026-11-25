@@ -16,6 +16,8 @@
  * | `agreement.accepted`| `{ agreement }`       | agreement-modal.js    | The server recorded the user agreement. The toolkit's general event |
  * | `chat.mode.changed` | `{ from, to }`        | student-events.js     | The student switched between tutor and protégé mode. Reported to the server |
  * | `chat.session.ended`| `{ reason }`          | student-session.js    | The student's chat session ended and a new one starts: `manual` or `inactivity` |
+ * | `chat.reply.received` | none                | student-chat-request.js | BiocBot answered a student's message. The award toast looks for anything it earned (student-gamification.js) |
+ * | `quiz.answer.saved` | none                  | quiz.js               | A practice answer was saved. The award toast looks too |
  *
  * Data never holds a name, an email or a student number: who the user is
  * stays with auth.js.

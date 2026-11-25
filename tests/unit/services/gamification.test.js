@@ -144,3 +144,58 @@ describeWithToolkit('BiocBot\'s catalog', () => {
         ]));
     });
 });
+
+describeWithToolkit('each course\'s switch', () => {
+    const { memoryDb } = require('../helpers/memory-db');
+
+    function setup(courseOn) {
+        const toolkit = eventsService.loadToolkit();
+        const events = toolkit.events.createEvents({
+            bus: toolkit.core.createEventBus(),
+            dictionary: eventsService.buildDictionary(toolkit),
+            server: 'test'
+        });
+        const logger = { log: jest.fn(), error: jest.fn() };
+        const store = gamificationService.loadGamificationToolkit().core.createMemoryStore();
+        const started = gamificationService.startGamification({ events, store, logger, courseOn });
+        return { events, started, logger };
+    }
+
+    const chatIn = (events, course) => events.publish('chat.session.started', {
+        user: STUDENT, course, session: `chat-${course}`, data: { unit: 'Unit 1' }
+    });
+
+    test('counts only the courses that have gamification on', async () => {
+        const { events, started } = setup(async course => course === 'ON');
+        await started.gamification.publish('ON', FIRST_CHAT);
+        await started.gamification.publish('OFF', FIRST_CHAT);
+
+        chatIn(events, 'ON');
+        chatIn(events, 'OFF');
+        await settled();
+
+        expect((await started.gamification.status('ON', STUDENT)).badges).toHaveLength(1);
+        expect((await started.gamification.status('OFF', STUDENT)).badges).toHaveLength(0);
+        started.stop();
+    });
+
+    test('counts nothing for a course whose switch cannot be read, and says so', async () => {
+        const { events, started, logger } = setup(async () => { throw new Error('database down'); });
+        await started.gamification.publish(COURSE, FIRST_CHAT);
+        chatIn(events, COURSE);
+        await settled();
+        expect((await started.gamification.status(COURSE, STUDENT)).badges).toHaveLength(0);
+        expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Could not read whether a course counts'), 'database down');
+        started.stop();
+    });
+
+    test('is off until set, and set for every reader on this server at once', async () => {
+        gamificationService.forgetCourseSwitches();
+        const db = memoryDb({ courses: [{ courseId: 'C9' }] });
+        expect(await gamificationService.isCourseOn(db, 'C9')).toBe(false);
+        expect(await gamificationService.setCourseOn(db, 'C9', true, 'user_17d0')).toBe(true);
+        expect(await gamificationService.isCourseOn(db, 'C9')).toBe(true);
+        expect(await gamificationService.setCourseOn(db, 'NOPE', true)).toBe(false);
+        gamificationService.forgetCourseSwitches();
+    });
+});

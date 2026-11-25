@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Achievements | BiocBot</title>
+    <link rel="icon" type="image/x-icon" href="../assets/images/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../assets/images/favicon-32x32.png">
+    <link rel="stylesheet" href="../styles/style.css">
+    <link rel="stylesheet" href="../styles/student-guided-tour.css">
+    <link rel="stylesheet" href="../styles/preview.css">
+    <link rel="stylesheet" href="../styles/gamification.css">
+    <!-- Must load before any page script so no request escapes unmarked -->
+    <script src="../common/scripts/preview-session.js"></script>
+</head>
+<body>
+    <p class="skip-link"><a href="#main">Skip to main content</a></p>
+    <div class="app-container">
+        <header class="sidebar">
+            <div class="logo-container"><h2>BiocBot</h2></div>
+            <nav class="main-nav">
+                <ul>
+                    <li><a href="/student"><span class="icon"></span> Chat</a></li>
+                    <li><a href="/student/history"><span class="icon"></span> Chat History</a></li>
+                    <li><a href="/student/flagged"><span class="icon"></span> Flagged</a></li>
+                    <li><a href="/student/dashboard.html"><span class="icon"></span> Topic Dashboard</a></li>
+                    <li id="quiz-nav-item"><a href="/student/quiz"><span class="icon"></span> Quiz</a></li>
+                    <li id="flashcards-nav-item"><a href="/student/flashcards"><span class="icon"></span> Flashcards</a></li>
+                    <li id="super-course-nav-item" style="display: none;"><a href="/student/super-course"><span class="icon"></span> Super Course</a></li>
+                    <li class="mobile-only-nav"><a href="#" id="mobile-logout-btn"><span class="icon"></span> Logout</a></li>
+                </ul>
+            </nav>
+            <div class="user-info">
+                <div class="user-avatar">S</div>
+                <div class="user-name" id="user-display-name">Student</div>
+                <div class="user-role">Student</div>
+                <div class="user-actions"><a href="#" id="logout-btn" class="user-action">Logout</a></div>
+            </div>
+        </header>
+
+        <main class="main-content gamification-page">
+            <h1 id="main" tabindex="-1">Achievements</h1>
+            <p class="gamification-intro">Badges, points and streaks for what you do in BiocBot this course. Only you see them.</p>
+            <p id="achievements-unavailable" class="gamification-notice" tabindex="-1" hidden>Badges and points aren't turned on in this course.</p>
+            <!-- Your badges, points, streaks and progress (@ubc/genai-toolkit-gamification-ui, src/routes/vendor.js) -->
+            <ubc-badge-shelf id="achievements" api="/api/gamification" heading-level="2" time-zone="America/Vancouver"></ubc-badge-shelf>
+        </main>
+    </div>
+
+    <script src="../common/scripts/modal-a11y.js"></script>
+    <!-- The page's events: the pub/sub toolkit's browser bus (UbcPubsub, src/routes/vendor.js) where it is installed -->
+    <script src="../vendor/pubsub.js"></script>
+    <script src="../common/scripts/biocbot-events.js"></script>
+    <script src="../common/scripts/auth.js"></script>
+    <script src="../common/scripts/mobile-layout.js"></script>
+    <script src="../common/scripts/idle-timer.js"></script>
+    <script src="../vendor/gamification-ui.js"></script>
+    <script src="./scripts/student-achievements.js"></script>
+</body>
+</html>
