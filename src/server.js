@@ -53,6 +53,8 @@ const vendorRoutes = require('./routes/vendor');
 const { createEventReportRoute } = require('./routes/events');
 const { getEvents, serverName } = require('./services/events');
 const { startListeners } = require('./listeners');
+const { getGamification } = require('./services/gamification');
+const { createGamificationRoutes } = require('./routes/gamification');
 const { createHealthRouter } = require('./routes/health');
 const { createCanvasLmsRouter } = require('./routes/canvasLms');
 const { createLmsGradesRouter } = require('./routes/lmsGrades');
@@ -717,6 +719,16 @@ function setupAPIRoutes() {
     // Gamification gets the driver's raw Db, like the startup migrations: its
     // gamification_* collections hold no encrypted field.
     startListeners({ db });
+    // Gamification's routes (src/routes/gamification.js), only while it's
+    // counting: a student's own awards and the course's rules. No page uses
+    // them yet.
+    const gamificationRoutes = createGamificationRoutes({ gamification: getGamification() });
+    if (gamificationRoutes) {
+        app.use('/api/gamification', authMiddleware.requireAuth, authMiddleware.populateUser, gamificationRoutes);
+        console.log('🏅 [GAMIFICATION] Its routes are at /api/gamification.');
+    } else if (getGamification()) {
+        console.warn('⚠️ [GAMIFICATION] Counting, but @ubc/genai-toolkit-gamification-server is not installed, so there are no routes.');
+    }
 
     // Preview control plane. Deliberately mounted without a role gate: calls
     // arrive from a tab that is already wearing the sandboxed student identity,

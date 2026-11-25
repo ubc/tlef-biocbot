@@ -10,8 +10,10 @@
  * events it counted. Students are their pseudonymous `user_<uuid>` ids, as on
  * every event; never a name or an email.
  *
- * This first step only counts. There's no page or route yet, so no one sees
- * anything, and it's off unless BIOCBOT_GAMIFICATION=1 (.env-example).
+ * It counts, and src/routes/gamification.js lets a student read their own
+ * awards and instructors publish rules at /api/gamification. No page uses
+ * those routes yet, so no one sees anything, and it's all off unless
+ * BIOCBOT_GAMIFICATION=1 (.env-example).
  *
  * The packages are on GitHub Packages, so, like pub/sub, they are optional
  * dependencies. Without them, or without pub/sub, nothing here starts.
@@ -122,7 +124,7 @@ function startGamification({ events, db, store, logger = console }) {
 
 /**
  * BiocBot's gamification, once startGamification has run; null before, or
- * where it's off. For the routes that come next.
+ * where it's off. src/server.js mounts its routes with it.
  *
  * @returns {any | null}
  */
