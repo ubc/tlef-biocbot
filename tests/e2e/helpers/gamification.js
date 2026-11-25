@@ -14,8 +14,15 @@ const { createValidLlmApiKey } = require('./llm-keys');
 const GAMI_COURSE_ID = 'BIOC-E2E-GAMI';
 const GAMI_UNIT = 'Unit 1';
 
+/**
+ * Whether the server runs gamification. Asked before the course is seeded, so
+ * a server that runs it answers 403 (the route checked, and the instructor
+ * isn't in a course that doesn't exist yet); one that doesn't answers
+ * `running: false`.
+ */
 async function serverRunsGamification(request) {
     const response = await request.get(`/api/gamification/courses/${GAMI_COURSE_ID}/enabled`);
+    if (response.status() === 403) return true;
     if (!response.ok()) return false;
     return (await response.json()).running === true;
 }
