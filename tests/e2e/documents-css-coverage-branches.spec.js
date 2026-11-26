@@ -292,20 +292,22 @@ function branchHarness() {
                         <textarea id="branch-text">Paste text.</textarea>
                     </div>
 
-                    <div class="assessment-actions">
-                        <button class="add-question-btn" id="add-question-btn" type="button">
-                            <span class="btn-icon">+</span>
-                            Add Question
-                        </button>
-                        <button class="auto-link-btn" id="auto-link-btn" type="button">Auto-link</button>
-                        <button class="generate-ai-btn" id="generate-ai-btn" type="button">Generate with AI</button>
-                    </div>
+                    <div class="assessment-questions-section">
+                        <div class="assessment-actions">
+                            <button class="add-question-btn" id="add-question-btn" type="button">
+                                <span class="btn-icon">+</span>
+                                Add Question
+                            </button>
+                            <button class="auto-link-btn" id="auto-link-btn" type="button">Auto-link</button>
+                            <button class="generate-ai-btn" id="generate-ai-btn" type="button">Generate with AI</button>
+                        </div>
 
-                    <div class="question-header">
-                        <span class="question-type-badge multiple-choice">Multiple Choice</span>
-                        <span class="question-type-badge short-answer">Short Answer</span>
-                        <button class="edit-question-btn" id="edit-question-btn" type="button">e</button>
-                        <button class="delete-question-btn" id="delete-question-btn" type="button">x</button>
+                        <div class="question-header">
+                            <span class="question-type-badge multiple-choice">Multiple Choice</span>
+                            <span class="question-type-badge short-answer">Short Answer</span>
+                            <button class="edit-question-btn" id="edit-question-btn" type="button">e</button>
+                            <button class="delete-question-btn" id="delete-question-btn" type="button">x</button>
+                        </div>
                     </div>
 
                     <div class="struggle-topic-actions">
@@ -445,10 +447,13 @@ test.describe('documents.css branch harness coverage', () => {
         await expect(page.locator('#generate-ai-btn')).toHaveCSS('background-image', 'linear-gradient(135deg, rgb(90, 111, 216) 0%, rgb(106, 65, 144) 100%)');
         await expect(page.locator('.question-type-badge.multiple-choice')).toHaveCSS('color', 'rgb(0, 64, 133)');
         await expect(page.locator('.question-type-badge.short-answer')).toHaveCSS('color', 'rgb(133, 100, 4)');
+        // Bordered icon buttons (matching .unit-rename-btn's pattern) with a
+        // light color tint on hover, not the filled color circles these used
+        // to be - see .edit-question-btn/.delete-question-btn in documents.css.
         await page.locator('#edit-question-btn').hover();
-        await expect(page.locator('#edit-question-btn')).toHaveCSS('background-color', 'rgb(11, 94, 215)');
+        await expect(page.locator('#edit-question-btn')).toHaveCSS('background-color', 'rgba(74, 111, 165, 0.08)');
         await page.locator('#delete-question-btn').hover();
-        await expect(page.locator('#delete-question-btn')).toHaveCSS('background-color', 'rgb(200, 35, 51)');
+        await expect(page.locator('#delete-question-btn')).toHaveCSS('background-color', 'rgba(220, 53, 69, 0.08)');
         await page.locator('#scope-hover').hover();
         await expect(page.locator('#scope-hover')).toHaveCSS('color', 'rgb(40, 77, 122)');
         await page.locator('#radio-option').hover();

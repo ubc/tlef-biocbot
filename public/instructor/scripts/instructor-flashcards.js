@@ -4,6 +4,11 @@
 
 let flashcardDecksByUnit = new Map();
 
+// Set for the duration of a drag (dragstart -> dragend) so dragover handlers
+// on other rows know which row is being moved. Same pattern as
+// mcq-options-editor.js's drag-to-reorder.
+let flashcardDraggedRow = null;
+
 function flashcardUnitId(unitName) {
     return String(unitName || '').toLowerCase().replace(/\s+/g, '-');
 }
@@ -173,49 +178,176 @@ function renderInstructorFlashcardSection(unitName) {
             <span>${cards.length} card${cards.length === 1 ? '' : 's'}</span>
         </div>
         <ul class="flashcard-editor-list">
-            ${cards.map((card, index) => renderFlashcardEditorRow(card, index, !isEditableDraft, unitName)).join('')}
+            ${cards.map((card, index) => renderFlashcardEditorRow(card, index, !isEditableDraft, unitName, cards.length)).join('')}
         </ul>
         <div class="flashcard-editor-actions">
             ${isEditableDraft ? `
                 <button type="button" class="secondary-button flashcard-add-btn" id="flashcard-add-${unitId}" onclick="addManualFlashcard('${unitName}')">Add Card${flashcardContext(unitName, flashcardDeckLead())}</button>
                 <button type="button" class="secondary-button flashcard-save-btn" id="flashcard-save-${unitId}" onclick="saveFlashcardDraft('${unitName}')">Save Draft${flashcardContext(unitName, flashcardDeckLead())}</button>
-                <button type="button" class="flashcard-publish-btn" id="flashcard-publish-${unitId}" onclick="publishFlashcardDeck('${unitName}', this)">Publish to Students${flashcardContext(unitName, flashcardDeckLead())}</button>
             ` : ''}
-            ${deck.isPublished ? `<button type="button" class="flashcard-unpublish-btn" id="flashcard-unpublish-${unitId}" onclick="unpublishFlashcardDeck('${unitName}', this)">Unpublish${flashcardContext(unitName, flashcardDeckLead())}</button>` : ''}
+            ${(isEditableDraft || deck.isPublished) ? `
+                <div class="publish-toggle">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="flashcard-publish-${unitId}" ${deck.isPublished ? 'checked' : ''} onchange="toggleFlashcardPublish('${unitName}', this)">
+                        <span class="toggle-slider"></span>
+                        <!-- "Publish (Student Flashcards)", not just "Publish" - the
+                             unit's own publish switch already claims that name, and
+                             two controls on the page can't share a name. -->
+                        ${flashcardContext(unitName, `Publish${flashcardDeckLead()}`)}
+                    </label>
+                    <!-- Same word as the label above, shown beside the switch. Hidden
+                         from assistive technology so it is not read a second time. The
+                         switch is named for what turning it on does ("Publish"); whether
+                         the deck is published now is its checked state. -->
+                    <span class="toggle-label" aria-hidden="true">Publish</span>
+                </div>
+            ` : ''}
         </div>
     `;
-    initializeInstructorFlashcardPreviews(editor);
     restoreFlashcardFocus(editor, focusBefore);
+    flashcardEditorRows(editor).forEach(wireFlashcardEditorRowDrag);
 }
 
-function renderFlashcardEditorRow(card, index, readOnly, unitName) {
+function renderFlashcardEditorRow(card, index, readOnly, unitName, totalCards) {
     const sourceData = encodeURIComponent(JSON.stringify(card.source || null));
     // Ids are positional ("card 2 of this unit"), which is exactly what the
     // heading says, so they stay right after a card is added or removed and
     // the list is re-rendered.
     const key = `${flashcardUnitId(unitName)}-${index + 1}`;
     const which = flashcardContext(unitName, flashcardCardLead(index + 1));
+    const isFirst = index === 0;
+    const isLast = index === (totalCards - 1);
     return `
-        <li class="flashcard-editor-row" data-card-id="${flashcardEscapeHtml(card.cardId || '')}" data-source="${sourceData}">
+        <li class="flashcard-editor-row" data-card-id="${flashcardEscapeHtml(card.cardId || '')}" data-source="${sourceData}" ${readOnly ? '' : 'draggable="true"'}>
             <div class="flashcard-editor-row-heading">
-                <h6 class="flashcard-card-title" id="flashcard-title-${key}" tabindex="-1">Card ${index + 1}</h6>
-                ${readOnly ? '' : `<button type="button" class="flashcard-remove-btn" id="flashcard-remove-${key}" onclick="removeFlashcardEditorRow(this)">Remove${which}</button>`}
+                <span class="flashcard-editor-row-title">
+                    ${readOnly ? '' : `
+                    <span class="flashcard-drag-handle" aria-hidden="true">
+                        <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden="true">
+                            <circle cx="2" cy="2" r="1.5"></circle><circle cx="8" cy="2" r="1.5"></circle>
+                            <circle cx="2" cy="8" r="1.5"></circle><circle cx="8" cy="8" r="1.5"></circle>
+                            <circle cx="2" cy="14" r="1.5"></circle><circle cx="8" cy="14" r="1.5"></circle>
+                        </svg>
+                    </span>
+                    <div class="flashcard-move-controls">
+                        <button type="button" class="flashcard-move-btn" id="flashcard-move-up-${key}" onclick="moveFlashcardEditorRow(this, 'up')" title="Move up" ${isFirst ? 'disabled' : ''}><span aria-hidden="true">&uarr;</span>${flashcardContext(unitName, `Move Up${flashcardCardLead(index + 1)}`)}</button>
+                        <button type="button" class="flashcard-move-btn" id="flashcard-move-down-${key}" onclick="moveFlashcardEditorRow(this, 'down')" title="Move down" ${isLast ? 'disabled' : ''}><span aria-hidden="true">&darr;</span>${flashcardContext(unitName, `Move Down${flashcardCardLead(index + 1)}`)}</button>
+                    </div>`}
+                    <h6 class="flashcard-card-title" id="flashcard-title-${key}" tabindex="-1">Card ${index + 1}</h6>
+                </span>
+                ${readOnly ? '' : `
+                <span class="flashcard-editor-row-actions">
+                    <button type="button" class="flashcard-convert-btn" id="flashcard-convert-${key}" onclick="convertFlashcardToQuestion(this)" title="Create an assessment question pre-filled from this card's term and definition">Convert to Question${which}</button>
+                    <button type="button" class="flashcard-remove-btn" id="flashcard-remove-${key}" onclick="removeFlashcardEditorRow(this)" title="Remove this card">${Icons.trash}${flashcardContext(unitName, `Remove${flashcardCardLead(index + 1)}`)}</button>
+                </span>`}
             </div>
-            <label for="flashcard-front-${key}">Front${which}</label>
+            <label for="flashcard-front-${key}">Term${which}</label>
             <textarea class="flashcard-front-input" id="flashcard-front-${key}" rows="2" maxlength="300" ${readOnly ? 'readonly' : ''}>${flashcardEscapeHtml(card.front)}</textarea>
-            <div class="flashcard-preview-group">
-                <span class="flashcard-preview-label">Student preview · Front</span>
-                <div class="flashcard-rendered-preview" data-flashcard-preview="front"></div>
-            </div>
-            <label for="flashcard-back-${key}">Back${which}</label>
+            <label for="flashcard-back-${key}">Definition${which}</label>
             <textarea class="flashcard-back-input" id="flashcard-back-${key}" rows="3" maxlength="1200" ${readOnly ? 'readonly' : ''}>${flashcardEscapeHtml(card.back)}</textarea>
-            <div class="flashcard-preview-group">
-                <span class="flashcard-preview-label">Student preview · Back</span>
-                <div class="flashcard-rendered-preview" data-flashcard-preview="back"></div>
-            </div>
             <p class="flashcard-source">Source: ${flashcardEscapeHtml(flashcardSourceLabel(card.source))}</p>
         </li>
     `;
+}
+
+function flashcardEditorRows(editor) {
+    return Array.from(editor.querySelectorAll('.flashcard-editor-row'));
+}
+
+/**
+ * Renumber "Card N" headings in document order and fix up the move
+ * buttons' disabled state (first row can't move up, last can't move
+ * down) - the only things a reorder, add, or remove needs to fix up
+ * locally. Card order itself is picked up automatically on the next
+ * save, since collectFlashcardDraftCards() reads rows in DOM order.
+ */
+function relabelFlashcardEditorRows(editor) {
+    const rows = flashcardEditorRows(editor);
+    rows.forEach((row, index) => {
+        const heading = row.querySelector('.flashcard-card-title');
+        if (heading) heading.textContent = `Card ${index + 1}`;
+        const [up, down] = row.querySelectorAll('.flashcard-move-btn');
+        if (up) up.disabled = index === 0;
+        if (down) down.disabled = index === rows.length - 1;
+    });
+}
+
+/**
+ * Move a card row one slot up or down via its keyboard-accessible move
+ * button - drag-and-drop's only reorder affordance otherwise.
+ * @param {HTMLButtonElement} button - The pressed move button
+ * @param {'up'|'down'} direction - Direction to move the row
+ */
+function moveFlashcardEditorRow(button, direction) {
+    const row = button.closest('.flashcard-editor-row');
+    const editor = row?.closest('.flashcard-editor-list');
+    if (!row || !editor) return;
+
+    const sibling = direction === 'up' ? row.previousElementSibling : row.nextElementSibling;
+    if (!sibling) return;
+
+    if (direction === 'up') {
+        sibling.insertAdjacentElement('beforebegin', row);
+    } else {
+        sibling.insertAdjacentElement('afterend', row);
+    }
+    relabelFlashcardEditorRows(editor);
+    // The button itself didn't move or get rebuilt, so it keeps focus
+    // automatically - unless this move just disabled it (now first/last).
+    if (!button.disabled) button.focus({ preventScroll: true });
+}
+
+/**
+ * Wire drag-to-reorder on one card row. Same interaction as
+ * mcq-options-editor.js: draggable anywhere on the row except the text
+ * areas/buttons, live-reorders as it passes another row's midpoint, and
+ * re-numbers "Card N" headings as it goes.
+ */
+function wireFlashcardEditorRowDrag(row) {
+    const editor = row.closest('.flashcard-editor-list');
+    if (!editor) return;
+
+    row.addEventListener('dragstart', (event) => {
+        if (event.target.closest('.flashcard-front-input, .flashcard-back-input, .flashcard-remove-btn, .flashcard-convert-btn')) {
+            event.preventDefault();
+            return;
+        }
+        flashcardDraggedRow = row;
+        event.dataTransfer.effectAllowed = 'move';
+        // Firefox requires setData to actually start a drag.
+        event.dataTransfer.setData('text/plain', '');
+        row.classList.add('flashcard-editor-row-dragging');
+    });
+
+    row.addEventListener('dragend', () => {
+        row.classList.remove('flashcard-editor-row-dragging');
+        flashcardDraggedRow = null;
+    });
+
+    row.addEventListener('dragover', (event) => {
+        if (!flashcardDraggedRow) return;
+        event.preventDefault(); // required for drop to fire at all
+        event.dataTransfer.dropEffect = 'move';
+        if (flashcardDraggedRow === row) return;
+
+        const rect = row.getBoundingClientRect();
+        const dropAfter = event.clientY > rect.top + rect.height / 2;
+        if (dropAfter && row.nextElementSibling !== flashcardDraggedRow) {
+            row.insertAdjacentElement('afterend', flashcardDraggedRow);
+            relabelFlashcardEditorRows(editor);
+        } else if (!dropAfter && row.previousElementSibling !== flashcardDraggedRow) {
+            row.insertAdjacentElement('beforebegin', flashcardDraggedRow);
+            relabelFlashcardEditorRows(editor);
+        }
+    });
+
+    row.addEventListener('drop', (event) => {
+        if (!flashcardDraggedRow) return;
+        event.preventDefault();
+        // dragover above already moved the row into place live; drop just
+        // finalizes where it already is.
+        relabelFlashcardEditorRows(editor);
+    });
 }
 
 /**
@@ -236,49 +368,6 @@ async function withBusyFlashcardButton(button, work) {
         const focusDropped = !document.activeElement || document.activeElement === document.body;
         if (hadFocus && focusDropped && button.isConnected) button.focus({ preventScroll: true });
     }
-}
-
-/**
- * Render one editable card side exactly as it will appear to students.
- *
- * @param {Element} row Instructor card editor row
- * @param {'front'|'back'} side Card side to render
- * @returns {void}
- */
-function renderInstructorFlashcardPreview(row, side) {
-    const input = row.querySelector(`.flashcard-${side}-input`);
-    const preview = row.querySelector(`[data-flashcard-preview="${side}"]`);
-    if (!input || !preview) return;
-
-    const value = input.value || '';
-    if (typeof RichText === 'undefined') {
-        preview.textContent = value;
-        return;
-    }
-    RichText.render(preview, value);
-}
-
-/**
- * Initialize and keep live previews in sync with their raw textareas.
- *
- * @param {Element} root Editor container or newly inserted row
- * @returns {void}
- */
-function initializeInstructorFlashcardPreviews(root) {
-    const rows = root.matches?.('.flashcard-editor-row')
-        ? [root]
-        : Array.from(root.querySelectorAll('.flashcard-editor-row'));
-
-    rows.forEach(row => {
-        renderInstructorFlashcardPreview(row, 'front');
-        renderInstructorFlashcardPreview(row, 'back');
-        row.querySelectorAll('.flashcard-front-input, .flashcard-back-input').forEach(input => {
-            input.addEventListener('input', () => {
-                const side = input.classList.contains('flashcard-front-input') ? 'front' : 'back';
-                renderInstructorFlashcardPreview(row, side);
-            });
-        });
-    });
 }
 
 async function generateFlashcardDraft(unitName, button) {
@@ -364,10 +453,26 @@ function addManualFlashcard(unitName) {
         showNotification('A deck can contain at most 20 cards.', 'warning');
         return;
     }
-    editor.insertAdjacentHTML('beforeend', renderFlashcardEditorRow({ front: '', back: '', source: null }, count, false, unitName));
+    editor.insertAdjacentHTML('beforeend', renderFlashcardEditorRow({ front: '', back: '', source: null }, count, false, unitName, count + 1));
     const row = editor.lastElementChild;
-    if (row) initializeInstructorFlashcardPreviews(row);
+    if (row) wireFlashcardEditorRowDrag(row);
+    // The previously-last row's "move down" button was rendered disabled;
+    // it no longer is, now that this new row follows it.
+    relabelFlashcardEditorRows(editor);
     row?.querySelector('.flashcard-front-input')?.focus();
+}
+
+function convertFlashcardToQuestion(button) {
+    const section = button.closest('.flashcards-section');
+    const unitName = section?.dataset.flashcardUnit;
+    const row = button.closest('.flashcard-editor-row');
+    const front = row?.querySelector('.flashcard-front-input')?.value.trim();
+    const back = row?.querySelector('.flashcard-back-input')?.value.trim();
+    if (!unitName || !front || !back) {
+        showNotification('Add both a front and back to this card before converting it.', 'warning');
+        return;
+    }
+    openQuestionModalFromFlashcard(unitName, front, back);
 }
 
 async function removeFlashcardEditorRow(button) {
@@ -394,6 +499,24 @@ async function removeFlashcardEditorRow(button) {
     } catch (error) {
         renderInstructorFlashcardSection(unitName);
         showNotification(error.message || 'Unable to remove flashcard.', 'error');
+    }
+}
+
+/**
+ * Single Published toggle standing in for the old separate Publish/Unpublish
+ * buttons. Decides which action a click means from the deck's own state
+ * rather than the checkbox's native checked value, so clicking while already
+ * published but with newer unsaved draft edits ("Draft changes") still
+ * republishes that draft instead of unpublishing - same as the old
+ * "Publish to Students" button did in that state, just as one control.
+ */
+function toggleFlashcardPublish(unitName, checkbox) {
+    const deck = flashcardDecksByUnit.get(unitName);
+    if (!deck) return;
+    if (deck.hasDraft || !deck.isPublished) {
+        publishFlashcardDeck(unitName, checkbox);
+    } else {
+        unpublishFlashcardDeck(unitName, checkbox);
     }
 }
 
