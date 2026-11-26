@@ -335,7 +335,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // Record attempt
         try {
-            await fetch('/api/quiz/attempt', {
+            const attempt = await fetch('/api/quiz/attempt', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -348,6 +348,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     feedback
                 })
             });
+            // The award toast looks for anything this answer earned (student-gamification.js).
+            if (attempt.ok) BiocbotEvents.publish('quiz.answer.saved');
         } catch (e) {
             console.error('Error recording attempt:', e);
         }

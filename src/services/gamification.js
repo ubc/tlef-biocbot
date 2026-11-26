@@ -10,8 +10,10 @@
  * events it counted. Students are their pseudonymous `user_<uuid>` ids, as on
  * every event; never a name or an email.
  *
- * This first step only counts. There's no page or route yet, so no one sees
- * anything, and it's off unless BIOCBOT_GAMIFICATION=1 (.env-example).
+ * It counts, and src/routes/gamification.js lets a student read their own
+ * awards and instructors publish rules at /api/gamification. No page uses
+ * those routes yet, so no one sees anything, and it's all off unless
+ * BIOCBOT_GAMIFICATION=1 (.env-example).
  *
  * The packages are on GitHub Packages, so, like pub/sub, they are optional
  * dependencies. Without them, or without pub/sub, nothing here starts.
@@ -37,6 +39,85 @@ const METRICS = Object.freeze([
 
 /** Days and weeks (streaks, "3 different days") are counted in UBC's time. */
 const TIME_ZONE = 'America/Vancouver';
+
+/**
+ * Each course turns gamification on for itself (the toolkit's PRD: "Instructor
+ * turns gamification on per course"). It's off until an instructor turns it
+ * on, at /instructor/gamification. While it's off nothing is counted for the
+ * course and its students see nothing. The switch is the course's
+ * `gamification.enabled`, which holds nothing encrypted.
+ *
+ * Counting asks for every event, so the answer is kept for a short while. A
+ * switch on this server takes effect at once; on another node (staging has
+ * two) within SWITCH_TTL_MS.
+ */
+const SWITCH_TTL_MS = 30 * 1000;
+/** @type {Map<string, { on: boolean, at: number }>} */
+const switches = new Map();
+
+/**
+ * Whether `course` has gamification on.
+ *
+ * @param {import('mongodb').Db} db
+ * @param {string} course
+ * @returns {Promise<boolean>}
+ */
+async function isCourseOn(db, course) {
+    const known = switches.get(course);
+    if (known && Date.now() - known.at < SWITCH_TTL_MS) return known.on;
+    const doc = await db.collection('courses').findOne({ courseId: course }, { projection: { gamification: 1 } });
+    const on = doc?.gamification?.enabled === true;
+    switches.set(course, { on, at: Date.now() });
+    return on;
+}
+
+/**
+ * Turns gamification on or off for `course`.
+ *
+ * @param {import('mongodb').Db} db
+ * @param {string} course
+ * @param {boolean} on
+ * @param {string} [userId] - Who changed it
+ * @returns {Promise<boolean>} Whether the course was found
+ */
+async function setCourseOn(db, course, on, userId) {
+    const result = await db.collection('courses').updateOne(
+        { courseId: course },
+        { $set: { 'gamification.enabled': on === true, 'gamification.updatedAt': new Date(), 'gamification.updatedBy': userId || null } }
+    );
+    switches.set(course, { on: on === true, at: Date.now() });
+    return result.matchedCount > 0;
+}
+
+/** For tests: forgets the switches kept in memory. */
+function forgetCourseSwitches() {
+    switches.clear();
+}
+
+/**
+ * BiocBot's publisher as gamification's listener sees it: only events from
+ * courses that have gamification on. An event's course is checked as it's
+ * heard; if the check fails, the event isn't counted.
+ */
+function onlyCoursesThatCount(events, courseOn, logger) {
+    // A new object rather than one inheriting from `events`: the publisher is
+    // frozen, so overriding a method on an heir would be silently ignored.
+    return Object.freeze({
+        dictionary: events.dictionary,
+        publish: (...args) => events.publish(...args),
+        subscribe: (...args) => events.subscribe(...args),
+        subscribeAll: (listener, options) => events.subscribeAll(async event => {
+            if (typeof event.course !== 'string') return listener(event);
+            let on = false;
+            try {
+                on = await courseOn(event.course);
+            } catch (error) {
+                logger.error('❌ [GAMIFICATION] Could not read whether a course counts:', error && error.message);
+            }
+            return on ? listener(event) : undefined;
+        }, options)
+    });
+}
 
 /** @type {{ core: any, store: any, pubsub: any } | null | undefined} */
 let toolkit;
@@ -79,13 +160,16 @@ let gamification = null;
  *   events: any,
  *   db?: import('mongodb').Db,
  *   store?: any,
+ *   courseOn?: (course: string) => Promise<boolean>,
  *   logger?: Pick<Console, 'log' | 'error'>
  * }} options - `events` is BiocBot's publisher (getEvents()). `db` is
- *   BiocBot's database; tests pass an in-memory `store` instead.
+ *   BiocBot's database; tests pass an in-memory `store` instead. `courseOn`
+ *   says which courses count; with `db` it's each course's own switch, and
+ *   without either every course counts (tests).
  * @returns {{ gamification: any, stop: () => void } | null} Null where the
  *   packages aren't installed
  */
-function startGamification({ events, db, store, logger = console }) {
+function startGamification({ events, db, store, courseOn = db ? course => isCourseOn(db, course) : null, logger = console }) {
     const loaded = loadGamificationToolkit();
     if (!loaded || !events) return null;
 
@@ -109,7 +193,8 @@ function startGamification({ events, db, store, logger = console }) {
         timeZone: TIME_ZONE,
         logger
     });
-    const stopListening = loaded.pubsub.listenForGamification({ events, gamification, logger });
+    const heard = courseOn ? onlyCoursesThatCount(events, courseOn, logger) : events;
+    const stopListening = loaded.pubsub.listenForGamification({ events: heard, gamification, logger });
 
     return {
         gamification,
@@ -122,7 +207,7 @@ function startGamification({ events, db, store, logger = console }) {
 
 /**
  * BiocBot's gamification, once startGamification has run; null before, or
- * where it's off. For the routes that come next.
+ * where it's off. src/server.js mounts its routes with it.
  *
  * @returns {any | null}
  */
@@ -131,6 +216,10 @@ function getGamification() {
 }
 
 module.exports = {
+    SWITCH_TTL_MS,
+    isCourseOn,
+    setCourseOn,
+    forgetCourseSwitches,
     METRICS,
     TIME_ZONE,
     loadGamificationToolkit,

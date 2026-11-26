@@ -22,6 +22,8 @@
 </head>
 <body>
     <p class="skip-link"><a href="#main">Skip to main content</a></p>
+    <!-- Says what the student just earned, where their course has gamification on (scripts/student-gamification.js) -->
+    <ubc-award-toast api="/api/gamification"></ubc-award-toast>
     <div class="app-container">
         <!-- Sidebar Navigation -->
         <header class="sidebar">
@@ -156,6 +158,8 @@
     <script src="./scripts/student-events.js"></script>
     <script src="./scripts/student-calibration.js"></script>
     <script src="./scripts/student.js"></script>
+    <script src="../vendor/gamification-ui.js"></script>
+    <script src="./scripts/student-gamification.js"></script>
     <script>
         // Initialize flag notifications after DOM is ready
         document.addEventListener('DOMContentLoaded', async () => {

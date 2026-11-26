@@ -284,7 +284,7 @@ describe('the pages', () => {
 
     test('some pages and scripts use the page\'s events (the checks below aren\'t empty)', () => {
         expect(helperUsers.size).toBeGreaterThan(10);
-        expect(pages.filter(file => pageScripts(file).some(script => script.src === HELPER)).length).toBe(20);
+        expect(pages.filter(file => pageScripts(file).some(script => script.src === HELPER)).length).toBe(22);
     });
 
     test.each(pages.map(file => [path.relative(PUBLIC, file), file]))('%s loads biocbot-events.js before anything that uses it', (name, file) => {

@@ -191,6 +191,7 @@ function adjustNavigationForRole() {
         if (currentUser.role === 'instructor' || currentUser.role === 'ta') {
             addStudentPreviewNavItem();
         }
+        addGamificationNavItem();
     } catch (e) {
         console.warn('adjustNavigationForRole failed:', e);
     }
@@ -232,6 +233,61 @@ const PREVIEW_COURSE_BACKUP_KEY = 'biocbot_course_before_preview';
  * Injected here rather than hard-coded into each sidebar so the entry point
  * cannot drift between the ten instructor pages and the three TA pages.
  */
+/**
+ * The gamification page's link: "Gamification" for instructors and TAs, and
+ * "Achievements" for students. It's added only when the server runs
+ * gamification (src/routes/gamification.js answers), and for a student only
+ * where their course has it on, so with BIOCBOT_GAMIFICATION unset nobody's
+ * navigation changes.
+ */
+async function addGamificationNavItem() {
+    try {
+        const navList = document.querySelector('.main-nav ul');
+        const role = currentUser && currentUser.role;
+        if (!navList || document.getElementById('nav-gamification-li') || !['student', 'instructor', 'ta'].includes(role)) {
+            return;
+        }
+        let courseId = getCurrentCourseId();
+        if (courseId && typeof courseId.then === 'function') {
+            courseId = await courseId;
+        }
+        if (!courseId) return;
+        const response = await fetch(`/api/gamification/courses/${encodeURIComponent(courseId)}/enabled`);
+        if (!response.ok) return;
+        const state = await response.json();
+        if (state.running === false) return;
+        const isStudent = role === 'student';
+        if (isStudent && !state.enabled) return;
+        if (document.getElementById('nav-gamification-li')) return;
+
+        const href = isStudent ? '/student/achievements' : '/instructor/gamification';
+        const item = document.createElement('li');
+        item.id = 'nav-gamification-li';
+        const link = document.createElement('a');
+        link.href = href;
+        if (isStudent) {
+            // Student links carry an empty icon slot, as the others do.
+            const icon = document.createElement('span');
+            icon.className = 'icon';
+            link.append(icon, ' Achievements');
+        } else {
+            link.textContent = 'Gamification';
+        }
+        if (window.location.pathname.replace(/\.html$/, '').replace(/\/$/, '') === href) {
+            item.classList.add('active');
+            link.setAttribute('aria-current', 'page');
+        }
+        item.appendChild(link);
+
+        // Before "View as Student" and the mobile logout, which sit last.
+        const before = document.getElementById('nav-student-preview-li') || navList.querySelector('.mobile-only-nav');
+        navList.insertBefore(item, before || null);
+    } catch (error) {
+        // Without it the page works as before.
+        console.warn('Could not add the gamification link:', error);
+    }
+}
+
 function addStudentPreviewNavItem() {
     const navList = document.querySelector('.main-nav ul');
     if (!navList || document.getElementById('nav-student-preview')) {

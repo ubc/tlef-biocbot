@@ -49,4 +49,11 @@ router.get('/agents-chat.js', sendInstalledFile(installedFile('@ubc/genai-toolki
 // uses a bus of its own with the same contract, and the page reports nothing.
 router.get('/pubsub.js', sendInstalledFile(installedFile('@ubc/genai-toolkit-pubsub-browser/pubsub.global.js')));
 
+// The gamification toolkit's web components as a classic script, which
+// defines <ubc-badge-shelf>, <ubc-award-toast> and <ubc-rule-builder> (the
+// student's achievements, award toasts on the chat and quiz pages, and the
+// instructor's rule builder). Their routes only exist while
+// BIOCBOT_GAMIFICATION=1 (src/routes/gamification.js).
+router.get('/gamification-ui.js', sendInstalledFile(installedFile('@ubc/genai-toolkit-gamification-ui/gamification-ui.global.js')));
+
 module.exports = router;
